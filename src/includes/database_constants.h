@@ -187,10 +187,14 @@ namespace DatabaseConstants {
   // constexpr std::array<size_t, 3> CoeffMods = { 60, 60, 60 }; // the first two addes up to log q
 
 
-
-
-
-
+  // ! ========================== 52 bit ct mods (n=4096)==========================
+  // constexpr size_t PolyDegree = 4096;
+  // constexpr size_t NumEntries = 1 << 16;            // number of entries in the database
+  // constexpr size_t EntrySize = 0;                   // 0 means calculated automatically. Take the largest possible value.
+  // constexpr size_t GSW_L = 4;                       // parameter for GSW scheme
+  // constexpr size_t GSW_L_KEY = 9;                   // GSW for query expansion
+  // constexpr size_t PlainMod = 40;
+  // constexpr std::array<size_t, 3> CoeffMods = { 52, 52, 52 }; // the first two addes up to log q
 
 
 } // namespace DatabaseConstants

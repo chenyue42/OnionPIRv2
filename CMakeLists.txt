@@ -6,7 +6,7 @@ if (NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Automatically enables all available optimizations for your local machine, including AVX2 and AVX512
-set(CMAKE_CXX_FLAGS "-O3 -MD -march=native -mtune=native")  # Enable all optimizations
+set(CMAKE_CXX_FLAGS "-O3 -pg -MD -march=native -mtune=native")  # Enable all optimizations
 
 
 # Add perf when building in Debug mode
@@ -29,9 +29,6 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -D_DEBUG")
 set(IS_BENCHMARK_BUILD CMAKE_BUILD_TYPE STREQUAL "Benchmark")
 if (${IS_BENCHMARK_BUILD})
     add_compile_definitions(_BENCHMARK)
-    set(CMAKE_PREFIX_PATH ~/scratch/keyword_OnionPIR)
-elseif (CMAKE_BUILD_TYPE MATCHES Debug)
-    set(CMAKE_PREFIX_PATH ~/scratch/keyword_OnionPIR)
 endif ()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(Onion-PIR)

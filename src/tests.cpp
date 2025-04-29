@@ -17,6 +17,12 @@
 
 #define EXPERIMENT_ITERATIONS 5
 
+void print_throughput(const std::string &name, const size_t db_size) {
+  double avg_time = GET_AVG_TIME(name);
+  double throughput = db_size / (avg_time * 1000);
+  BENCH_PRINT(name << ": " << throughput << " MB/s");
+}
+
 void PirTest::run_tests() {
   test_pir();
   // bfv_example();
@@ -26,6 +32,7 @@ void PirTest::run_tests() {
   // test_fst_dim_mult();
   // test_batch_decomp();
   // test_fast_expand_query();
+  // test_raw_pt_ct_mult();
 }
 
 
@@ -487,52 +494,67 @@ void PirTest::test_single_mat_mult() {
   uint128_t sum128 = 0;
   size_t sum = 0;
 
+  // ============= baseline: read once, write once ==============
+  // reading and writing using uint64_t
+  const std::string SIMPLE_READ = "Read once, write once";
+  TIME_START(SIMPLE_READ);
+  #pragma unroll
+  for (size_t i = 0; i < A_data.size(); i++) { 
+    A_data[i] ^= 42;
+  }
+  TIME_END(SIMPLE_READ);
 
   // ============= naive mat-vec mult ==============
-  const std::string NAIVE_MAT_MULT = "Naive matrix multiplication";
-  TIME_START(NAIVE_MAT_MULT);
+  const std::string NAIVE_MAT_VEC_64 = "Naive mat-vec-64";
+  TIME_START(NAIVE_MAT_VEC_64);
   naive_mat_vec(&A_mat, &B_mat, &C_mat);
-  TIME_END(NAIVE_MAT_MULT);
+  TIME_END(NAIVE_MAT_VEC_64);
 
   // ============= naive mat-vec mult 128 bits ==============
-  const std::string NAIVE_MAT_MULT_128 = "Naive matrix multiplication 128 bits";
-  TIME_START(NAIVE_MAT_MULT_128);
+  const std::string NAIVE_MAT_VEC_128 = "Naive mat-vec-128";
+  TIME_START(NAIVE_MAT_VEC_128);
   naive_mat_vec_128(&A_mat, &B_mat, &C_mat128);
-  TIME_END(NAIVE_MAT_MULT_128);
+  TIME_END(NAIVE_MAT_VEC_128);
 
   // ============= naive level mat mult ==============
-  const std::string NAIVE_LEVEL_MAT_MULT = "Naive level matrix multiplication";
-  TIME_START(NAIVE_LEVEL_MAT_MULT);
+  const std::string NAIVE_LEVEL_MAT_MAT_64 = "Naive level mat-mat-64";
+  TIME_START(NAIVE_LEVEL_MAT_MAT_64);
   naive_level_mat_mat(&A_mat, &B_mat, &C_mat);
-  TIME_END(NAIVE_LEVEL_MAT_MULT);
+  TIME_END(NAIVE_LEVEL_MAT_MAT_64);
 
   // ============= naive level mat mult 128 bits ==============
-  const std::string NAIVE_LEVEL_MAT_MULT_128 = "Naive level matrix multiplication 128 bits";
-  TIME_START(NAIVE_LEVEL_MAT_MULT_128);
+  const std::string NAIVE_LEVEL_MAT_MAT_128 = "Naive level mat-mat-128";
+  TIME_START(NAIVE_LEVEL_MAT_MAT_128);
   naive_level_mat_mat_128(&A_mat, &B_mat, &C_mat128);
-  TIME_END(NAIVE_LEVEL_MAT_MULT_128);
+  TIME_END(NAIVE_LEVEL_MAT_MAT_128);
+
+  // raw matrix multiplication
+  const std::string RAW_MAT_MAT_128 = "raw mat-mat-128";
+  TIME_START(RAW_MAT_MAT_128);
+  mat_mat_128(A_data.data(), B_data.data(), C_data128.data(), rows, cols);
+  TIME_END(RAW_MAT_MAT_128);
 
   // ============= level mat mult ==============
-  const std::string LV_MAT_MULT = "Matrix multiplication";
-  TIME_START(LV_MAT_MULT);
+  const std::string LV_MAT_MAT_64 = "level mat-mat-64";
+  TIME_START(LV_MAT_MAT_64);
   level_mat_mat(&A_mat, &B_mat, &C_mat);
-  TIME_END(LV_MAT_MULT);
+  TIME_END(LV_MAT_MAT_64);
 
   // ============= level mat mult 128 bits ==============
-  const std::string LV_MAT_MULT_128 = "Matrix multiplication 128 bits";
-  TIME_START(LV_MAT_MULT_128);
+  const std::string LV_MAT_MAT_128 = "level mat-mat-128";
+  TIME_START(LV_MAT_MAT_128);
   level_mat_mat_128(&A_mat, &B_mat, &C_mat128);
-  TIME_END(LV_MAT_MULT_128);
+  TIME_END(LV_MAT_MAT_128);
 
   // ============= Eigen mat mult ==============
-  const std::string EIGEN_MULT = "Matrix multiplication Eigen";
+  const std::string EIGEN_MULT = "mat-mat-64 Eigen";
   Eigen::setNbThreads(1);  // Force Eigen to use only 1 thread
   TIME_START(EIGEN_MULT);
   level_mat_mult_eigen(&A_mat, &B_mat, &C_mat);
   TIME_END(EIGEN_MULT);
 
   // ============= avx mat mat mult 128 bits ==============
-  const std::string AVX_MAT_MULT_128 = "AVX matrix multiplication 128 bits";
+  const std::string AVX_MAT_MULT_128 = "AVX mat-mat-128";
   TIME_START(AVX_MAT_MULT_128);
   avx_mat_mat_mult_128(A_data.data(), B_data.data(), C_data128.data(), rows, cols);
   TIME_END(AVX_MAT_MULT_128);
@@ -548,32 +570,17 @@ void PirTest::test_single_mat_mult() {
   END_EXPERIMENT();
   // PRINT_RESULTS(); // uncomment this line to see the actual time elapsed in each function.
   PRINT_BAR;
-  double naive_time = GET_AVG_TIME(NAIVE_MAT_MULT);
-  double naive_time_128 = GET_AVG_TIME(NAIVE_MAT_MULT_128);
-  double naive_lvl_time = GET_AVG_TIME(NAIVE_LEVEL_MAT_MULT);
-  double naive_lvl_time_128 = GET_AVG_TIME(NAIVE_LEVEL_MAT_MULT_128);
-  double lv_time = GET_AVG_TIME(LV_MAT_MULT);
-  double lv_time_128 = GET_AVG_TIME(LV_MAT_MULT_128);
-  double eigen_time = GET_AVG_TIME(EIGEN_MULT);
-  double avx_time_128 = GET_AVG_TIME(AVX_MAT_MULT_128);
+  print_throughput(SIMPLE_READ, db_size);
+  print_throughput(NAIVE_MAT_VEC_64, db_size);
+  print_throughput(NAIVE_MAT_VEC_128, db_size);
+  print_throughput(NAIVE_LEVEL_MAT_MAT_64, db_size);
+  print_throughput(NAIVE_LEVEL_MAT_MAT_128, db_size);
+  print_throughput(RAW_MAT_MAT_128, db_size);
+  print_throughput(LV_MAT_MAT_64, db_size);
+  print_throughput(LV_MAT_MAT_128, db_size);
+  print_throughput(EIGEN_MULT, db_size);
+  print_throughput(AVX_MAT_MULT_128, db_size);
 
-  double naive_throughput = db_size / (naive_time * 1000);
-  double naive_throughput_128 = db_size / (naive_time_128 * 1000);
-  double naive_lvl_throughput = db_size / (naive_lvl_time * 1000);
-  double naive_lvl_throughput_128 = db_size / (naive_lvl_time_128 * 1000);
-  double lv_throughput = db_size / (lv_time * 1000);
-  double lv_throughput_128 = db_size / (lv_time_128 * 1000);
-  double eigen_throughput = db_size / (eigen_time * 1000);
-  double avx_throughput_128 = db_size / (avx_time_128 * 1000);
-
-  BENCH_PRINT("Naive mat vec throughput: \t\t" << naive_throughput << " MB/s");
-  BENCH_PRINT("Naive mat vec 128 throughput: \t\t" << naive_throughput_128 << " MB/s");
-  BENCH_PRINT("Naive level mat mat throughput: \t" << naive_lvl_throughput << " MB/s");
-  BENCH_PRINT("Naive level mat mat 128 throughput: \t" << naive_lvl_throughput_128 << " MB/s");
-  BENCH_PRINT("Level mat mat throughput: \t\t" << lv_throughput << " MB/s");
-  BENCH_PRINT("Level mat mat 128 throughput: \t\t" << lv_throughput_128 << " MB/s");
-  BENCH_PRINT("Eigen mat mat throughput: \t\t" << eigen_throughput << " MB/s");
-  BENCH_PRINT("AVX mat mat 128 throughput: \t\t" << avx_throughput_128 << " MB/s");
 }
 
 
@@ -901,4 +908,81 @@ void PirTest::test_fast_expand_query() {
       BENCH_PRINT("equals one at idx: " << i << " ");
     }
   }
+}
+
+
+void PirTest::test_raw_pt_ct_mult() {
+  // what is the speed of doing polynomial multiplication in coefficient form?
+  print_func_name(__FUNCTION__);
+  CLEAN_TIMER();
+  PirParams pir_params;
+  // You need a a chunk of code to init the seal parameters. Here is the minimum you need:
+  seal::EncryptionParameters params(seal::scheme_type::bfv);
+  const size_t coeff_count = 2048;  // you can try other powers of two.
+  params.set_poly_modulus_degree(coeff_count); // example: a_1 x^4095 + a_2 x^4094 + ...
+  const uint64_t pt_mod = utils::generate_prime(17); // 49 bits for the plain modulus, then you can use 48 bits for storing data.
+  params.set_plain_modulus(pt_mod);
+  std::vector<int> bit_sizes({60,60}); // You can also try our own DatabaseConstants::CoeffMods
+  const auto coeff_modulus = CoeffModulus::Create(coeff_count, bit_sizes);
+  params.set_coeff_modulus(coeff_modulus);
+  const size_t bits_per_coeff = params.plain_modulus().bit_count() - 1;
+  const uint64_t coeff_mask = (uint64_t(1) << (bits_per_coeff)) - 1;
+  const size_t num_pt = pir_params.get_num_pt();
+  // ================== END OF SEAL PARAMS INIT ==================
+  // The following are things you need to encrypt, evaluate, and decrypt BFV.
+  SEALContext context_(params);
+  auto evaluator_ = seal::Evaluator(context_);
+  auto keygen_ = seal::KeyGenerator(context_);
+  auto secret_key_ = keygen_.secret_key();
+  auto encryptor_ = new seal::Encryptor(context_, secret_key_);
+  auto decryptor_ = new seal::Decryptor(context_, secret_key_);
+  // ============= Generate the plaintexts ==============
+  seal::Plaintext pt1(coeff_count), pt2(coeff_count), pt_ntt;
+  uint64_t* pt1_data = pt1.data();
+  uint64_t* pt2_data = pt2.data();
+  // Generate two random plaintexts
+  utils::fill_rand_arr(pt1_data, coeff_count);
+  utils::fill_rand_arr(pt2_data, coeff_count);
+  for (size_t i = 0; i < coeff_count; i++) {
+    pt1_data[i] &= coeff_mask;
+    pt2_data[i] &= coeff_mask;
+  }
+  pt_ntt = pt1;
+  evaluator_.transform_to_ntt_inplace(pt_ntt, context_.first_parms_id());
+
+  const size_t iter_num = num_pt;
+  BENCH_PRINT("num_pt: " << num_pt);
+  seal::Ciphertext ct1, ct2;
+  encryptor_->encrypt_symmetric(pt1, ct1);
+  encryptor_->encrypt_symmetric(pt2, ct2);
+  evaluator_.transform_to_ntt_inplace(ct2); // only ct2 is in NTT form.
+  // ============= Perform the multiplication ==============
+  TIME_START("naive ct * naive pt");
+  for (size_t i = 0; i < iter_num; i++) {
+    evaluator_.multiply_plain_inplace(ct1, pt1);
+  }
+  TIME_END("naive ct * naive pt");
+
+  TIME_START("ntt ct * pt");
+  for (size_t i = 0; i < iter_num; i++) {
+    evaluator_.multiply_plain_inplace(ct2, pt1);
+  }
+  TIME_END("ntt ct * pt");
+
+  TIME_START("ntt ct * ntt pt");
+  for (size_t i = 0; i < iter_num; i++) {
+    evaluator_.multiply_plain_inplace(ct2, pt_ntt);
+  }
+  TIME_END("ntt ct * ntt pt");
+  // ============= Decrypt and print the result ==============
+  evaluator_.transform_from_ntt_inplace(ct2);
+  seal::Plaintext res_pt;
+  decryptor_->decrypt(ct2, res_pt);
+  BENCH_PRINT("Result: " << res_pt.to_string().substr(0, 50));
+  // ============= Profiling the multiplication ==============
+  END_EXPERIMENT();
+  PRINT_RESULTS();
+  double tot = GET_AVG_TIME("ntt ct * pt");
+  double amortized = tot / iter_num;
+  BENCH_PRINT("ntt ct * pt: " << amortized << " ms");
 }

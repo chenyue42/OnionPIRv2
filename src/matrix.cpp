@@ -194,24 +194,24 @@ void level_mat_mat_128(matrix_t *A, matrix_t *B, matrix128_t *out) {
 
     // We read multiple rows of A at a time to improve cache locality.
     // The reason is that we can save reading B and C multiple times.
-    for (i = 0; i < rows; i += 4) {
+    for (i = 0; i < rows; i += 2) {
       tmp0 = 0; tmp1 = 0; tmp2 = 0; tmp3 = 0;
-      tmp4 = 0; tmp5 = 0; tmp6 = 0; tmp7 = 0;
+      #pragma GCC ivdep
       for (j = 0; j < cols; j++) {
         db0 = A_ptr[i * cols + j];
         db1 = A_ptr[(i + 1) * cols + j];
-        db2 = A_ptr[(i + 2) * cols + j];
-        db3 = A_ptr[(i + 3) * cols + j];
-        tmp0 += (uint128_t)db0 * B_ptr[j * 2]; tmp1 += (uint128_t)db0 * B_ptr[j * 2 + 1];
-        tmp2 += (uint128_t)db1 * B_ptr[j * 2]; tmp3 += (uint128_t)db1 * B_ptr[j * 2 + 1];
-        tmp4 += (uint128_t)db2 * B_ptr[j * 2]; tmp5 += (uint128_t)db2 * B_ptr[j * 2 + 1];
-        tmp6 += (uint128_t)db3 * B_ptr[j * 2]; tmp7 += (uint128_t)db3 * B_ptr[j * 2 + 1];
+        // db2 = A_ptr[(i + 2) * cols + j];
+        // db3 = A_ptr[(i + 3) * cols + j];
+        tmp0 += db0 * (uint128_t)B_ptr[j * 2]; tmp1 += db0 * (uint128_t)B_ptr[j * 2 + 1];
+        tmp2 += db1 * (uint128_t)B_ptr[j * 2]; tmp3 += db1 * (uint128_t)B_ptr[j * 2 + 1];
+        // tmp4 += (uint128_t)db2 * B_ptr[j * 2]; tmp5 += (uint128_t)db2 * B_ptr[j * 2 + 1];
+        // tmp6 += (uint128_t)db3 * B_ptr[j * 2]; tmp7 += (uint128_t)db3 * B_ptr[j * 2 + 1];
       }
       // Accumulate the computed values into the output.
       C_ptr[i * 2 + 0] += tmp0; C_ptr[i * 2 + 1] += tmp1;
       C_ptr[i * 2 + 2] += tmp2; C_ptr[i * 2 + 3] += tmp3;
-      C_ptr[i * 2 + 4] += tmp4; C_ptr[i * 2 + 5] += tmp5;
-      C_ptr[i * 2 + 6] += tmp6; C_ptr[i * 2 + 7] += tmp7;
+      // C_ptr[i * 2 + 4] += tmp4; C_ptr[i * 2 + 5] += tmp5;
+      // C_ptr[i * 2 + 6] += tmp6; C_ptr[i * 2 + 7] += tmp7;
     }
   }
 }
@@ -223,10 +223,11 @@ void mat_mat_128(const uint64_t *__restrict A, const uint64_t *__restrict B,
   uint128_t t0, t1;
   for (size_t i = 0; i < rows; i++) {
     t0 = 0; t1 = 0;
+    const size_t offset = i * cols;
     #pragma GCC unroll 32
     for (size_t k = 0; k < cols; k++) {
-      t0 += A[i * cols + k] * (uint128_t)B[2 * k];
-      t1 += A[i * cols + k] * (uint128_t)B[2 * k + 1];
+      t0 += A[offset + k] * (uint128_t)B[2 * k];
+      t1 += A[offset + k] * (uint128_t)B[2 * k + 1];
     }
     out[2 * i] = t0;
     out[2 * i + 1] = t1;
