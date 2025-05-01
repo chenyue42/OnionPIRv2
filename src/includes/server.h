@@ -96,4 +96,6 @@ private:
 
   // write one chunk of the database to a binary file in CACHE_DIR
   void write_one_chunk(std::vector<Entry> &chunk);
+
+  void prep_query(const std::vector<seal::Ciphertext> &fst_dim_query, std::vector<uint64_t>& query_data);
 };

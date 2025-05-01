@@ -195,7 +195,6 @@ void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size
       for (size_t k = 0; k < l; k++) {
         const size_t coef_pos = fst_dim_sz + (i-1) * l + k;  // the position of the coefficient in the resulting query
         const size_t reversed_idx = utils::bit_reverse(coef_pos, expan_height);  // the position of the coefficient in the query
-        DEBUG_PRINT("reversed_idx: " << reversed_idx << ", coef_pos: " << coef_pos);
         for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
           const size_t pad = mod_id * DatabaseConstants::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
           uint128_t mod = coeff_modulus[mod_id].value();

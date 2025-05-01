@@ -15,7 +15,7 @@
 #include <Eigen/Core>
 #endif
 
-#define EXPERIMENT_ITERATIONS 5
+#define EXPERIMENT_ITERATIONS 10
 
 void print_throughput(const std::string &name, const size_t db_size) {
   double avg_time = GET_AVG_TIME(name);
@@ -77,8 +77,7 @@ void PirTest::test_pir() {
 
     // ===================== ONLINE PHASE =====================
     // Client start generating query
-    // size_t query_index = rand() % pir_params.get_num_entries();
-    size_t query_index = 1; 
+    size_t query_index = rand() % pir_params.get_num_entries();
 
     // ============= CLIENT ===============
     TIME_START(CLIENT_TOT_TIME);

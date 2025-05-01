@@ -7,6 +7,7 @@
 #include <memory>
 #include <stdexcept>
 #include <fstream>
+#include <immintrin.h>
 
 #ifdef _DEBUG
 #include <bitset>
@@ -68,6 +69,45 @@ void PirServer::gen_data() {
   realign_db();
 }
 
+void PirServer::prep_query(const std::vector<seal::Ciphertext> &fst_dim_query,
+                           std::vector<uint64_t> &query_data) {
+  const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();       // 256
+  const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt(); // 4096
+  const size_t slice_sz = fst_dim_sz * 2;
+
+  // Pre-fetch the data pointers to avoid repeated indirect access
+  std::vector<const uint64_t *> data0_ptrs(fst_dim_sz);
+  std::vector<const uint64_t *> data1_ptrs(fst_dim_sz);
+
+  // Prefetch all pointers
+  for (size_t i = 0; i < fst_dim_sz; ++i) {
+    data0_ptrs[i] = fst_dim_query[i].data(0);
+    data1_ptrs[i] = fst_dim_query[i].data(1);
+  }
+
+  // Process in blocks to improve cache locality
+  const size_t BLOCK_SIZE = 8;
+  // Fallback to scalar implementation if no SIMD is available
+  for (size_t slice_block = 0; slice_block < coeff_val_cnt;
+       slice_block += BLOCK_SIZE) {
+    const size_t slice_block_end =
+        std::min(slice_block + BLOCK_SIZE, coeff_val_cnt);
+
+    for (size_t i = 0; i < fst_dim_sz; ++i) {
+      const uint64_t *p0 = data0_ptrs[i];
+      const uint64_t *p1 = data1_ptrs[i];
+
+      // Process a block of slices for the same i value (improves temporal
+      // locality)
+      for (size_t slice_id = slice_block; slice_id < slice_block_end;
+           ++slice_id) {
+        const size_t idx = slice_id * slice_sz + i * 2;
+        query_data[idx] = p0[slice_id];
+        query_data[idx + 1] = p1[slice_id];
+      }
+    }
+  }
+}
 
 // Computes a dot product between the fst_dim_query and the database for the
 // first dimension with a delayed modulus optimization. fst_dim_query should
@@ -89,18 +129,11 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
   for (size_t i = 0; i < fst_dim_query.size(); i++) {
     evaluator_.transform_to_ntt_inplace(fst_dim_query[i]);
   }
-
+  
   // reallocate the query data to a continuous memory 
   TIME_START(FST_DIM_PREP);
-  std::vector<uint64_t> query_data(fst_dim_sz * 2 * coeff_val_cnt);
-  size_t query_data_idx = 0;
-  for (size_t i = 0; i < coeff_val_cnt; i++) {
-    for (size_t j = 0; j < fst_dim_sz; j++) {
-      query_data[query_data_idx] = fst_dim_query[j].data(0)[i];
-      query_data[query_data_idx + 1] = fst_dim_query[j].data(1)[i];
-      query_data_idx += 2;
-    }
-  }
+  std::vector<uint64_t> query_data(fst_dim_sz * one_ct_sz);
+  prep_query(fst_dim_query, query_data);
   TIME_END(FST_DIM_PREP);
 
   /*
@@ -290,7 +323,7 @@ PirServer::fast_expand_qry(size_t client_id,
   const size_t useful_cnt = pir_params_.get_fst_dim_sz() + pir_params_.get_l() * (dims_.size() - 1);
   const size_t expan_height = pir_params_.get_expan_height();
   const auto& client_galois_key = client_galois_keys_.at(client_id); // used for substitution
-  std::vector<seal::Ciphertext> cts(useful_cnt);
+  std::vector<seal::Ciphertext> cts(useful_cnt + useful_cnt % 2); // just in case we have odd number of useful ciphertexts.
   DEBUG_PRINT("expansion height: " << expan_height << ", useful count: " << useful_cnt);
 
   /*  Pseudu code:
