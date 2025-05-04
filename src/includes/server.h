@@ -98,4 +98,10 @@ private:
   void write_one_chunk(std::vector<Entry> &chunk);
 
   void prep_query(const std::vector<seal::Ciphertext> &fst_dim_query, std::vector<uint64_t>& query_data);
+
+
+  // customized modulus switch for single mod seal::Ciphertext. (Not RNS modulus)
+  // The goal is to halve the size of the ciphertext.
+  void mod_switch_inplace(seal::Ciphertext &ciphertext);
+
 };

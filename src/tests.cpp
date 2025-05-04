@@ -6,6 +6,10 @@
 #include "utils.h"
 #include "logging.h"
 #include "matrix.h"
+#include "seal/util/polyarithsmallmod.h"
+// #include "hexl/hexl.hpp"
+#include "seal/util/iterator.h"
+
 #include <cassert>
 #include <iostream>
 #include <bitset>
@@ -24,7 +28,7 @@ void print_throughput(const std::string &name, const size_t db_size) {
 }
 
 void PirTest::run_tests() {
-  test_pir();
+  // test_pir();
   // bfv_example();
   // serialization_example();
   // test_external_product();
@@ -33,6 +37,7 @@ void PirTest::run_tests() {
   // test_batch_decomp();
   // test_fast_expand_query();
   // test_raw_pt_ct_mult();
+  test_mod_switch();
 }
 
 
@@ -985,3 +990,222 @@ void PirTest::test_raw_pt_ct_mult() {
   double amortized = tot / iter_num;
   BENCH_PRINT("ntt ct * pt: " << amortized << " ms");
 }
+
+
+void PirTest::test_mod_switch() {
+  // ! please test with small setting (n = 2048, log q = 60, log t = 17)
+  PirParams pir_params;
+  PirServer server(pir_params);
+  auto params = pir_params.get_seal_params();
+  auto context_ = pir_params.get_context();
+  auto evaluator_ = seal::Evaluator(context_);
+  auto keygen_ = seal::KeyGenerator(context_);
+  auto secret_key_ = keygen_.secret_key();
+  auto encryptor_ = new seal::Encryptor(context_, secret_key_);
+  auto decryptor_ = new seal::Decryptor(context_, secret_key_);
+  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  // auto ntt_tables = context_.first_context_data()->small_ntt_tables();
+  auto ntt_tables = context_.get_context_data(params.parms_id())->small_ntt_tables();
+  MemoryPoolHandle pool_ = MemoryManager::GetPool(mm_prof_opt::mm_force_new, true);
+
+  seal::Plaintext pt(coeff_count), phase(coeff_count), result(coeff_count);
+  pt[0] = 1; pt[1] = 2; 
+  DEBUG_PRINT("Plaintext: " << pt.to_string());
+  
+  seal::Ciphertext ct; 
+  encryptor_->encrypt_symmetric(pt, ct);
+  decryptor_->decrypt(ct, result);
+  DEBUG_PRINT("=====================================================");
+  // // coeff to NTT
+  // ntt_negacyclic_harvey(ct, 2, ntt_tables);
+  // ct.is_ntt_form() = true;
+
+  // evaluator_.multiply_plain_inplace(ct, pt);
+
+  // // NTT to coeff
+  // inverse_ntt_negacyclic_harvey(ct, 2, ntt_tables);
+  // ct.is_ntt_form() = false;
+
+  // decryptor_->decrypt(ct, result);
+  // DEBUG_PRINT("Decrypted: " << result.to_string());
+  
+  // server.mod_switch_inplace(ct);
+
+  // !temp: use log q = 60, log t = 17
+  const size_t plain_mod = params.plain_modulus().value();
+  constexpr size_t half_width = 30; 
+  const uint64_t old_q = params.coeff_modulus()[0].value(); // old q
+  const uint64_t new_q = 1073692673; // new q
+  seal::Modulus orig_last_q = params.coeff_modulus()[1];   // the second q in orginal coeff mod
+  // std::vector<seal::Modulus> new_mods = {new_q, orig_last_q};
+  std::vector<seal::Modulus> new_mods = {old_q};
+  DEBUG_PRINT("Old q: " << old_q);
+  DEBUG_PRINT("orig last q: " << orig_last_q.value());
+  DEBUG_PRINT("New q: " << new_q);  
+
+
+  // Create a new RNSTool (copied from context.cpp)
+  Pointer<RNSBase> coeff_modulus_base = allocate<RNSBase>(pool_, new_mods, pool_);
+  util::Pointer<util::RNSTool> rns_tool_ = allocate<RNSTool>(pool_, coeff_count, *coeff_modulus_base, plain_mod, pool_);
+
+  // =========================== Now let's try to decrypt the ciphertex. Adapted from decryptor.cpp
+  /*
+    The high-level is to compute round( (c0 * s + c1) / Delta )
+    The questions are:
+    1. how do you do polynomial multiplication and addition?
+      ANS: we transform c1 to NTT form, use dyadic_product_coeffmod to do the
+          multiplication, then INTT it back to coeff form and compute
+          add_poly_coeffmod.
+    2. What is Delta?
+      ANS: Delta = floor(new_q / plain_mod) = (new_q - new_q % plain_mod) / plain_mod
+    3. What is division?
+      ANS: Doesn't look like a division over rationals... I am checking
+          RNSTool::decrypt_scale_and_round. It "divide scaling variant using
+    BEHZ FullRNS techniques", as introduced by comment in decryptor.cpp
+  */
+
+  // ======================= Compute the phase = c0 + c1 * s
+  // TODO: use new_q when implementing the mod switch
+
+  util::Pointer<std::uint64_t> secret_key_array_ = allocate_poly(coeff_count, 2, pool_);
+  set_poly(secret_key_.data().data(), coeff_count, 2, secret_key_array_.get());
+
+  ConstRNSIter secret_key_array(secret_key_array_.get(), coeff_count);
+  ConstRNSIter c0(ct.data(0), coeff_count);
+  ConstRNSIter c1(ct.data(1), coeff_count);
+  SEAL_ALLOCATE_ZERO_GET_RNS_ITER(phase_iter, coeff_count, 1, pool_);
+
+
+
+  SEAL_ITERATE(
+    iter(c0, c1, secret_key_array, new_mods, ntt_tables, phase_iter), 1,
+    [&](auto I) {
+      set_uint(get<1>(I), coeff_count, get<5>(I));
+      // Transform c_1 to NTT form
+      ntt_negacyclic_harvey_lazy(get<5>(I), get<4>(I));
+      // put < c_1 * s > mod q in destination
+      dyadic_product_coeffmod(get<5>(I), get<2>(I), coeff_count, get<3>(I), get<5>(I));
+      // Transform back
+      inverse_ntt_negacyclic_harvey(get<5>(I), get<4>(I));
+      // add c_0 to the result; note that destination should be in the same (NTT) form as encrypted
+      add_poly_coeffmod(get<5>(I), get<0>(I), coeff_count, get<3>(I), get<5>(I));
+  });
+
+
+  // // dyadic_product_coeffmod from seal/util/polyarithsmallmod.cpp
+  // intel::hexl::EltwiseMultMod(phase.data(), ct.data(1), secret_key_.data().data(), coeff_count, old_q, 4);
+  // // add_poly_coeffmod from seal/util/polyarithsmallmod.cpp
+  // intel::hexl::EltwiseAddMod(phase.data(), ct.data(0), phase.data(), coeff_count, old_q);
+
+  // ======================= Compute Delta
+  // const size_t Delta = (new_q - new_q % plain_mod) / plain_mod;
+  // DEBUG_PRINT("Delta: " << Delta);
+
+  // ======================= scale and round the phase 
+  rns_tool_->decrypt_scale_and_round(phase_iter, result.data(), pool_);
+
+  size_t plain_coeff_count = get_significant_uint64_count_uint(result.data(), coeff_count);
+  result.resize(std::max(plain_coeff_count, size_t(1)));
+  
+  DEBUG_PRINT("Manual decrypt result: " << result.to_string());
+
+// ============================================================================
+
+  // // a new set of encryption parameters using the new modulus
+  // seal::EncryptionParameters new_params(seal::scheme_type::bfv);
+  // new_params.set_poly_modulus_degree(DatabaseConstants::PolyDegree);
+  // seal::Modulus original_mods = params.coeff_modulus()[1];
+  // seal::Modulus q = seal::Modulus(new_q);  
+
+  // std::vector<int> bit_sizes({30, 60}); // You can also try our own DatabaseConstants::CoeffMods
+  // const auto new_mods = CoeffModulus::Create(coeff_count, bit_sizes);
+
+  // // print new mods
+  // for (size_t i = 0; i < new_mods.size(); ++i) {
+  //   DEBUG_PRINT("new coeff mod: " << new_mods[i].value());
+  // }
+
+  // new_params.set_plain_modulus(65537);
+  // new_params.set_coeff_modulus(new_mods);
+  // seal::SEALContext new_context = seal::SEALContext(new_params);
+  // auto &context_data = *new_context.get_context_data(new_params.parms_id());
+
+  // MemoryPoolHandle pool_ = MemoryManager::GetPool(mm_prof_opt::mm_force_new, true);
+  // SEAL_ALLOCATE_ZERO_GET_RNS_ITER(tmp_dest_modq, coeff_count, 2, pool_);
+  // auto secret_key_array_ = seal::util::allocate_poly(coeff_count, 1, pool_);
+  // ConstRNSIter secret_key_array(secret_key_array_.get(), coeff_count);
+  // ConstRNSIter c0(ct.data(0), coeff_count);
+  // ConstRNSIter c1(ct.data(1), coeff_count);
+
+  // SEAL_ITERATE(
+  //   iter(c0, c1, secret_key_array, new_mods, tmp_dest_modq), 2, [&](auto I) {
+  //       // put < c_1 * s > mod q in destination
+  //       seal::util::dyadic_product_coeffmod(get<1>(I), get<2>(I), coeff_count, get<3>(I), get<4>(I));
+  //       // add c_0 to the result; note that destination should be in the same (NTT) form as encrypted
+  //       seal::util::add_poly_coeffmod(get<4>(I), get<0>(I), coeff_count, get<3>(I), get<4>(I));
+  //   });
+
+  // context_data.rns_tool()->decrypt_scale_and_round(tmp_dest_modq, result.data(), pool_);
+
+  // // How many non-zero coefficients do we really have in the result?
+  // size_t plain_coeff_count = get_significant_uint64_count_uint(result.data(), coeff_count);
+
+  // // Resize destination to appropriate size
+  // result.resize(std::max(plain_coeff_count, size_t(1)));
+
+  // DEBUG_PRINT("mod switch result: " << result.to_string());
+
+
+
+  // ============================================================================
+
+
+  // // a new set of encryption parameters using the new modulus
+  // seal::EncryptionParameters new_params(seal::scheme_type::bfv);
+  // new_params.set_poly_modulus_degree(DatabaseConstants::PolyDegree);
+  // seal::Modulus original_mods = params.coeff_modulus()[1];
+  // // seal::Modulus q = seal::Modulus(new_q);
+  // seal::Modulus q = 1073692673;
+  
+  // std::vector<seal::Modulus> new_mods = {q, original_mods};
+
+
+  // // std::vector<int> bit_sizes({30, 60}); // You can also try our own DatabaseConstants::CoeffMods
+  // // const auto new_mods = CoeffModulus::Create(coeff_count, bit_sizes);
+
+
+  // new_params.set_plain_modulus(65537);
+  // new_params.set_coeff_modulus(new_mods);
+
+  // for (size_t i = 0; i < params.coeff_modulus().size(); ++i) {
+  //   std::cout << "old coeff mod: " << params.coeff_modulus()[i].value() << std::endl;
+  // }
+
+  // for (size_t i = 0; i < new_params.coeff_modulus().size(); ++i) {
+  //   std::cout << "new coeff mod: " << new_params.coeff_modulus()[i].value() << std::endl;
+  // }
+
+  // // decryptor and evaluator for the new parameters
+  // seal::SEALContext new_context = seal::SEALContext(new_params);
+  // auto new_keygen = seal::KeyGenerator(new_context);
+  // auto new_secret_key = new_keygen.secret_key();
+  // // new_secret_key = secret_key_;
+
+  // DEBUG_PRINT("Check secret_key_" << !is_valid_for(new_secret_key, context_));
+  // DEBUG_PRINT("is buffer valid: " << is_buffer_valid(new_secret_key)); 
+  // DEBUG_PRINT("is data valid: " << is_data_valid_for(new_secret_key, new_context));
+  // DEBUG_PRINT("is metadata valid: " << is_metadata_valid_for(new_secret_key, new_context));
+
+  // auto new_decryptor = new seal::Decryptor(new_context, new_secret_key);
+
+  // new_decryptor->decrypt(ct, result);
+  // DEBUG_PRINT("mod switch result: " << result.to_string());
+
+
+}
+
+
+
+
+
+

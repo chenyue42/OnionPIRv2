@@ -29,7 +29,7 @@ seal::EncryptionParameters PirParams::init_seal_params() {
 PirParams::PirParams()
     : seal_params_(init_seal_params()), context_(seal_params_) {
   // =============== Setting modulus ===============
-  const uint64_t pt_mod = utils::generate_prime(DatabaseConstants::PlainMod);
+  const uint64_t pt_mod = seal_params_.plain_modulus().value();
   // calculate the entry size in bytes automatically.
   if (DatabaseConstants::EntrySize == 0) {
     entry_size_ = (seal::Modulus(pt_mod).bit_count() - 1) * DatabaseConstants::PolyDegree / 8;

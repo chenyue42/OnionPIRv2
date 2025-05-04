@@ -27,4 +27,5 @@ class PirTest {
     void test_batch_decomp();
     void test_fast_expand_query();
     void test_raw_pt_ct_mult();
+    void test_mod_switch();
 };

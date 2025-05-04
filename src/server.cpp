@@ -603,3 +603,39 @@ void PirServer::write_one_chunk(std::vector<Entry> &data) {
     std::cerr << "Unable to open file for writing" << std::endl;
   }
 }
+
+
+void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext) {
+  // current ciphertext modulus
+  const size_t Q = pir_params_.get_coeff_modulus()[0].value(); 
+  const size_t half_width = (std::log2(Q) + 1) / 2; 
+  DEBUG_PRINT("Current modulus: " << Q);
+  DEBUG_PRINT("Half width: " << half_width);
+  // ! temp: create a new modulus with half the bit size
+  const size_t q = utils::generate_prime(half_width);
+
+  // mod switch: round( (ct * q) / Q) ) (mod q)
+  // the multiplication and division are in rational.
+
+  // there are two ciphertext polynomials
+  auto* data0 = ciphertext.data(0);
+  auto* data1 = ciphertext.data(1);
+
+  for (size_t i = 0; i < DatabaseConstants::PolyDegree; i++) {
+    double x0 = static_cast<double>(data0[i]) * q / Q;
+    double x1 = static_cast<double>(data1[i]) * q / Q;
+    data0[i] = static_cast<uint64_t>(std::round(x0));
+    data1[i] = static_cast<uint64_t>(std::round(x1));
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
