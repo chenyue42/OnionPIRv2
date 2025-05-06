@@ -25,7 +25,7 @@ public:
   void push_database_chunk(std::vector<Entry> &chunk_entry, const size_t chunk_idx);
 
   // Given the client id and a packed client query, this function first unpacks the query, then returns the retrieved encrypted result.
-  std::vector<seal::Ciphertext> make_query(const size_t client_id, std::stringstream &query_stream);
+  seal::Ciphertext make_query(const size_t client_id, std::stringstream &query_stream);
 
   /**
    * @brief A clever way to evaluate the external product for second to last dimensions. 

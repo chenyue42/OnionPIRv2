@@ -36,6 +36,14 @@ PirParams::PirParams()
   } else {
     entry_size_ = DatabaseConstants::EntrySize;
   }
+  // setup the modulus switching mod when we have only one modulus.
+  if (get_rns_mod_cnt() == 1) {
+    // For now, we just use half the ct mod width for our new small q width.
+    // ! Assuming we have the DatabaseConstants::CoeffMods setup correctly.
+    constexpr std::array<size_t, 2> old_mod_sizes = DatabaseConstants::CoeffMods;
+    small_q_ = CoeffModulus::Create(DatabaseConstants::PolyDegree,
+                                    {old_mod_sizes[0] / 2, old_mod_sizes[1]})[0].value();
+  }
 
   // ================== GSW related parameters ==================
   const auto coeff_modulus = seal_params_.coeff_modulus();

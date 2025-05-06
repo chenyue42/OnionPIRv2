@@ -242,12 +242,15 @@ size_t PirClient::create_galois_keys(std::stringstream &galois_key_stream) {
   return written_size;
 }
 
-std::vector<seal::Plaintext> PirClient::decrypt_result(const std::vector<seal::Ciphertext> reply) {
-  std::vector<seal::Plaintext> result(reply.size(), seal::Plaintext(DatabaseConstants::PolyDegree));
-  for (size_t i = 0; i < reply.size(); i++) {
-    decryptor_.decrypt(reply[i], result[i]);
+seal::Plaintext PirClient::decrypt_result(const seal::Ciphertext& reply) {
+  // we need to use custom decryptor to decrypt the single mod ct
+  if (pir_params_.get_rns_mod_cnt() == 1) {
+    seal::Plaintext result = decrypt_mod_q(reply, pir_params_.get_small_q());
+    return {result};
   }
 
+  seal::Plaintext result;
+  decryptor_.decrypt(reply, result);
   return result;
 }
 
@@ -359,7 +362,7 @@ Entry PirClient::get_entry_from_plaintext(const size_t entry_index, const seal::
 // }
 
 
-seal::Plaintext PirClient::custom_decrypt_mod_q(const seal::Ciphertext &ct, const size_t new_q) {
+seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint64_t small_q) const {
   constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const auto seal_params = pir_params_.get_seal_params();
   const auto full_mods = seal_params.coeff_modulus();
@@ -370,13 +373,13 @@ seal::Plaintext PirClient::custom_decrypt_mod_q(const seal::Ciphertext &ct, cons
     DEBUG_PRINT("full_mods[" << i << "] = " << full_mods[i].value());
   }
   DEBUG_PRINT("ct mod: " << pir_params_.get_coeff_modulus()[0].value());
-  DEBUG_PRINT("new_q = " << new_q);
+  DEBUG_PRINT("small q = " << small_q);
 
   // create a new secret key with new modulus
   seal::EncryptionParameters new_params(seal::scheme_type::bfv);
   new_params.set_poly_modulus_degree(DatabaseConstants::PolyDegree);
   new_params.set_plain_modulus(pir_params_.get_plain_mod());
-  new_params.set_coeff_modulus({new_q, full_mods[1]}); // use the same last modulus as the original one.
+  new_params.set_coeff_modulus({small_q, full_mods[1]}); // use the same last modulus as the original one.
 
   seal::SecretKey new_sk = secret_key_mod_switch(secret_key_, new_params);
   seal::SEALContext new_context(new_params);
@@ -402,7 +405,7 @@ seal::Plaintext PirClient::custom_decrypt_mod_q(const seal::Ciphertext &ct, cons
 }
 
 
-seal::SecretKey PirClient::secret_key_mod_switch(seal::SecretKey &sk, seal::EncryptionParameters &new_params) {
+seal::SecretKey PirClient::secret_key_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const {
   constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const seal::SEALContext old_context = pir_params_.get_context();
   const seal::SEALContext new_context(new_params);

@@ -27,7 +27,7 @@ public:
   static size_t write_query_to_stream(const seal::Ciphertext &query, std::stringstream &data_stream);
   static size_t write_gsw_to_stream(const std::vector<Ciphertext> &gsw, std::stringstream &gsw_stream);
   size_t create_galois_keys(std::stringstream &galois_key_stream);
-  std::vector<seal::Plaintext> decrypt_result(const std::vector<seal::Ciphertext> reply);
+  seal::Plaintext decrypt_result(const seal::Ciphertext& reply);
   // Retrieves an entry from the plaintext containing the entry.
   std::vector<Ciphertext> generate_gsw_from_key();
   
@@ -39,14 +39,12 @@ public:
     BENCH_PRINT("Noise budget in the query: " << decryptor_.invariant_noise_budget(ct) << " bits");
   }
 
-  // given a ciphertext, decrypt it using the given ciphertext modulus q, the
+  // given a ciphertext, decrypt it using the small_q_ stored in PirParams, the
   // stored secret key, and the stored plaintext modulus.
-  seal::Plaintext custom_decrypt_mod_q(const seal::Ciphertext &ciphertext, const size_t new_q); 
-
+  seal::Plaintext decrypt_mod_q(const seal::Ciphertext &ciphertext, const uint64_t small_q) const; 
 
   // // old definition.
   // seal::Plaintext custom_decrypt_mod_q(const seal::Ciphertext &ciphertext, const std::vector<seal::Modulus>& modulus); 
-
 
 
   friend class PirTest;
@@ -70,7 +68,7 @@ private:
 
   // switching the secret key mod old_q to mod new_q
   // This matters since sk is a tenary polynomial, which contains -1 mod q.
-  seal::SecretKey secret_key_mod_switch(seal::SecretKey &sk, seal::EncryptionParameters &new_params);
+  seal::SecretKey secret_key_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const;
 
 
 

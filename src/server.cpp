@@ -403,7 +403,7 @@ Entry PirServer::direct_get_entry(const size_t entry_idx) const {
 }
 
 
-std::vector<seal::Ciphertext> PirServer::make_query(const size_t client_id, std::stringstream &query_stream) {
+seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream &query_stream) {
   // receive the query from the client
   seal::Ciphertext query; 
   query.load(context_, query_stream);
@@ -451,13 +451,16 @@ std::vector<seal::Ciphertext> PirServer::make_query(const size_t client_id, std:
   // ========================== Post-processing ==========================
   TIME_START(MOD_SWITCH);
   // modulus switching so to reduce the response size by half
-  if(pir_params_.get_seal_params().coeff_modulus().size() > 2) {
-    DEBUG_PRINT("Modulus switching...");
+  if(pir_params_.get_rns_mod_cnt() > 2) {
+    DEBUG_PRINT("Modulus switching in RNS...");
     evaluator_.mod_switch_to_next_inplace(result[0]); // result.size() == 1.
+  } else {
+    DEBUG_PRINT("Modulus switching for a single modulus...");
+    const uint64_t small_q = pir_params_.get_small_q();
+    mod_switch_inplace(result[0], small_q);
   }
   TIME_END(MOD_SWITCH);
-
-  return result;
+  return result[0];
 }
 
 

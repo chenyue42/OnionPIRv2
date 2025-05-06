@@ -27,18 +27,18 @@ void print_throughput(const std::string &name, const size_t db_size) {
 }
 
 void PirTest::run_tests() {
-  // test_pir();
+  test_pir();
   // bfv_example();
   // serialization_example();
   // test_external_product();
-  // test_custom_decrypt_mod_q();
   // test_single_mat_mult();
   // test_fst_dim_mult();
   // test_batch_decomp();
   // test_fast_expand_query();
   // test_raw_pt_ct_mult();
+  test_decrypt_mod_q();
   test_mod_switch();
-  // test_sk_mod_switch();
+  test_sk_mod_switch();
 }
 
 
@@ -94,19 +94,19 @@ void PirTest::test_pir() {
     
     // ============= SERVER ===============
     TIME_START(SERVER_TOT_TIME);
-    std::vector<seal::Ciphertext> result = server.make_query(client_id, data_stream);
+    seal::Ciphertext result = server.make_query(client_id, data_stream);
     TIME_END(SERVER_TOT_TIME);
 
     // ============= CLIENT ===============
     TIME_START(CLIENT_TOT_TIME);
     // client gets result from the server and decrypts it
-    std::vector<seal::Plaintext> decrypted_result = client.decrypt_result(result);
-    Entry response_entry = client.get_entry_from_plaintext(query_index, decrypted_result[0]);
+    seal::Plaintext decrypted_result = client.decrypt_result(result);
+    Entry response_entry = client.get_entry_from_plaintext(query_index, decrypted_result);
     TIME_END(CLIENT_TOT_TIME);
 
     // write the result to the stream to test the size
     std::stringstream result_stream;
-    response_size = result[0].save(result_stream);
+    response_size = result.save(result_stream);
     result_stream.str(std::string()); // clear the stream
 
     // Directly get the plaintext from server. Not part of PIR.
@@ -469,7 +469,8 @@ void PirTest::test_external_product() {
   PRINT_RESULTS(); 
 }
 
-void PirTest::test_custom_decrypt_mod_q() {
+void PirTest::test_decrypt_mod_q() {
+  // this is testing if custom decryption works for the original modulus. (no modulus switching involved)
   print_func_name(__FUNCTION__);
   PirParams pir_params;
   PirClient client(pir_params);
@@ -487,13 +488,8 @@ void PirTest::test_custom_decrypt_mod_q() {
   BENCH_PRINT("Vector a: " << a.to_string());
   seal::Ciphertext a_encrypted;    // encrypted "a" will be stored here. 
   encryptor_->encrypt_symmetric(a, a_encrypted);
-
-  // get the modulus q
-  std::vector<Modulus> coeff_modulus = pir_params.get_coeff_modulus();
-  for (size_t i = 0; i < coeff_modulus.size(); i++) {
-    BENCH_PRINT("Modulus " << i << ": " << coeff_modulus[i].value());
-  }
-  result = client.custom_decrypt_mod_q(a_encrypted, coeff_modulus[0].value());
+  const auto coeff_modulus = pir_params.get_coeff_modulus();
+  result = client.decrypt_mod_q(a_encrypted, coeff_modulus[0].value());
   BENCH_PRINT("Decrypted result: " << result.to_string());
 }
 
@@ -916,10 +912,10 @@ void PirTest::test_fast_expand_query() {
   client.test_budget(normal_query);
   client.test_budget(fast_query);
   // decrypt the query and print it
-  auto normal_decrypted = client.decrypt_result({normal_query});
-  auto fast_decrypted = client.decrypt_result({fast_query});
-  BENCH_PRINT("raw packed query: " << normal_decrypted[0].to_string());
-  BENCH_PRINT("fast packed query: " << fast_decrypted[0].to_string());
+  auto normal_decrypted = client.decrypt_result(normal_query);
+  auto fast_decrypted = client.decrypt_result(fast_query);
+  BENCH_PRINT("raw packed query: " << normal_decrypted.to_string());
+  BENCH_PRINT("fast packed query: " << fast_decrypted.to_string());
   PRINT_BAR;
 
   // ============= Expand the query ==============
@@ -929,17 +925,13 @@ void PirTest::test_fast_expand_query() {
   client.test_budget(normal_exp_q[query_idx % fst_dim_sz]);
   client.test_budget(fast_exp_q[query_idx % fst_dim_sz]);
 
-  normal_decrypted = client.decrypt_result(normal_exp_q);
-  fast_decrypted = client.decrypt_result(fast_exp_q);
-  BENCH_PRINT("normal Expanded query: " << normal_decrypted[query_idx % fst_dim_sz].to_string());
-  BENCH_PRINT("fast Expanded query: " << fast_decrypted[query_idx % fst_dim_sz].to_string());
-
-  for (size_t i = 0; i < useful_cnt; i++) {
-    // BENCH_PRINT(fast_decrypted[i].to_string());
-    if (fast_decrypted[i].to_string() == "1") {
-      BENCH_PRINT("equals one at idx: " << i << " ");
-    }
+  std::vector<seal::Plaintext> normal_exp_pt, fast_exp_pt;
+  for (size_t i = 0; i < normal_exp_q.size(); i++) {
+    normal_exp_pt.push_back(client.decrypt_result(normal_exp_q[i]));
+    fast_exp_pt.push_back(client.decrypt_result(fast_exp_q[i]));
   }
+  BENCH_PRINT("normal Expanded query: " << normal_exp_pt[query_idx % fst_dim_sz].to_string());
+  BENCH_PRINT("fast Expanded query: " << fast_exp_pt[query_idx % fst_dim_sz].to_string());
 }
 
 
@@ -1036,20 +1028,20 @@ void PirTest::test_mod_switch() {
   for (size_t i = 0; i < 10; ++i) {
     pt[i] = rand() % pir_params.get_plain_mod();
   }
-  DEBUG_PRINT("Plaintext: " << pt.to_string());
+  BENCH_PRINT("Plaintext: " << pt.to_string());
 
   // !temp: use log q = 60, log t = 17
   const uint64_t old_q = params.coeff_modulus()[0].value(); // old q
-  const uint64_t small_q = 1073692673; // new q
+  const uint64_t small_q = pir_params.get_small_q(); // new q
   // const uint64_t small_q = 1073668097;
-  DEBUG_PRINT("Old q: " << old_q);
-  DEBUG_PRINT("New q: " << small_q);  
+  BENCH_PRINT("Old q: " << old_q);
+  BENCH_PRINT("New q: " << small_q);  
 
   // encrypt the plaintext and apply modulus switch
   seal::Ciphertext ct; 
   encryptor_->encrypt_symmetric(pt, ct);
   server.mod_switch_inplace(ct, small_q);
-  result = client.custom_decrypt_mod_q(ct, small_q);
+  result = client.decrypt_mod_q(ct, small_q);
   BENCH_PRINT("Client decrypted: " << result.to_string());
   
   // verify if ct coeffs are all less than small_q
@@ -1096,10 +1088,10 @@ void PirTest::test_sk_mod_switch() {
   auto context_data2 = context2.key_context_data();
 
   for (size_t i = 0; i < coeff_modulus1.size(); i++) {
-    BENCH_PRINT("Modulus " << i << ": " << coeff_modulus1[i].value());
+    BENCH_PRINT("Big modulus " << i << ": " << coeff_modulus1[i].value());
   }
   for (size_t i = 0; i < coeff_modulus2.size(); i++) {
-    BENCH_PRINT("Modulus " << i << ": " << coeff_modulus2[i].value());
+    BENCH_PRINT("Small modulus " << i << ": " << coeff_modulus2[i].value());
   }
   
   // ==================== Create evaluator, secret key, encryptor of the large setting
@@ -1112,53 +1104,15 @@ void PirTest::test_sk_mod_switch() {
   // test if the encryption and decryption works
   seal::Plaintext pt1(coeff_count), result1;
   pt1[0] = 1; pt1[1] = 2;
-  BENCH_PRINT("=========== Plaintext: " << pt1.to_string());
+  BENCH_PRINT("Plaintext: " << pt1.to_string());
   seal::Ciphertext ct1;
   encryptor1->encrypt_symmetric(pt1, ct1);
   decryptor1->decrypt(ct1, result1);
-  BENCH_PRINT("=========== Decrypted result: " << result1.to_string());
+  BENCH_PRINT("Decrypted result: " << result1.to_string());
   BENCH_PRINT("--------------------------------------------------------------------------")
 
 
   // ==================== Create evaluator, secret key, encryptor of the small setting
-  // auto keygen2 = seal::KeyGenerator(context2);
-  // auto sk2 = keygen2.secret_key();
-
-  // const auto ntt_tables1 = context_data1->small_ntt_tables();
-  // const auto ntt_tables2 = context_data2->small_ntt_tables();
-
-  // // compute INTT for sk1 using ntt_tables from context1
-  // std::vector<uint64_t> sk1_ntt(sk1.data().data(), sk1.data().data() + coeff_count);
-  // RNSIter intt_iter(sk1_ntt.data(), coeff_count);
-  // inverse_ntt_negacyclic_harvey(intt_iter, 1, ntt_tables1);
-
-  // const uint64_t small_q = coeff_modulus2[0].value();
-  // for (size_t i = 0; i < coeff_count; i++) {
-  //   // BENCH_PRINT("sk1.data() = " << sk1_ntt[i] << " " << sk1_ntt[i] % params1.coeff_modulus()[0].value());
-  //   if (sk1_ntt[i] > 1) {
-  //     sk1_ntt[i] = small_q - 1; // change it to -1 mod small_q
-  //   }
-  // }
-
-  // // compute NTT forward for sk1 using ntt_tables from context2
-  // RNSIter ntt_iter(sk1_ntt.data(), coeff_count);
-  // ntt_negacyclic_harvey(ntt_iter, 1, ntt_tables2);
-  
-
-  // // create a new secret key with the same data as sk1
-  // // change the underlying data
-  // for (size_t i = 0; i < coeff_count; i++) {
-  //   sk2.data().data()[i] = sk1_ntt[i];
-  // }
-
-  // BENCH_PRINT("is_metadata_valid_for(secret, context): " << is_metadata_valid_for(sk2, context2));
-  // BENCH_PRINT("is_metadata_valid_for(in.data(), context, true): " << is_metadata_valid_for(sk2.data(), context2, true));
-  // BENCH_PRINT("context.parameters_set(): " << context2.parameters_set());
-  // BENCH_PRINT("is secret in ntt: " << sk2.data().is_ntt_form());
-  // auto context_data_ptr = context2.get_context_data(sk2.parms_id());
-  // // auto context_data_ptr = context1.get_context_data(sk1.parms_id());
-  // BENCH_PRINT("does context_data_ptr exist: " << (context_data_ptr != nullptr));
-
   // Now, we create a new secret key with the same logical data as sk1, but represented in new modulus.
   seal::SecretKey sk2 = client.secret_key_mod_switch(sk1, params2);
 
@@ -1168,9 +1122,9 @@ void PirTest::test_sk_mod_switch() {
   // test if the encryption and decryption works
   seal::Plaintext pt2(coeff_count), result2;
   pt2[0] = 1; pt2[1] = 2;
-  BENCH_PRINT("=========== Plaintext: " << pt2.to_string());
+  BENCH_PRINT("Plaintext: " << pt2.to_string());
   seal::Ciphertext ct2;
   encryptor2->encrypt_symmetric(pt2, ct2);
   decryptor2->decrypt(ct2, result2);
-  BENCH_PRINT("=========== Decrypted result: " << result2.to_string());
+  BENCH_PRINT("Decrypted result: " << result2.to_string());
 }
