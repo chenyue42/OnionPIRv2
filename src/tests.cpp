@@ -37,8 +37,8 @@ void PirTest::run_tests() {
   // test_batch_decomp();
   // test_fast_expand_query();
   // test_raw_pt_ct_mult();
-  // test_mod_switch();
-  test_sk_mod_switch();
+  test_mod_switch();
+  // test_sk_mod_switch();
 }
 
 
@@ -478,7 +478,7 @@ void PirTest::test_custom_decrypt_mod_q() {
   auto secret_key_ = client.secret_key_;
   auto evaluator_ = seal::Evaluator(context_);
   auto encryptor_ = new seal::Encryptor(context_, secret_key_);
-  auto decryptor_ = new seal::Decryptor(context_, secret_key_);
+
   const size_t coeff_count = DatabaseConstants::PolyDegree;
 
   // the test data vector a and results are both in BFV scheme.
@@ -493,16 +493,8 @@ void PirTest::test_custom_decrypt_mod_q() {
   for (size_t i = 0; i < coeff_modulus.size(); i++) {
     BENCH_PRINT("Modulus " << i << ": " << coeff_modulus[i].value());
   }
-  result = client.custom_decrypt_mod_q(a_encrypted, coeff_modulus);
+  result = client.custom_decrypt_mod_q(a_encrypted, coeff_modulus[0].value());
   BENCH_PRINT("Decrypted result: " << result.to_string());
-
-  // Our function should be able to handle multiple moduli.
-  if (DatabaseConstants::CoeffMods.size() > 2) {
-    evaluator_.mod_switch_to_next_inplace(a_encrypted);
-    std::vector<Modulus> coeff_modulus2(coeff_modulus.begin(), coeff_modulus.end() - 1);
-    result = client.custom_decrypt_mod_q(a_encrypted, coeff_modulus2);
-    BENCH_PRINT("Decrypted result: " << result.to_string());
-  }
 }
 
 void PirTest::test_single_mat_mult() {
@@ -1041,13 +1033,15 @@ void PirTest::test_mod_switch() {
   const size_t coeff_count = DatabaseConstants::PolyDegree;
 
   seal::Plaintext pt(coeff_count), result(coeff_count);
-  pt[0] = 1; pt[1] = 2;
+  for (size_t i = 0; i < 10; ++i) {
+    pt[i] = rand() % pir_params.get_plain_mod();
+  }
   DEBUG_PRINT("Plaintext: " << pt.to_string());
 
   // !temp: use log q = 60, log t = 17
   const uint64_t old_q = params.coeff_modulus()[0].value(); // old q
-  // const uint64_t small_q = 1073692673; // new q
-  const uint64_t small_q = 1073668097;
+  const uint64_t small_q = 1073692673; // new q
+  // const uint64_t small_q = 1073668097;
   DEBUG_PRINT("Old q: " << old_q);
   DEBUG_PRINT("New q: " << small_q);  
 
@@ -1055,13 +1049,23 @@ void PirTest::test_mod_switch() {
   seal::Ciphertext ct; 
   encryptor_->encrypt_symmetric(pt, ct);
   server.mod_switch_inplace(ct, small_q);
-  // result = client.custom_decrypt_mod_q(ct, {old_q});
-  result = client.custom_decrypt_mod_q(ct, {small_q});
-  DEBUG_PRINT("Client decrypted: " << result.to_string());
+  result = client.custom_decrypt_mod_q(ct, small_q);
+  BENCH_PRINT("Client decrypted: " << result.to_string());
+  
+  // verify if ct coeffs are all less than small_q
+  bool can_compress = true; // if so, then we can use 32 bits to store the coeffs.
+  for (size_t i = 0; i < coeff_count; i++) {
+    if (ct.data()[i] >= small_q) {
+      BENCH_PRINT("ct.data()[i] = " << ct.data()[i]);
+      BENCH_PRINT("ct.data()[i] >= small_q");
+    }
+  }
+  BENCH_PRINT("can_compress: " << can_compress);
 }
 
 
 void PirTest::test_sk_mod_switch() {
+  print_func_name(__FUNCTION__);
   // Create two sets of parameters, one with {60, 60}, one with {30, 60} mods
   PirParams pir_params;
   seal::EncryptionParameters params1(seal::scheme_type::bfv);  // or use this for explicit setup.
@@ -1074,7 +1078,6 @@ void PirTest::test_sk_mod_switch() {
   params2.set_plain_modulus(pt_mod);
   std::vector<int> bit_sizes1({60,60}); // set this same as DatabaseConstants::CoeffMods
   std::vector<int> bit_sizes2({30,60});
-  // std::vector<int> bit_sizes2({60,60});
 
   const auto coeff_modulus1 = CoeffModulus::Create(coeff_count, bit_sizes1);
   const auto coeff_modulus2 = CoeffModulus::Create(coeff_count, bit_sizes2);

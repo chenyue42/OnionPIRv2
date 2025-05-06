@@ -41,7 +41,13 @@ public:
 
   // given a ciphertext, decrypt it using the given ciphertext modulus q, the
   // stored secret key, and the stored plaintext modulus.
-  seal::Plaintext custom_decrypt_mod_q(const seal::Ciphertext &ciphertext, const std::vector<seal::Modulus>& modulus); 
+  seal::Plaintext custom_decrypt_mod_q(const seal::Ciphertext &ciphertext, const size_t new_q); 
+
+
+  // // old definition.
+  // seal::Plaintext custom_decrypt_mod_q(const seal::Ciphertext &ciphertext, const std::vector<seal::Modulus>& modulus); 
+
+
 
   friend class PirTest;
 

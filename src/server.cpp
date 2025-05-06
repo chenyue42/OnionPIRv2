@@ -614,7 +614,6 @@ void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext, const uint64_t 
 
   // current ciphertext modulus
   const size_t Q = pir_params_.get_coeff_modulus()[0].value(); 
-  const size_t last_q = pir_params_.get_coeff_modulus()[1].value(); // the last modulus
 
   // mod switch: round( (ct * q) / Q) ) (mod q)
   // the multiplication and division are in rational.
@@ -622,13 +621,11 @@ void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext, const uint64_t 
   auto* data0 = ciphertext.data(0);
   auto* data1 = ciphertext.data(1);
   
-  // const long double scale = static_cast<double>(q) / static_cast<double>(Q);
+  const long double scale = static_cast<double>(q) / static_cast<double>(Q);
   
   for (size_t i = 0; i < DatabaseConstants::PolyDegree; i++) {
-    // data0[i] = (uint64_t)std::round((long double)data0[i] * scale);
-    // data1[i] = (uint64_t)std::round((long double)data1[i] * scale);
-    data0[i] = (uint64_t)std::round((long double)data0[i] / (long double)last_q);
-    data1[i] = (uint64_t)std::round((long double)data1[i] / (long double)last_q);
+    data0[i] = (uint64_t)std::round((long double)data0[i] * scale);
+    data1[i] = (uint64_t)std::round((long double)data1[i] * scale);
   }
 }
 
