@@ -39,6 +39,12 @@ public:
     BENCH_PRINT("Noise budget in the query: " << decryptor_.invariant_noise_budget(ct) << " bits");
   }
 
+  // given a ciphertext, decrypt it using the given ciphertext modulus q, the
+  // stored secret key, and the stored plaintext modulus.
+  seal::Plaintext custom_decrypt_mod_q(const seal::Ciphertext &ciphertext, const std::vector<seal::Modulus>& modulus); 
+
+  friend class PirTest;
+
 private:
   size_t client_id_;
   seal::SEALContext context_;
@@ -55,4 +61,20 @@ private:
 
   // Gets the query indices for a given plaintext
   std::vector<size_t> get_query_indices(size_t plaintext_index);
+
+  // switching the secret key mod old_q to mod new_q
+  // This matters since sk is a tenary polynomial, which contains -1 mod q.
+  seal::SecretKey secret_key_mod_switch(seal::SecretKey &sk, seal::EncryptionParameters &new_params);
+
+
+
 };
+
+
+
+
+
+
+
+
+

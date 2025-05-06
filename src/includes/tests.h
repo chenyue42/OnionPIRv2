@@ -12,6 +12,7 @@ class PirTest {
     // ======================== BFV & GSW tests ========================
     void bfv_example();
     void test_external_product(); 
+    void test_custom_decrypt_mod_q();
 
     // ======================== SEAL Serialization ========================
     void serialization_example();
@@ -28,4 +29,5 @@ class PirTest {
     void test_fast_expand_query();
     void test_raw_pt_ct_mult();
     void test_mod_switch();
+    void test_sk_mod_switch();
 };

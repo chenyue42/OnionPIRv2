@@ -605,27 +605,30 @@ void PirServer::write_one_chunk(std::vector<Entry> &data) {
 }
 
 
-void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext) {
+void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext, const uint64_t q) {
+  if (ciphertext.is_ntt_form()) {
+    throw std::invalid_argument("Ciphertext is in NTT form, cannot mod switch.");
+  }
+
+  const size_t coeff_count = DatabaseConstants::PolyDegree;
+
   // current ciphertext modulus
   const size_t Q = pir_params_.get_coeff_modulus()[0].value(); 
-  const size_t half_width = (std::log2(Q) + 1) / 2; 
-  DEBUG_PRINT("Current modulus: " << Q);
-  DEBUG_PRINT("Half width: " << half_width);
-  // ! temp: create a new modulus with half the bit size
-  const size_t q = utils::generate_prime(half_width);
+  const size_t last_q = pir_params_.get_coeff_modulus()[1].value(); // the last modulus
 
   // mod switch: round( (ct * q) / Q) ) (mod q)
   // the multiplication and division are in rational.
-
   // there are two ciphertext polynomials
   auto* data0 = ciphertext.data(0);
   auto* data1 = ciphertext.data(1);
-
+  
+  // const long double scale = static_cast<double>(q) / static_cast<double>(Q);
+  
   for (size_t i = 0; i < DatabaseConstants::PolyDegree; i++) {
-    double x0 = static_cast<double>(data0[i]) * q / Q;
-    double x1 = static_cast<double>(data1[i]) * q / Q;
-    data0[i] = static_cast<uint64_t>(std::round(x0));
-    data1[i] = static_cast<uint64_t>(std::round(x1));
+    // data0[i] = (uint64_t)std::round((long double)data0[i] * scale);
+    // data1[i] = (uint64_t)std::round((long double)data1[i] * scale);
+    data0[i] = (uint64_t)std::round((long double)data0[i] / (long double)last_q);
+    data1[i] = (uint64_t)std::round((long double)data1[i] / (long double)last_q);
   }
 }
 

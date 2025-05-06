@@ -2,6 +2,8 @@
 #include "pir.h"
 #include "utils.h"
 #include "gsw_eval.h"
+#include "seal/util/polyarithsmallmod.h"
+#include "seal/util/iterator.h"
 
 
 // constructor
@@ -283,3 +285,103 @@ Entry PirClient::get_entry_from_plaintext(const size_t entry_index, const seal::
   return result;
 }
 
+
+seal::Plaintext PirClient::custom_decrypt_mod_q(const seal::Ciphertext &ct, const std::vector<seal::Modulus>& q_mod) {
+  auto params = pir_params_.get_seal_params();
+  auto context_ = pir_params_.get_context();
+  const size_t plain_mod = pir_params_.get_plain_mod();
+  auto ntt_tables = context_.get_context_data(params.parms_id())->small_ntt_tables();
+  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  MemoryPoolHandle pool_ = MemoryManager::GetPool(mm_prof_opt::mm_force_new, true);
+  seal::Plaintext phase(coeff_count), result(coeff_count);
+
+  // Create a new RNSTool (copied from context.cpp)
+  Pointer<RNSBase> coeff_modulus_base = allocate<RNSBase>(pool_, q_mod, pool_);
+  util::Pointer<util::RNSTool> rns_tool_ = allocate<RNSTool>(pool_, coeff_count, *coeff_modulus_base, plain_mod, pool_);
+
+  // =========================== Now let's try to decrypt the ciphertext. Adapted from decryptor.cpp
+  /*
+    The high-level is to compute round( (c0 * s + c1) / Delta )
+    The questions are:
+    1. how do you do polynomial multiplication and addition?
+      ANS: we transform c1 to NTT form, use dyadic_product_coeffmod to do the
+          multiplication, then INTT it back to coeff form and compute
+          add_poly_coeffmod.
+    2. What is Delta?
+      ANS: Delta = floor(new_q / plain_mod) = (new_q - new_q % plain_mod) / plain_mod
+    3. How do we calculate the division?
+      ANS: Doesn't look like a division over rationals... I am checking
+          RNSTool::decrypt_scale_and_round. It "divide scaling variant using
+          BEHZ FullRNS techniques", as introduced by comment in decryptor.cpp
+          We can use this function if we setup the RNSTool correctly.j
+  */
+
+  const size_t rns_mod_cnt = q_mod.size();
+
+  // ======================= Compute the phase = c0 + c1 * s
+  util::Pointer<std::uint64_t> secret_key_array_ = allocate_poly(coeff_count, 2, pool_);
+  set_poly(secret_key_.data().data(), coeff_count, 2, secret_key_array_.get());
+
+  // settingup iterators for input and the phase
+  ConstRNSIter secret_key_array(secret_key_array_.get(), coeff_count);
+  ConstRNSIter c0(ct.data(0), coeff_count);
+  ConstRNSIter c1(ct.data(1), coeff_count);
+  SEAL_ALLOCATE_ZERO_GET_RNS_ITER(phase_iter, coeff_count, rns_mod_cnt, pool_);
+
+  // perform the elementwise multiplication and addition
+  SEAL_ITERATE(
+    iter(c0, c1, secret_key_array, q_mod, ntt_tables, phase_iter), rns_mod_cnt,
+    [&](auto I) {
+      set_uint(get<1>(I), coeff_count, get<5>(I));
+      // Transform c_1 to NTT form
+      ntt_negacyclic_harvey_lazy(get<5>(I), get<4>(I));
+      // put < c_1 * s > mod q in destination
+      dyadic_product_coeffmod(get<5>(I), get<2>(I), coeff_count, get<3>(I), get<5>(I));
+      // Transform back
+      inverse_ntt_negacyclic_harvey(get<5>(I), get<4>(I));
+      // add c_0 to the result; note that destination should be in the same (NTT) form as encrypted
+      add_poly_coeffmod(get<5>(I), get<0>(I), coeff_count, get<3>(I), get<5>(I));
+  });
+
+  // ======================= scale the phase and round it to get the result.
+  rns_tool_->decrypt_scale_and_round(phase_iter, result.data(), pool_);
+
+  size_t plain_coeff_count = get_significant_uint64_count_uint(result.data(), coeff_count);
+  result.resize(std::max(plain_coeff_count, size_t(1)));
+  return result;
+}
+
+
+
+
+seal::SecretKey PirClient::secret_key_mod_switch(seal::SecretKey &sk, seal::EncryptionParameters &new_params) {
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  const seal::SEALContext old_context = pir_params_.get_context();
+  const seal::SEALContext new_context(new_params);
+  const auto old_context_data = old_context.key_context_data();
+  const auto new_context_data = new_context.key_context_data();
+  const auto old_ntt_tables = old_context_data->small_ntt_tables(); 
+  const auto new_ntt_tables = new_context_data->small_ntt_tables();
+
+  auto temp_keygen = seal::KeyGenerator(new_context);
+  auto new_sk = temp_keygen.secret_key(); // create non-empty secret key. will use old sk data.
+
+  std::vector<uint64_t> sk_data(sk.data().data(), sk.data().data() + coeff_count);
+  RNSIter intt_iter(sk_data.data(), coeff_count);
+  inverse_ntt_negacyclic_harvey(intt_iter, 1, old_ntt_tables);
+  const uint64_t new_q = new_params.coeff_modulus()[0].value();
+  for (size_t i = 0; i < coeff_count; ++i) {
+    // sk in coefficient form only contains 0, 1, q-1, where q-1 \equiv -1 mod q
+    if (sk_data[i] > 1) {
+      sk_data[i] = new_q - 1; // change it to -1 mod small_q
+    }
+  }
+  // compute NTT forward for sk1 using new_ntt_tables
+  RNSIter ntt_iter(sk_data.data(), coeff_count);
+  ntt_negacyclic_harvey(ntt_iter, 1, new_ntt_tables);
+
+  // replace the underlying data of new_sk with the data of sk
+  std::copy(sk_data.begin(), sk_data.end(), new_sk.data().data());
+
+  return new_sk;
+}

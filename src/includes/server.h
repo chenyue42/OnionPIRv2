@@ -102,6 +102,6 @@ private:
 
   // customized modulus switch for single mod seal::Ciphertext. (Not RNS modulus)
   // The goal is to halve the size of the ciphertext.
-  void mod_switch_inplace(seal::Ciphertext &ciphertext);
+  void mod_switch_inplace(seal::Ciphertext &ciphertext, const uint64_t small_q);
 
 };
