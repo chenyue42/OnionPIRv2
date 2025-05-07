@@ -39,6 +39,9 @@ public:
     BENCH_PRINT("Noise budget in the query: " << decryptor_.invariant_noise_budget(ct) << " bits");
   }
 
+  // load the response from the stream and recover the ciphertext
+  seal::Ciphertext load_resp_from_stream(std::stringstream &resp_stream);
+
   // given a ciphertext, decrypt it using the small_q_ stored in PirParams, the
   // stored secret key, and the stored plaintext modulus.
   seal::Plaintext decrypt_mod_q(const seal::Ciphertext &ciphertext, const uint64_t small_q) const; 

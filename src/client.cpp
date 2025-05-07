@@ -362,6 +362,61 @@ Entry PirClient::get_entry_from_plaintext(const size_t entry_index, const seal::
 // }
 
 
+
+seal::Ciphertext PirClient::load_resp_from_stream(std::stringstream &resp_stream) {
+  // For now, we only serve the single modulus case.
+  // TODO: maybe it can be cool to support multiple moduli.
+
+  // ------------ parameter setup -------------------------------------------
+  const size_t small_q = pir_params_.get_small_q();
+  const size_t small_q_width =
+      static_cast<size_t>(std::ceil(std::log2(small_q)));
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+
+  std::vector<uint64_t> c0(coeff_count);
+  std::vector<uint64_t> c1(coeff_count);
+
+  // ------------ helper: read one bit (LSB-first in every byte) ------------
+  uint8_t current_byte = 0;
+  size_t bits_left = 0; // how many unread bits remain in current_byte
+  auto next_bit = [&]() -> uint8_t {
+    if (bits_left == 0) { // fetch the next byte
+      int ch = resp_stream.get();
+      if (ch == EOF)
+        throw std::runtime_error("unexpected end of response stream");
+      current_byte = static_cast<uint8_t>(ch);
+      bits_left = 8;
+    }
+    uint8_t bit = current_byte & 1; // least-significant bit is next in order
+    current_byte >>= 1;
+    --bits_left;
+    return bit;
+  };
+
+  // ------------ helper: read one coefficient ------------------------------
+  auto read_coeff = [&](uint64_t &dest) {
+    dest = 0;
+    for (size_t j = 0; j < small_q_width; ++j)
+      dest |= static_cast<uint64_t>(next_bit()) << j; // LSB-first
+  };
+
+  // ------------ fill both polynomials --------------------------------------
+  for (size_t i = 0; i < coeff_count; ++i)
+    read_coeff(c0[i]);
+  for (size_t i = 0; i < coeff_count; ++i)
+    read_coeff(c1[i]);
+
+  // ------------ reconstruct ciphertext -------------------------------------
+  seal::Ciphertext result(context_);
+  result.resize(context_, 2);
+  std::copy(c0.begin(), c0.end(), result.data(0));
+  std::copy(c1.begin(), c1.end(), result.data(1));
+  return result;
+}
+
+
+
+
 seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint64_t small_q) const {
   constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const auto seal_params = pir_params_.get_seal_params();

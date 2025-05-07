@@ -6,7 +6,6 @@
 #include "utils.h"
 #include "logging.h"
 #include "matrix.h"
-#include "seal/util/polyarithsmallmod.h"
 #include "seal/util/iterator.h"
 
 #include <cassert>
@@ -18,7 +17,7 @@
 #include <Eigen/Core>
 #endif
 
-#define EXPERIMENT_ITERATIONS 10
+constexpr size_t EXPERIMENT_ITERATIONS = 10 + WARMUP_ITERATIONS;
 
 void print_throughput(const std::string &name, const size_t db_size) {
   double avg_time = GET_AVG_TIME(name);
@@ -36,9 +35,9 @@ void PirTest::run_tests() {
   // test_batch_decomp();
   // test_fast_expand_query();
   // test_raw_pt_ct_mult();
-  test_decrypt_mod_q();
-  test_mod_switch();
-  test_sk_mod_switch();
+  // test_decrypt_mod_q();
+  // test_mod_switch();
+  // test_sk_mod_switch();
 }
 
 
@@ -60,19 +59,20 @@ void PirTest::test_pir() {
   size_t galois_key_size = 0;
   size_t gsw_key_size = 0;
   size_t query_size = 0;
-  size_t response_size = 0;
+  size_t resp_size = 0;
 
   // Run the query process many times.
   srand(time(0)); // reset the seed for the random number generator
   for (size_t i = 0; i < EXPERIMENT_ITERATIONS; i++) {
+    BENCH_PRINT("======================== Experiment " << i + 1 << " ========================");
     
     // ============= OFFLINE PHASE ==============
     // Initialize the client
     PirClient client(pir_params);
     const size_t client_id = client.get_client_id();
-    std::stringstream galois_key_stream, gsw_stream, data_stream;
+    std::stringstream galois_key_stream, gsw_stream, query_stream, resp_stream;
 
-    // Client create galois keys and gsw keys and writes to the stream (to the server)
+    // Client create galois keys and gsw(sk) and writes to the stream (to the server)
     galois_key_size = client.create_galois_keys(galois_key_stream);
     gsw_key_size = client.write_gsw_to_stream(
         client.generate_gsw_from_key(), gsw_stream);
@@ -89,27 +89,40 @@ void PirTest::test_pir() {
     TIME_START(CLIENT_TOT_TIME);
     // seal::Ciphertext query = client.generate_query(query_index);
     seal::Ciphertext query = client.fast_generate_query(query_index);
-    query_size = client.write_query_to_stream(query, data_stream);
+    query_size = client.write_query_to_stream(query, query_stream);
     TIME_END(CLIENT_TOT_TIME);
     
     // ============= SERVER ===============
     TIME_START(SERVER_TOT_TIME);
-    seal::Ciphertext result = server.make_query(client_id, data_stream);
+    seal::Ciphertext response = server.make_query(client_id, query_stream);
+    if (pir_params.get_rns_mod_cnt() == 1)
+      resp_size = server.save_resp_to_stream(response, resp_stream);
     TIME_END(SERVER_TOT_TIME);
+
+    // ---------- server send the response to the client -----------
 
     // ============= CLIENT ===============
     TIME_START(CLIENT_TOT_TIME);
     // client gets result from the server and decrypts it
-    seal::Plaintext decrypted_result = client.decrypt_result(result);
+    seal::Plaintext decrypted_result;
+    if (pir_params.get_rns_mod_cnt() == 1) {
+    seal::Ciphertext reconstructed_result = client.load_resp_from_stream(resp_stream);
+    decrypted_result= client.decrypt_result(reconstructed_result);
+    }
+    else {
+      decrypted_result = client.decrypt_result(response);
+    }
     Entry response_entry = client.get_entry_from_plaintext(query_index, decrypted_result);
     TIME_END(CLIENT_TOT_TIME);
 
-    // write the result to the stream to test the size
-    std::stringstream result_stream;
-    response_size = result.save(result_stream);
-    result_stream.str(std::string()); // clear the stream
-
-    // Directly get the plaintext from server. Not part of PIR.
+    if (pir_params.get_rns_mod_cnt() > 1) {
+      // write the result to the stream to test the size
+      std::stringstream result_stream;
+      resp_size = response.save(result_stream);
+      result_stream.str(std::string()); // clear the stream
+    }
+    
+    // ============= Directly get the plaintext from server. Not part of PIR.
     Entry actual_entry = server.direct_get_entry(query_index);
     // extract and print the actual entry index
     uint64_t actual_entry_idx = utils::get_entry_idx(actual_entry);
@@ -117,7 +130,7 @@ void PirTest::test_pir() {
     
     END_EXPERIMENT();
     // ============= PRINTING RESULTS ===============    
-    DEBUG_PRINT("\t\tWanted/resp/actual idx:\t" << query_index << " / " << resp_entry_idx << " / " << actual_entry_idx);
+    DEBUG_PRINT("\t\tquery / resp / actual idx:\t" << query_index << " / " << resp_entry_idx << " / " << actual_entry_idx);
     #ifdef _DEBUG
     PRINT_RESULTS(i+1);
     #endif
@@ -134,13 +147,13 @@ void PirTest::test_pir() {
       std::cout << "Actual Entry:\t";
       utils::print_entry(actual_entry, 20);
     }
-    PRINT_BAR;
   }
 
   double avg_server_time = GET_AVG_TIME(SERVER_TOT_TIME);
   double throughput = pir_params.get_DBSize_MB() / (avg_server_time / 1000);
 
   // ============= PRINTING FINAL RESULTS ===============]
+  PRINT_BAR;
   BENCH_PRINT("                                FINAL RESULTS")
   PRINT_BAR;
   BENCH_PRINT("Success rate: " << success_count << "/" << EXPERIMENT_ITERATIONS);
@@ -148,7 +161,7 @@ void PirTest::test_pir() {
   BENCH_PRINT("gsw key size: " << gsw_key_size << " bytes");
   BENCH_PRINT("total key size: " << static_cast<double>(galois_key_size + gsw_key_size) / 1024 / 1024 << "MB");
   BENCH_PRINT("query size: " << query_size << " bytes");
-  BENCH_PRINT("response size: " << response_size << " bytes");
+  BENCH_PRINT("response size: " << resp_size << " bytes");
   
   PRETTY_PRINT();
   BENCH_PRINT("Server throughput: " << throughput << " MB/s");

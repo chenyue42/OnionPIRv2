@@ -443,7 +443,6 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   if (dims_.size() != 1) {
     for (size_t i = 1; i < dims_.size(); i++) {
       other_dim_mux(result, gsw_vec[i - 1]);
-      // batch_other_dim_mux(result, gsw_vec[i - 1]);
     }
   }
   TIME_END(OTHER_DIM_TIME);
@@ -451,7 +450,7 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   // ========================== Post-processing ==========================
   TIME_START(MOD_SWITCH);
   // modulus switching so to reduce the response size by half
-  if(pir_params_.get_rns_mod_cnt() > 2) {
+  if(pir_params_.get_rns_mod_cnt() > 1) {
     DEBUG_PRINT("Modulus switching in RNS...");
     evaluator_.mod_switch_to_next_inplace(result[0]); // result.size() == 1.
   } else {
@@ -460,9 +459,64 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
     mod_switch_inplace(result[0], small_q);
   }
   TIME_END(MOD_SWITCH);
+  DEBUG_PRINT("Modulus switching done.");
   return result[0];
 }
 
+size_t PirServer::save_resp_to_stream(const seal::Ciphertext &response,
+                                      std::stringstream &stream) {
+  // For now, we only serve the single modulus case.
+  // TODO: maybe it can be cool to support multiple moduli.
+
+  // --- 1.  Runtime parameters ------------------------------------------------
+  const size_t small_q = pir_params_.get_small_q();
+  const size_t small_q_width =
+      static_cast<size_t>(std::ceil(std::log2(small_q)));
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+
+  // --- 2.  Bit-packing state -------------------------------------------------
+  uint8_t byte_buf = 0;   // currently accumulated bits (LSB-first)
+  size_t bits_filled = 0; // number of valid bits in byte_buf
+  size_t total_bytes = 0; // bytes written so far
+
+  auto flush_byte = [&]() {
+    stream.put(static_cast<char>(byte_buf));
+    ++total_bytes;
+    byte_buf = 0;
+    bits_filled = 0;
+  };
+
+  // --- 3.  Write every coefficient of the two polynomials -------------------
+  for (size_t poly_id = 0; poly_id < 2; ++poly_id) {
+    const uint64_t *data = response.data(poly_id);
+
+    for (size_t i = 0; i < coeff_count; ++i) {
+      uint64_t coeff = data[i] & ((1ULL << small_q_width) - 1); // keep LS bits only
+      size_t bits_written = 0;
+
+      while (bits_written < small_q_width) {
+        const size_t room = 8 - bits_filled; // free bits in buffer
+        const size_t bits_to_take = std::min(room, small_q_width - bits_written);
+
+        const uint8_t chunk = static_cast<uint8_t>(
+            (coeff >> bits_written) & ((1ULL << bits_to_take) - 1));
+
+        byte_buf |= static_cast<uint8_t>(chunk << bits_filled);
+        bits_filled += bits_to_take;
+        bits_written += bits_to_take;
+
+        if (bits_filled == 8)
+          flush_byte();
+      }
+    }
+  }
+
+  // --- 4.  Flush padding byte (if any) --------------------------------------
+  if (bits_filled != 0)
+    flush_byte();
+
+  return total_bytes;
+}
 
 void PirServer::push_database_chunk(std::vector<Entry> &chunk_entry, const size_t chunk_idx) {
   // Flattens data into vector of u8s and pads each entry with 0s to entry_size number of bytes.
