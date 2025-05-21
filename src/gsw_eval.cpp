@@ -13,7 +13,7 @@
 
 
 void GSWEval::gsw_ntt_negacyclic_harvey(GSWCiphertext &gsw) {
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const auto context = pir_params_.get_context();
   auto ntt_tables = context.first_context_data()->small_ntt_tables();
@@ -31,25 +31,47 @@ void GSWEval::gsw_ntt_negacyclic_harvey(GSWCiphertext &gsw) {
 }
 
 void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext const &bfv,
-                              seal::Ciphertext &res_ct) {
+                              seal::Ciphertext &res_ct,
+                              LogContext context) {
+
+  // ============================ Logging ============================
+  const char* decomp_rlwe_log_key;
+  const char* extern_prod_mat_mult_log_key;
+  if (context == LogContext::QUERY_TO_GSW) {
+    decomp_rlwe_log_key = QTG_DECOMP_RLWE_TIME;
+    extern_prod_mat_mult_log_key = QTG_EXTERN_PROD_MAT_MULT_TIME;
+  } else if (context == LogContext::OTHER_DIM_MUX) {
+    decomp_rlwe_log_key = ODM_DECOMP_RLWE_TIME;
+    extern_prod_mat_mult_log_key = ODM_EXTERN_PROD_MAT_MULT_TIME;
+  } else { // GENERIC or default
+    decomp_rlwe_log_key = DECOMP_RLWE_TIME;
+    extern_prod_mat_mult_log_key = EXTERN_PROD_MAT_MULT_TIME;
+  }
+
+  // ============================ Parameters ============================
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const size_t coeff_val_cnt = DatabaseConstants::PolyDegree * rns_mod_cnt; // polydegree * RNS moduli count
 
+  // ============================ Decomposition ============================
   // Decomposing the BFV ciphertext to 2l polynomials. Transform to NTT form.
   std::vector<std::vector<uint64_t>> decomposed_bfv;
-  TIME_START(DECOMP_RLWE_TIME);
+  TIME_START(decomp_rlwe_log_key);
   if (rns_mod_cnt == 1) {
-    decomp_rlwe_single_mod(bfv, decomposed_bfv);
+    decomp_rlwe_single_mod(bfv, decomposed_bfv, context);
   } else {
-    decomp_rlwe(bfv, decomposed_bfv);
+    decomp_rlwe(bfv, decomposed_bfv, context);
   }
-  TIME_END(DECOMP_RLWE_TIME);
+  TIME_END(decomp_rlwe_log_key);
 
+  // Transform decomposed coefficients to NTT form
+  decomp_to_ntt(decomposed_bfv, context);
+
+  // ============================ Polynomial Matrix Multiplication ============================
   std::vector<std::vector<uint128_t>> result(
       2, std::vector<uint128_t>(coeff_val_cnt, 0));
 
-  TIME_START(EXTERN_PROD_MAT_MULT_TIME);
+  TIME_START(extern_prod_mat_mult_log_key);
   // matrix multiplication: decomp(bfv) * gsw = (1 x 2l) * (2l x 2) = (1 x 2)
   for (size_t k = 0; k < 2; ++k) {
     for (size_t j = 0; j < 2 * l_; j++) {
@@ -61,9 +83,9 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
       }
     }
   }
-  TIME_END(EXTERN_PROD_MAT_MULT_TIME);
+  TIME_END(extern_prod_mat_mult_log_key);
 
-  // taking mods.
+  // ============================ Modding ============================
   TIME_START("external mod");
   const auto coeff_modulus = pir_params_.get_coeff_modulus();
   for (size_t poly_id = 0; poly_id < 2; poly_id++) {
@@ -83,38 +105,56 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
   res_ct.is_ntt_form() = true;  // the result of two NTT form polynomials is still in NTT form.
 }
 
-void GSWEval::decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output) {
+void GSWEval::decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output,
+                         LogContext context) {
+  // ============================ Logging ============================
+  const char* extern_compose_log_key;
+  const char* right_shift_log_key;
+  const char* extern_decomp_log_key;
+  if (context == LogContext::QUERY_TO_GSW) {
+    extern_compose_log_key = QTG_EXTERN_COMPOSE;
+    right_shift_log_key = QTG_RIGHT_SHIFT_TIME;
+    extern_decomp_log_key = QTG_EXTERN_DECOMP;
+  } else if (context == LogContext::OTHER_DIM_MUX) {
+    extern_compose_log_key = ODM_EXTERN_COMPOSE;
+    right_shift_log_key = ODM_RIGHT_SHIFT_TIME;
+    extern_decomp_log_key = ODM_EXTERN_DECOMP;
+  } else { // GENERIC or default
+    extern_compose_log_key = EXTERN_COMPOSE;
+    right_shift_log_key = RIGHT_SHIFT_TIME;
+    extern_decomp_log_key = EXTERN_DECOMP;
+  }
+
+  // ============================ Parameters ============================
   assert(output.size() == 0);
   output.reserve(2 * l_);
-
   // Setup parameters
   const uint128_t base = uint128_t(1) << base_log2_;
   const uint128_t mask = base - 1;
   const auto &coeff_modulus = pir_params_.get_coeff_modulus();
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt();
-  const auto &context = pir_params_.get_context();
-  const auto context_data = context.first_context_data();
-  auto ntt_tables = context_data->small_ntt_tables();
+  const auto &context_data = pir_params_.get_context().first_context_data();
   seal::util::RNSBase *rns_base = context_data->rns_tool()->base_q();
   auto pool = seal::MemoryManager::GetPool();
   std::vector<uint64_t> ct_coeffs(coeff_val_cnt);
 
+  // ============================ Decomposition ============================
   for (size_t poly_id = 0; poly_id < 2; poly_id++) {
     // we need a copy because we need to compose the array. This copy is very fast. 
     memcpy(ct_coeffs.data(), ct.data(poly_id), coeff_val_cnt * sizeof(uint64_t));
-    TIME_START(EXTERN_COMPOSE); 
+    TIME_START(extern_compose_log_key); 
     // the "compose_array" transform the coefficients from RNS form to multi-precision integer form. The lower bits are in the front. 
     // ! the compose and decompose functions are slow when rns_mod_cnt > 1 because mod and div operations are slow.
     rns_base->compose_array(ct_coeffs.data(), coeff_count, pool);
-    TIME_END(EXTERN_COMPOSE);
+    TIME_END(extern_compose_log_key);
 
     // we right shift certain amount to match the GSW ciphertext
-    for (int p = l_ - 1; p >= 0; p--) {
+    for (size_t p = l_; p-- > 0;) { // loop from l_ - 1 to 0.
       std::vector<uint64_t> rshift_res(ct_coeffs);
       const size_t shift_amount = p * base_log2_;
-      TIME_START(RIGHT_SHIFT_TIME);
+      TIME_START(right_shift_log_key);
       for (size_t k = 0; k < coeff_count; k++) {
         uint64_t* res_ptr = rshift_res.data() + k * rns_mod_cnt;
         if (rns_mod_cnt == 2) {
@@ -131,66 +171,91 @@ void GSWEval::decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<ui
           }
         }
       }
-      TIME_END(RIGHT_SHIFT_TIME);
-      TIME_START(EXTERN_DECOMP);
+      TIME_END(right_shift_log_key);
+      TIME_START(extern_decomp_log_key);
       rns_base->decompose_array(rshift_res.data(), coeff_count, pool);
-      TIME_END(EXTERN_DECOMP);
+      TIME_END(extern_decomp_log_key);
 
-      TIME_START(EXTERN_NTT_TIME);
-      // transform result to NTT form
-      for (size_t i = 0; i < rns_mod_cnt; i++) {
-        seal::util::ntt_negacyclic_harvey(rshift_res.data() + coeff_count * i, ntt_tables[i]);
-      }
-      TIME_END(EXTERN_NTT_TIME);
       output.emplace_back(std::move(rshift_res));
     }
   }
 }
 
-void GSWEval::decomp_rlwe_single_mod(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output) {
+void GSWEval::decomp_rlwe_single_mod(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output,
+                                   LogContext context) {
+  // ============================ Logging ============================
+  const char* right_shift_log_key;
+  if (context == LogContext::QUERY_TO_GSW) {
+    right_shift_log_key = QTG_RIGHT_SHIFT_TIME;
+  } else if (context == LogContext::OTHER_DIM_MUX) {
+    right_shift_log_key = ODM_RIGHT_SHIFT_TIME;
+  } else { // GENERIC or default
+    right_shift_log_key = RIGHT_SHIFT_TIME;
+  }
+
+  // ============================ Parameters ============================
   assert(output.size() == 0);
   output.reserve(2 * l_);
-
   // Get parameters
   const uint64_t base = uint64_t(1) << base_log2_;
   const uint64_t mask = base - 1;
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
-  const auto &context = pir_params_.get_context();
-  const auto &context_data = context.first_context_data();
-  const auto ntt_tables = context_data->small_ntt_tables();
-  seal::util::RNSBase *rns_base = context_data->rns_tool()->base_q();
-  auto pool = seal::MemoryManager::GetPool();
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
 
+  // ============================ Right Shift ============================
   // we do right shift on both polynomials
   for (size_t poly_id = 0; poly_id < 2; poly_id++) {
     const uint64_t *poly_ptr = ct.data(poly_id);
     // right shift different amount to match the GSW ciphertext
-    for (int p = l_ - 1; p >= 0; p--) {
+    for (size_t p = l_; p-- > 0;) { // loop from l_ - 1 to 0.
       std::vector<uint64_t> rshift_res(poly_ptr, poly_ptr + coeff_count);
       const size_t shift_amount = p * base_log2_;
       
-      TIME_START(RIGHT_SHIFT_TIME);
+      TIME_START(right_shift_log_key);
       #pragma GCC unroll 32
       for (size_t k = 0; k < coeff_count; k++) {
         // right shift every coefficient. This is why we need coefficient form.
         rshift_res[k] = (rshift_res[k] >> shift_amount) & mask;
       }
-      TIME_END(RIGHT_SHIFT_TIME);
+      TIME_END(right_shift_log_key);
 
-      // transform to NTT form
-      TIME_START(EXTERN_NTT_TIME);
-      seal::util::ntt_negacyclic_harvey(rshift_res.data(), ntt_tables[0]);
-      TIME_END(EXTERN_NTT_TIME);
       output.emplace_back(std::move(rshift_res)); // this is also fast
     }
   }
+}
+
+void GSWEval::decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,
+                           LogContext context) {
+  // ============================ Logging ============================
+  const char* extern_ntt_log_key;
+  if (context == LogContext::QUERY_TO_GSW) {
+    extern_ntt_log_key = QTG_EXTERN_NTT_TIME;
+  } else if (context == LogContext::OTHER_DIM_MUX) {
+    extern_ntt_log_key = ODM_EXTERN_NTT_TIME;
+  } else { // GENERIC or default
+    extern_ntt_log_key = EXTERN_NTT_TIME;
+  }
+
+  // ============================ Parameters ============================
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  const auto &context_data = pir_params_.get_context().first_context_data();
+  const auto ntt_tables = context_data->small_ntt_tables();
+
+  // ============================ NTT Transformation ============================
+  TIME_START(extern_ntt_log_key);
+  for (auto &coeffs : decomp_coeffs) {
+    for (size_t i = 0; i < rns_mod_cnt; i++) {
+      seal::util::ntt_negacyclic_harvey(coeffs.data() + coeff_count * i, ntt_tables[i]);
+    }
+  }
+  TIME_END(extern_ntt_log_key);
 }
 
 void GSWEval::query_to_gsw(std::vector<seal::Ciphertext> query, GSWCiphertext gsw_key,
                            GSWCiphertext &output) {
   const size_t curr_l = query.size();
   output.resize(curr_l);
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
 
   // We get the first half directly from the query
@@ -209,7 +274,7 @@ void GSWEval::query_to_gsw(std::vector<seal::Ciphertext> query, GSWCiphertext gs
   // We use external product to get the second half
   for (size_t i = 0; i < curr_l; i++) {
     TIME_START(CONVERT_EXTERN);
-    external_product(gsw_key, query[i], query[i]);
+    external_product(gsw_key, query[i], query[i], LogContext::QUERY_TO_GSW);
     TIME_END(CONVERT_EXTERN);
     for (size_t j = 0; j < coeff_count * rns_mod_cnt; j++) {
       output[i + curr_l].push_back(query[i].data(0)[j]);
@@ -242,7 +307,7 @@ void GSWEval::plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
 
   // Accessing context data within this function instead of passing these parameters
   const auto &context = pir_params_.get_context();
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const auto &coeff_modulus = pir_params_.get_coeff_modulus();
   const size_t rns_mod_cnt = coeff_modulus.size();
   assert(plaintext.size() == coeff_count * rns_mod_cnt || plaintext.size() == coeff_count);
@@ -295,7 +360,7 @@ void GSWEval::plain_to_half_gsw_one_row(std::vector<uint64_t> const &plaintext,
   // Accessing context data within this function instead of passing these parameters
   const auto &context = pir_params_.get_context();
   const auto &params = context.first_context_data()->parms();
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const auto &coeff_modulus = pir_params_.get_coeff_modulus();
   const size_t rns_mod_cnt = coeff_modulus.size();
   assert(plaintext.size() == coeff_count * rns_mod_cnt || plaintext.size() == coeff_count);
@@ -341,7 +406,7 @@ void GSWEval::plain_to_half_gsw_one_row(std::vector<uint64_t> const &plaintext,
 }
 
 void GSWEval::seal_GSW_vec_to_GSW(GSWCiphertext &output, const std::vector<seal::Ciphertext> &gsw_vec) {
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
 
   output.clear();

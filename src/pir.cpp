@@ -40,6 +40,8 @@ PirParams::PirParams()
   if (get_rns_mod_cnt() == 1) {
     // For now, we just use half the ct mod width for our new small q width.
     // const size_t small_q_width = DatabaseConstants::CoeffMods[0] / 2;
+    // const size_t small_q_width = 19;  // manual setting here.
+    // const size_t small_q_width = 20;  // manual setting here.
     const size_t small_q_width = 25;  // manual setting here.
     small_q_ = CoeffModulus::Create(DatabaseConstants::PolyDegree,
                                     {small_q_width, DatabaseConstants::CoeffMods[1]})[0].value();
@@ -146,6 +148,14 @@ void PirParams::print_params() const {
   }
   std::cout << seal_params_.coeff_modulus().back().bit_count();
   std::cout << "] bits" << std::endl;
+
+  // print the coeff_modulus
+  std::cout << "  seal_params_.coeff_modulus()\t\t\t= [";
+  for (std::size_t i = 0; i < seal_params_.coeff_modulus().size() - 1; i++) {
+    std::cout << seal_params_.coeff_modulus()[i].value() << " + ";
+  }
+  std::cout << seal_params_.coeff_modulus().back().value();
+  std::cout << "]" << std::endl;
   std::cout << "  log(q)\t\t\t\t\t= " << log_q << std::endl;
   std::cout << "  log(t)\t\t\t\t\t= "
             << seal_params_.plain_modulus().bit_count() << std::endl;

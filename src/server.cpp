@@ -165,7 +165,7 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
 void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res) {
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const auto coeff_modulus = pir_params_.get_coeff_modulus();
   const size_t inter_padding = other_dim_sz * 2;  // distance between coefficients in inter_res
   
@@ -183,7 +183,7 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint1
       cts[idx].resize(2);  // each ciphertext stores 2 polynomials
     }
 
-    // Compute the base indices for each ciphertext’s two intermediate parts.
+    // Compute the base indices for each ciphertext's two intermediate parts.
     // For ciphertext idx, poly0 uses base index: j*2 + 2*idx and poly1 uses j*2 + 2*idx + 1.
     std::array<size_t, unroll_factor> base0, base1;
     for (size_t idx = 0; idx < unroll_factor; idx++) {
@@ -254,7 +254,7 @@ void PirServer::other_dim_mux(std::vector<seal::Ciphertext> &result,
 
     // ========== y = b * (y - x) ========== output will be in NTT form
     TIME_START(OTHER_DIM_MUX_EXTERN);
-    data_gsw_.external_product(selection_cipher, y, y);
+    data_gsw_.external_product(selection_cipher, y, y, LogContext::OTHER_DIM_MUX);
     TIME_END(OTHER_DIM_MUX_EXTERN);
 
     // ========== y = INTT(y) ==========, INTT stands for inverse NTT
@@ -667,7 +667,7 @@ void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext, const uint64_t 
     throw std::invalid_argument("Ciphertext is in NTT form, cannot mod switch.");
   }
 
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
 
   // current ciphertext modulus
   const size_t Q = pir_params_.get_coeff_modulus()[0].value(); 

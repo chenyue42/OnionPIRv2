@@ -28,23 +28,29 @@ class GSWEval {
       @param ct_poly_size - number of ciphertext polynomials
       @param res_ct - output ciphertext
     */
-
     void external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext const &bfv,
-                          seal::Ciphertext &res_ct);
+                          seal::Ciphertext &res_ct,
+                          LogContext context = LogContext::GENERIC);
 
     /*!
       Performs a gadget decomposition of a size 2 BFV ciphertext into 2 sets of
       rows of l polynomials (the 2 sets are concatenated into a single vector of
       vectors). Each polynomial coefficient encodes the value congruent to the
       original ciphertext coefficient modulus the value of base^(l-row).
-      @param ct - input BFV ciphertext. Should be of size 2.
+      @param ct - input BFV ciphertext in NTT form. Should be of size 2.
       @param output - output to store the decomposed ciphertext as a vector of
       vectors of polynomial coefficients
     */
-    void decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output);
+    void decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output,
+                         LogContext context = LogContext::GENERIC);
 
-    // Similar to decomp_rlwe. Use this when rn_mod_cnt = 1. It uses faster right shift.
-    void decomp_rlwe_single_mod(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output);
+    // Similar to decomp_rlwe. Use this when rn_mod_cnt = 1. It avoids RNS decomposition and uses faster right shift.
+    void decomp_rlwe_single_mod(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output,
+                                   LogContext context = LogContext::GENERIC);
+
+    // Transform decomposed coefficients to NTT form
+    void decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,
+                      LogContext context = LogContext::GENERIC);
 
     /*!
       Generates a GSW ciphertext from a BFV ciphertext query.

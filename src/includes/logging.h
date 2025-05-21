@@ -45,8 +45,31 @@ constexpr std::size_t WARMUP_ITERATIONS = 3;
 #define EXTERN_DECOMP "external decompose"
 #define MOD_SWITCH "Modulus switching"
 
+// QTG (query_to_gsw) specific logging keys
+#define QTG_DECOMP_RLWE_TIME "QTG Decomp RLWE"
+#define QTG_EXTERN_PROD_MAT_MULT_TIME "QTG ExtProdMatMult"
+#define QTG_EXTERN_COMPOSE "QTG ExtCompose"
+#define QTG_EXTERN_NTT_TIME "QTG ExtNTT"
+#define QTG_RIGHT_SHIFT_TIME "QTG RightShift"
+#define QTG_EXTERN_DECOMP "QTG ExtDecomp"
+
+// ODM (other_dim_mux) specific logging keys
+#define ODM_DECOMP_RLWE_TIME "ODM Decomp RLWE"
+#define ODM_EXTERN_PROD_MAT_MULT_TIME "ODM ExtProdMatMult"
+#define ODM_EXTERN_COMPOSE "ODM ExtCompose"
+#define ODM_EXTERN_NTT_TIME "ODM ExtNTT"
+#define ODM_RIGHT_SHIFT_TIME "ODM RightShift"
+#define ODM_EXTERN_DECOMP "ODM ExtDecomp"
+
 #define RIGHT_SHIFT_TIME "Right shift"
 #define FST_DELEY_MOD_TIME "First dim delay mod"
+
+// Enum to specify the logging context for detailed operations
+enum class LogContext {
+    GENERIC,        // Default generic logging
+    QUERY_TO_GSW,   // Operations within query_to_gsw
+    OTHER_DIM_MUX   // Operations within other_dim_mux
+};
 
 // Hierarchical structure for pretty result
 // Map structure: Parent -> Children
@@ -54,10 +77,13 @@ const std::unordered_map<std::string, std::vector<std::string>> LOG_HIERARCHY = 
     {SERVER_TOT_TIME, {EXPAND_TIME, CONVERT_TIME, FST_DIM_TIME, OTHER_DIM_TIME, MOD_SWITCH}},
     {EXPAND_TIME, {APPLY_GALOIS}},
     {CONVERT_TIME, {CONVERT_EXTERN}},
+    {CONVERT_EXTERN, {QTG_DECOMP_RLWE_TIME, QTG_EXTERN_NTT_TIME, QTG_EXTERN_PROD_MAT_MULT_TIME}}, // Children for QTG path
+    {QTG_DECOMP_RLWE_TIME, {QTG_EXTERN_COMPOSE, QTG_RIGHT_SHIFT_TIME, QTG_EXTERN_DECOMP}},
     {FST_DIM_TIME, {CORE_TIME, FST_DIM_PREP, FST_DELEY_MOD_TIME, FST_NTT_TIME}},
     {OTHER_DIM_TIME, {OTHER_DIM_MUX_EXTERN, OTHER_DIM_INTT, OTHER_DIM_ADD_SUB}},
-    {OTHER_DIM_MUX_EXTERN, {DECOMP_RLWE_TIME, EXTERN_PROD_MAT_MULT_TIME}},
-    {DECOMP_RLWE_TIME, {EXTERN_COMPOSE, EXTERN_NTT_TIME, RIGHT_SHIFT_TIME, EXTERN_DECOMP}}
+    {OTHER_DIM_MUX_EXTERN, {ODM_DECOMP_RLWE_TIME, ODM_EXTERN_NTT_TIME, ODM_EXTERN_PROD_MAT_MULT_TIME}}, // Replaced children with ODM specific
+    {ODM_DECOMP_RLWE_TIME, {ODM_EXTERN_COMPOSE, ODM_RIGHT_SHIFT_TIME, ODM_EXTERN_DECOMP}},
+    {DECOMP_RLWE_TIME, {EXTERN_COMPOSE, EXTERN_NTT_TIME, RIGHT_SHIFT_TIME, EXTERN_DECOMP}} // Generic fallback
 };
 
 
