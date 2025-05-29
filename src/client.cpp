@@ -2,7 +2,6 @@
 #include "pir.h"
 #include "utils.h"
 #include "gsw_eval.h"
-#include "seal/util/polyarithsmallmod.h"
 #include "seal/util/iterator.h"
 #include <cassert>
 
@@ -243,15 +242,12 @@ size_t PirClient::create_galois_keys(std::stringstream &galois_key_stream) {
 }
 
 seal::Plaintext PirClient::decrypt_result(const seal::Ciphertext& reply) {
-  // we need to use custom decryptor to decrypt the single mod ct
-  if (pir_params_.get_rns_mod_cnt() == 1) {
-    seal::Plaintext result = decrypt_mod_q(reply, pir_params_.get_small_q());
-    return {result};
-  }
+  // most likely we are going to use our own decryption since we perform single mod mod-switch
+  return decrypt_mod_q(reply, pir_params_.get_small_q());
 
-  seal::Plaintext result;
-  decryptor_.decrypt(reply, result);
-  return result;
+  // otherwise, use the default decryptor of SEAL as follows:
+  // seal::Plaintext result;
+  // decryptor_.decrypt(reply, result);
 }
 
 Entry PirClient::get_entry_from_plaintext(const size_t entry_index, const seal::Plaintext plaintext) const {
@@ -365,8 +361,7 @@ Entry PirClient::get_entry_from_plaintext(const size_t entry_index, const seal::
 
 seal::Ciphertext PirClient::load_resp_from_stream(std::stringstream &resp_stream) {
   // For now, we only serve the single modulus case.
-  // TODO: maybe it can be cool to support multiple moduli.
-
+  
   // ------------ parameter setup -------------------------------------------
   const size_t small_q = pir_params_.get_small_q();
   const size_t small_q_width =
@@ -421,7 +416,6 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint6
   constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const auto seal_params = pir_params_.get_seal_params();
   const auto full_mods = seal_params.coeff_modulus();
-  assert(full_mods.size() == 2);  // we only support single ct mod since the secret_key_mod_switch only works for single mod.
   
   // display the moduli. Notice that there is one extra modulus used by seal. 
   for (size_t i = 0; i < full_mods.size(); i++) {
@@ -434,7 +428,7 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint6
   seal::EncryptionParameters new_params(seal::scheme_type::bfv);
   new_params.set_poly_modulus_degree(DatabaseConstants::PolyDegree);
   new_params.set_plain_modulus(pir_params_.get_plain_mod());
-  new_params.set_coeff_modulus({small_q, full_mods[1]}); // use the same last modulus as the original one.
+  new_params.set_coeff_modulus({small_q, full_mods.back()}); // use the same last modulus as the original one.
 
   seal::SecretKey new_sk = secret_key_mod_switch(secret_key_, new_params);
   seal::SEALContext new_context(new_params);

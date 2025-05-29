@@ -451,13 +451,14 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   TIME_START(MOD_SWITCH);
   // modulus switching so to reduce the response size by half
   if(pir_params_.get_rns_mod_cnt() > 1) {
-    DEBUG_PRINT("Modulus switching in RNS...");
+    DEBUG_PRINT("Modulus switching to the next modulus...");
     evaluator_.mod_switch_to_next_inplace(result[0]); // result.size() == 1.
-  } else {
-    DEBUG_PRINT("Modulus switching for a single modulus...");
-    const uint64_t small_q = pir_params_.get_small_q();
-    mod_switch_inplace(result[0], small_q);
   }
+  // we can always switch to the small modulus it correctness is guaranteed.
+  DEBUG_PRINT("Modulus switching for a single modulus...");
+  const uint64_t small_q = pir_params_.get_small_q();
+  mod_switch_inplace(result[0], small_q);
+
   TIME_END(MOD_SWITCH);
   DEBUG_PRINT("Modulus switching done.");
   return result[0];
@@ -466,7 +467,6 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
 size_t PirServer::save_resp_to_stream(const seal::Ciphertext &response,
                                       std::stringstream &stream) {
   // For now, we only serve the single modulus case.
-  // TODO: maybe it can be cool to support multiple moduli.
 
   // --- 1.  Runtime parameters ------------------------------------------------
   const size_t small_q = pir_params_.get_small_q();

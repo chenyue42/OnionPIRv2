@@ -40,6 +40,7 @@ namespace DatabaseConstants {
   // constexpr size_t GSW_L = 4;                       // parameter for GSW scheme
   // constexpr size_t GSW_L_KEY = 9;                   // GSW for query expansion
   // constexpr size_t PlainMod = 49;
+  // constexpr size_t SmallQWidth = 57;                // modulus switching width.
   // constexpr std::array<size_t, 3> CoeffMods = { 60, 60, 60 }; // the first two addes up to log q
 
 
@@ -62,6 +63,7 @@ namespace DatabaseConstants {
   // constexpr size_t GSW_L = 4;                       // parameter for GSW scheme
   // constexpr size_t GSW_L_KEY = 9;                   // GSW for query expansion
   // constexpr size_t PlainMod = 49;
+  // constexpr size_t SmallQWidth = 57;                // modulus switching width.
   // constexpr std::array<size_t, 3> CoeffMods = { 60, 60, 60 }; // the first two addes up to log q
 
   // ! ========================== 2^15 * 24KB = 768MB ==========================
@@ -83,6 +85,7 @@ namespace DatabaseConstants {
   constexpr size_t GSW_L = 4;                       // parameter for GSW scheme
   constexpr size_t GSW_L_KEY = 9;                   // GSW for query expansion
   constexpr size_t PlainMod = 49;
+  constexpr size_t SmallQWidth = 57;                // modulus switching width.
   constexpr std::array<size_t, 3> CoeffMods = { 60, 60, 60 }; // the first two addes up to log q
 
   // ! ========================== 256.5MB (n=4096) ==========================
@@ -93,6 +96,7 @@ namespace DatabaseConstants {
   // constexpr size_t GSW_L = 4;                       // parameter for GSW scheme
   // constexpr size_t GSW_L_KEY = 9;                   // GSW for query expansion
   // constexpr size_t PlainMod = 49;
+  // constexpr size_t SmallQWidth = 57;                // modulus switching width.
   // constexpr std::array<size_t, 3> CoeffMods = { 60, 60, 60 }; // the first two addes up to log q
 
   // ! ========================== 2^13 * 24KB = 192MB ==========================
@@ -179,6 +183,7 @@ namespace DatabaseConstants {
   // constexpr size_t GSW_L = 5;                       // parameter for GSW scheme
   // constexpr size_t GSW_L_KEY = 10;                   // GSW for query expansion
   // constexpr size_t PlainMod = 17;
+  // constexpr size_t SmallQWidth = 26;    // modulus switching width
   // constexpr std::array<size_t, 2> CoeffMods = {60, 60}; // log q = 60.
 
   // ! ========================== 2^18 * 4KB = 1GB ==========================
@@ -192,14 +197,29 @@ namespace DatabaseConstants {
   // constexpr std::array<size_t, 2> CoeffMods = {60, 60}; // log q = 60.
 
 
-  // ! ========================== 2^16 * 4KB = 256MB (quick test) ==========================
+
+  // ! ========================== 2^17 * 4KB = 512MB ==========================
   // constexpr size_t MaxFstDimSz = 512;                  // Maximum size of the first dimension. Actual size can only be smaller.
+  // constexpr size_t PolyDegree = 2048;
+  // constexpr size_t NumEntries = 1 << 17;            // number of entries in the database
+  // constexpr size_t EntrySize = 0;                   // 0 means calculated automatically. Take the largest possible value.
+  // constexpr size_t GSW_L = 5;                       // parameter for GSW scheme
+  // constexpr size_t GSW_L_KEY = 10;                   // GSW for query expansion
+  // constexpr size_t PlainMod = 17;
+  // constexpr size_t SmallQWidth = 25;  // modulus switching width
+  // constexpr std::array<size_t, 2> CoeffMods = {60, 60}; // log q = 60.
+
+
+
+  // ! ========================== 2^16 * 4KB = 256MB (quick test) ==========================
+  // constexpr size_t MaxFstDimSz = 256;                  // Maximum size of the first dimension. Actual size can only be smaller.
   // constexpr size_t PolyDegree = 2048;
   // constexpr size_t NumEntries = 1 << 16;            // number of entries in the database
   // constexpr size_t EntrySize = 0;                   // 0 means calculated automatically. Take the largest possible value.
   // constexpr size_t GSW_L = 5;                       // parameter for GSW scheme
   // constexpr size_t GSW_L_KEY = 10;                   // GSW for query expansion
   // constexpr size_t PlainMod = 17;
+  // constexpr size_t SmallQWidth = 25;  // modulus switching width
   // constexpr std::array<size_t, 2> CoeffMods = {60, 60}; // log q = 60.
 
   // ! ========================== 2^23 * 1KB = 8GB (general test case when n = 2048) ==========================

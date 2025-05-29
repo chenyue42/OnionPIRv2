@@ -95,33 +95,20 @@ void PirTest::test_pir() {
     // ============= SERVER ===============
     TIME_START(SERVER_TOT_TIME);
     seal::Ciphertext response = server.make_query(client_id, query_stream);
-    if (pir_params.get_rns_mod_cnt() == 1)
-      resp_size = server.save_resp_to_stream(response, resp_stream);
+    resp_size = server.save_resp_to_stream(response, resp_stream);
     TIME_END(SERVER_TOT_TIME);
 
     // ---------- server send the response to the client -----------
 
     // ============= CLIENT ===============
-    TIME_START(CLIENT_TOT_TIME);
     // client gets result from the server and decrypts it
-    seal::Plaintext decrypted_result;
-    if (pir_params.get_rns_mod_cnt() == 1) {
     seal::Ciphertext reconstructed_result = client.load_resp_from_stream(resp_stream);
-    decrypted_result= client.decrypt_result(reconstructed_result);
-    }
-    else {
-      decrypted_result = client.decrypt_result(response);
-    }
+    TIME_START(CLIENT_TOT_TIME);
+    seal::Plaintext decrypted_result = client.decrypt_result(reconstructed_result);
     Entry response_entry = client.get_entry_from_plaintext(query_index, decrypted_result);
     TIME_END(CLIENT_TOT_TIME);
 
-    if (pir_params.get_rns_mod_cnt() > 1) {
-      // write the result to the stream to test the size
-      std::stringstream result_stream;
-      resp_size = response.save(result_stream);
-      result_stream.str(std::string()); // clear the stream
-    }
-    
+
     // ============= Directly get the plaintext from server. Not part of PIR.
     Entry actual_entry = server.direct_get_entry(query_index);
     // extract and print the actual entry index

@@ -329,7 +329,6 @@ void GSWEval::plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
     }
     // Loop through plaintext coefficients
     for (size_t j = 0; j < coeff_count; j++) {
-      // TODO: We can use barret reduction here.
       uint128_t val = (uint128_t)pt[j] * gadget_coef % mod;
       ct[j + pad] =
           static_cast<uint64_t>((ct[j + pad] + val) % mod);
