@@ -27,6 +27,7 @@ PirServer::PirServer(const PirParams &pir_params)
   // after NTT, each database polynomial coefficient will be in mod q. Hence,
   // each pt coefficient will be represented by rns_mod_cnt many uint64_t, same as the ciphertext. 
   db_aligned_ = std::make_unique<uint64_t[]>(num_pt_ * pir_params_.get_coeff_val_cnt());
+  // db_aligned_ = (uint64_t *)std::aligned_alloc(64, num_pt_ * pir_params_.get_coeff_val_cnt() * sizeof(uint64_t));
   fill_inter_res();
 }
 
@@ -212,7 +213,6 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint1
           uint128_t x1 = inter_res[ base1[idx] + inter_idx1[idx] * inter_padding ];
           uint64_t raw1[2] = { static_cast<uint64_t>(x1), static_cast<uint64_t>(x1 >> 64) };
           cts[idx].data(1)[ ct_idx1[idx]++ ] = util::barrett_reduce_128(raw1, modulus);
-
           // Advance intermediate indices.
           inter_idx0[idx]++;
           inter_idx1[idx]++;
@@ -221,6 +221,7 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint1
     }
 
     // Mark each ciphertext as being in NTT form and then transform back.
+    #pragma unroll
     for (size_t idx = 0; idx < unroll_factor; idx++) {
       cts[idx].is_ntt_form() = true;
       evaluator_.transform_from_ntt_inplace(cts[idx]);
@@ -353,10 +354,12 @@ PirServer::fast_expand_qry(size_t client_id,
                                       client_galois_key); // Subs(c_b, n/k + 1)
       TIME_END(APPLY_GALOIS);
       // ! order matters! 
+      TIME_START("expand extra");
       seal::Ciphertext temp;
       evaluator_.sub(cts[b], c_prime, temp);  // temp = c_b - c'
       utils::shift_polynomial(params, temp, cts[2 * b + 1], -level_size); // temp * x^{-k}, store in c_{2b + 1}
       evaluator_.add(cts[b], c_prime, cts[2 * b]);
+      TIME_END("expand extra");
     }
   }
 

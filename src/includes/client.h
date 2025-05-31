@@ -4,7 +4,7 @@
 class PirClient {
 public:
   PirClient(const PirParams &pirparms);
-  ~PirClient() = default;
+  ~PirClient();
 
   /**
   This is the core function for the client.
@@ -42,25 +42,27 @@ public:
   // load the response from the stream and recover the ciphertext
   seal::Ciphertext load_resp_from_stream(std::stringstream &resp_stream);
 
-  // given a ciphertext, decrypt it using the small_q_ stored in PirParams, the
+  // given a ciphertext, decrypt it using the given small_q_, the
   // stored secret key, and the stored plaintext modulus.
   seal::Plaintext decrypt_mod_q(const seal::Ciphertext &ciphertext, const uint64_t small_q) const; 
 
-  // // old definition.
-  // seal::Plaintext custom_decrypt_mod_q(const seal::Ciphertext &ciphertext, const std::vector<seal::Modulus>& modulus); 
+  // given a ciphertext, decrypt it using the decryptor associated with small_q_ stored in PirParams
+  seal::Plaintext decrypt_mod_q(const seal::Ciphertext &ciphertext) const; 
 
 
   friend class PirTest;
 
 private:
-  size_t client_id_;
+  const size_t client_id_;
+  PirParams pir_params_;
   seal::SEALContext context_;
   seal::KeyGenerator keygen_;
   seal::SecretKey secret_key_;
   seal::Decryptor decryptor_;
   seal::Encryptor encryptor_;
   seal::Evaluator evaluator_;
-  PirParams pir_params_;
+  seal::Decryptor* decryptor_mod_q_prime_ = nullptr;
+  seal::SEALContext context_mod_q_prime_;
   std::vector<size_t> dims_;
   
   // Gets the corresponding plaintext index in a database for a given entry index
@@ -71,9 +73,9 @@ private:
 
   // switching the secret key mod old_q to mod new_q
   // This matters since sk is a tenary polynomial, which contains -1 mod q.
-  seal::SecretKey secret_key_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const;
-
-
+  seal::SecretKey sk_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const;
+  
+  seal::SEALContext init_mod_q_prime();
 
 };
 

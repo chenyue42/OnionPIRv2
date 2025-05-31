@@ -8,13 +8,11 @@
 
 // constructor
 PirClient::PirClient(const PirParams &pir_params)
-    : client_id_(0), context_(pir_params.get_seal_params()), keygen_(context_),
+    : client_id_(rand()), pir_params_(pir_params),
+      context_(pir_params.get_seal_params()), keygen_(context_),
       secret_key_(keygen_.secret_key()), decryptor_(context_, secret_key_),
       encryptor_(context_, secret_key_), evaluator_(context_),
-      pir_params_(pir_params), dims_(pir_params.get_dims()) {
-  // set the client id to 0
-  client_id_ = rand();
-}
+      context_mod_q_prime_(init_mod_q_prime()), dims_(pir_params.get_dims()) {}
 
 std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
   std::vector<seal::Ciphertext> gsw_enc; // temporary GSW ciphertext using seal::Ciphertext
@@ -30,6 +28,12 @@ std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
   GSWEval key_gsw(pir_params_, pir_params_.get_l_key(), pir_params_.get_base_log2_key());
   key_gsw.plain_to_half_gsw(sk_ntt, encryptor_, secret_key_, gsw_enc);
   return gsw_enc;
+}
+
+PirClient::~PirClient() {
+  if (decryptor_mod_q_prime_) {
+    delete decryptor_mod_q_prime_;
+  }
 }
 
 size_t PirClient::get_database_plain_index(size_t entry_index) {
@@ -361,7 +365,7 @@ Entry PirClient::get_entry_from_plaintext(const size_t entry_index, const seal::
 
 seal::Ciphertext PirClient::load_resp_from_stream(std::stringstream &resp_stream) {
   // For now, we only serve the single modulus case.
-  
+
   // ------------ parameter setup -------------------------------------------
   const size_t small_q = pir_params_.get_small_q();
   const size_t small_q_width =
@@ -410,8 +414,6 @@ seal::Ciphertext PirClient::load_resp_from_stream(std::stringstream &resp_stream
 }
 
 
-
-
 seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint64_t small_q) const {
   constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const auto seal_params = pir_params_.get_seal_params();
@@ -430,7 +432,7 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint6
   new_params.set_plain_modulus(pir_params_.get_plain_mod());
   new_params.set_coeff_modulus({small_q, full_mods.back()}); // use the same last modulus as the original one.
 
-  seal::SecretKey new_sk = secret_key_mod_switch(secret_key_, new_params);
+  seal::SecretKey new_sk = sk_mod_switch(secret_key_, new_params);
   seal::SEALContext new_context(new_params);
   seal::Decryptor new_decryptor(new_context, new_sk);
   seal::Encryptor new_encryptor(new_context, new_sk);
@@ -454,10 +456,41 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint6
 }
 
 
-seal::SecretKey PirClient::secret_key_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const {
+
+seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
+  // create a dummy ciphertext
+  seal::Ciphertext dummy_ct(context_mod_q_prime_);
+  dummy_ct.resize(context_mod_q_prime_, 2);
+
+  // create a new ciphertext under new context, then copy the data from the input ct, then decrypt using the new sk.
+  for (size_t i = 0; i < DatabaseConstants::PolyDegree; i++) {
+    // copy the data from the input ct to the new ct
+    dummy_ct.data(0)[i] = ct.data(0)[i];
+    dummy_ct.data(1)[i] = ct.data(1)[i];
+  }
+
+  if (!decryptor_mod_q_prime_) {
+    throw std::runtime_error("decryptor_mod_q_prime_ is not initialized. Please check the initialization of PirClient.");
+  }
+
+  // decrypt the new ciphertext using the new sk
+  seal::Plaintext result;
+  decryptor_mod_q_prime_->decrypt(dummy_ct, result);
+
+#ifdef _DEBUG
+  // print the noise budget
+  double noise_budget = decryptor_mod_q_prime_->invariant_noise_budget(dummy_ct);
+  DEBUG_PRINT("Noise budget after decryption: " << noise_budget);
+#endif
+  
+  return result;
+}
+
+
+seal::SecretKey PirClient::sk_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const {
   constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
   const seal::SEALContext old_context = pir_params_.get_context();
-  const seal::SEALContext new_context(new_params);
+    const seal::SEALContext new_context(new_params);
   const auto old_context_data = old_context.key_context_data();
   const auto new_context_data = new_context.key_context_data();
   const auto old_ntt_tables = old_context_data->small_ntt_tables(); 
@@ -484,4 +517,29 @@ seal::SecretKey PirClient::secret_key_mod_switch(const seal::SecretKey &sk, cons
   std::copy(sk_data.begin(), sk_data.end(), new_sk.data().data());
 
   return new_sk;
+}
+
+seal::SEALContext PirClient::init_mod_q_prime() {
+  const auto seal_params = pir_params_.get_seal_params();
+  const auto full_mods = seal_params.coeff_modulus();
+  const size_t small_q = pir_params_.get_small_q();
+
+  // display the moduli. Notice that there is one extra modulus used by seal. 
+  for (size_t i = 0; i < full_mods.size(); i++) {
+    DEBUG_PRINT("full_mods[" << i << "] = " << full_mods[i].value());
+  }
+  DEBUG_PRINT("ct mod: " << pir_params_.get_coeff_modulus()[0].value());
+  DEBUG_PRINT("small q = " << small_q);
+
+  // create a new secret key with new modulus
+  seal::EncryptionParameters new_params(seal::scheme_type::bfv);
+  new_params.set_poly_modulus_degree(DatabaseConstants::PolyDegree);
+  new_params.set_plain_modulus(pir_params_.get_plain_mod());
+  new_params.set_coeff_modulus({small_q, full_mods.back()}); // use the same last modulus as the original one.
+
+  seal::SEALContext context_mod_q_prime_ = seal::SEALContext(new_params);
+  auto secret_key_mod_q_prime_ = sk_mod_switch(secret_key_, new_params);
+  // create a new decryptor and encryptor with the new secret key
+  decryptor_mod_q_prime_ = new seal::Decryptor(context_mod_q_prime_, secret_key_mod_q_prime_);
+  return context_mod_q_prime_;
 }

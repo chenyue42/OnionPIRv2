@@ -26,7 +26,7 @@ void print_throughput(const std::string &name, const size_t db_size) {
 }
 
 void PirTest::run_tests() {
-  test_pir();
+  // test_pir();
   // bfv_example();
   // serialization_example();
   // test_external_product();
@@ -35,7 +35,7 @@ void PirTest::run_tests() {
   // test_batch_decomp();
   // test_fast_expand_query();
   // test_raw_pt_ct_mult();
-  // test_decrypt_mod_q();
+  test_decrypt_mod_q();
   // test_mod_switch();
   // test_sk_mod_switch();
 }
@@ -95,10 +95,10 @@ void PirTest::test_pir() {
     // ============= SERVER ===============
     TIME_START(SERVER_TOT_TIME);
     seal::Ciphertext response = server.make_query(client_id, query_stream);
-    resp_size = server.save_resp_to_stream(response, resp_stream);
     TIME_END(SERVER_TOT_TIME);
 
     // ---------- server send the response to the client -----------
+    resp_size = server.save_resp_to_stream(response, resp_stream);
 
     // ============= CLIENT ===============
     // client gets result from the server and decrypts it
@@ -107,6 +107,8 @@ void PirTest::test_pir() {
     seal::Plaintext decrypted_result = client.decrypt_result(reconstructed_result);
     Entry response_entry = client.get_entry_from_plaintext(query_index, decrypted_result);
     TIME_END(CLIENT_TOT_TIME);
+
+    // test noise budget
 
 
     // ============= Directly get the plaintext from server. Not part of PIR.
@@ -147,8 +149,8 @@ void PirTest::test_pir() {
   BENCH_PRINT("galois key size: " << galois_key_size << " bytes");
   BENCH_PRINT("gsw key size: " << gsw_key_size << " bytes");
   BENCH_PRINT("total key size: " << static_cast<double>(galois_key_size + gsw_key_size) / 1024 / 1024 << "MB");
-  BENCH_PRINT("query size: " << query_size << " bytes");
-  BENCH_PRINT("response size: " << resp_size << " bytes");
+  BENCH_PRINT("query size: " << query_size << " bytes = " << static_cast<double>(query_size) / 1024 << " KB");
+  BENCH_PRINT("response size: " << resp_size << " bytes = " << static_cast<double>(resp_size) / 1024 << " KB");
   
   PRETTY_PRINT();
   BENCH_PRINT("Server throughput: " << throughput << " MB/s");
@@ -471,6 +473,7 @@ void PirTest::test_external_product() {
 
 void PirTest::test_decrypt_mod_q() {
   // this is testing if custom decryption works for the original modulus. (no modulus switching involved)
+  // ! Use Small parameters for this test
   print_func_name(__FUNCTION__);
   PirParams pir_params;
   PirClient client(pir_params);
@@ -1114,7 +1117,7 @@ void PirTest::test_sk_mod_switch() {
 
   // ==================== Create evaluator, secret key, encryptor of the small setting
   // Now, we create a new secret key with the same logical data as sk1, but represented in new modulus.
-  seal::SecretKey sk2 = client.secret_key_mod_switch(sk1, params2);
+  seal::SecretKey sk2 = client.sk_mod_switch(sk1, params2);
 
   // And this new secret key can be used to encrypt and decrypt normally as if we use a new keygen.
   auto encryptor2 = new seal::Encryptor(context2, sk2);

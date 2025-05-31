@@ -117,7 +117,7 @@ void PirParams::print_params() const {
   std::cout << "==============================================================" << std::endl;
   std::cout << "  Database size (MB) \t\t\t\t= " << get_DBSize_MB() << std::endl;
   std::cout << "  Physical storage (MB)\t\t\t\t= " << get_physical_storage_MB() << std::endl;
-  std::cout << "  entry_size_(byte)\t\t\t\t= " << entry_size_ << std::endl;
+  std::cout << "  entry_size_\t\t\t\t\t= " << entry_size_ << " B = " << static_cast<double>(entry_size_) / 1024 << " KB" <<  std::endl;
   std::cout << "  num_pt_\t\t\t\t\t= " << num_pt_ << std::endl;
   std::cout << "  num_entries_(padded)\t\t\t\t= " << num_entries_ << std::endl;
   std::cout << "  Num entries per plaintext\t\t\t= "
