@@ -4,7 +4,7 @@
 class PirClient {
 public:
   PirClient(const PirParams &pirparms);
-  ~PirClient();
+  ~PirClient() = default;
 
   /**
   This is the core function for the client.
@@ -61,7 +61,7 @@ private:
   seal::Decryptor decryptor_;
   seal::Encryptor encryptor_;
   seal::Evaluator evaluator_;
-  seal::Decryptor* decryptor_mod_q_prime_ = nullptr;
+  std::unique_ptr<seal::Decryptor> decryptor_mod_q_prime_;
   seal::SEALContext context_mod_q_prime_;
   std::vector<size_t> dims_;
   

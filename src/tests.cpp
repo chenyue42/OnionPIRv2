@@ -26,7 +26,7 @@ void print_throughput(const std::string &name, const size_t db_size) {
 }
 
 void PirTest::run_tests() {
-  // test_pir();
+  test_pir();
   // bfv_example();
   // serialization_example();
   // test_external_product();
@@ -35,7 +35,7 @@ void PirTest::run_tests() {
   // test_batch_decomp();
   // test_fast_expand_query();
   // test_raw_pt_ct_mult();
-  test_decrypt_mod_q();
+  // test_decrypt_mod_q();
   // test_mod_switch();
   // test_sk_mod_switch();
 }
@@ -174,8 +174,8 @@ void PirTest::bfv_example() {
   auto evaluator_ = seal::Evaluator(context_);
   auto keygen_ = seal::KeyGenerator(context_);
   auto secret_key_ = keygen_.secret_key();
-  auto encryptor_ = new seal::Encryptor(context_, secret_key_);
-  auto decryptor_ = new seal::Decryptor(context_, secret_key_);
+  auto encryptor_ = seal::Encryptor(context_, secret_key_);
+  auto decryptor_ = seal::Decryptor(context_, secret_key_);
   // =============================================================
   BENCH_PRINT("coeff_count: " << coeff_count);
   BENCH_PRINT("Num of coeff mods that SEAL uses: "
@@ -191,14 +191,14 @@ void PirTest::bfv_example() {
   BENCH_PRINT("Vector b: " << b.to_string());
 
   seal::Ciphertext a_encrypted, b_encrypted, cipher_result;
-  encryptor_->encrypt_symmetric(a, a_encrypted);
-  encryptor_->encrypt_symmetric(b, b_encrypted);
+  encryptor_.encrypt_symmetric(a, a_encrypted);
+  encryptor_.encrypt_symmetric(b, b_encrypted);
   
-  BENCH_PRINT("Noise budget before: " << decryptor_->invariant_noise_budget(a_encrypted));
+  BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
   evaluator_.multiply(a_encrypted, b_encrypted, cipher_result);
-  decryptor_->decrypt(cipher_result, result);
+  decryptor_.decrypt(cipher_result, result);
   // You can see that this direct multiplication consumes a lot of noise budget.
-  BENCH_PRINT("Noise budget after: " << decryptor_->invariant_noise_budget(cipher_result));
+  BENCH_PRINT("Noise budget after: " << decryptor_.invariant_noise_budget(cipher_result));
   BENCH_PRINT("BFV x BFV result: " << result.to_string());
   PRINT_BAR;
   // ============= Now let's try addition in coefficient form ==============
@@ -208,12 +208,12 @@ void PirTest::bfv_example() {
   BENCH_PRINT("Vector a: " << a.to_string());
   BENCH_PRINT("Vector b: " << b.to_string());
 
-  encryptor_->encrypt_symmetric(a, a_encrypted);
-  encryptor_->encrypt_symmetric(b, b_encrypted);
-  BENCH_PRINT("Noise budget before: " << decryptor_->invariant_noise_budget(a_encrypted));
+  encryptor_.encrypt_symmetric(a, a_encrypted);
+  encryptor_.encrypt_symmetric(b, b_encrypted);
+  BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
   evaluator_.add(a_encrypted, b_encrypted, cipher_result);
-  decryptor_->decrypt(cipher_result, result);
-  BENCH_PRINT("Noise budget after: " << decryptor_->invariant_noise_budget(cipher_result));
+  decryptor_.decrypt(cipher_result, result);
+  BENCH_PRINT("Noise budget after: " << decryptor_.invariant_noise_budget(cipher_result));
   BENCH_PRINT("BFV + BFV result: " << result.to_string());
   PRINT_BAR;
 
@@ -223,17 +223,17 @@ void PirTest::bfv_example() {
   b[0] = 3; b[1] = 6;
   BENCH_PRINT("Vector a: " << a.to_string());
   BENCH_PRINT("Vector b: " << b.to_string());
-  encryptor_->encrypt_symmetric(a, a_encrypted);
-  encryptor_->encrypt_symmetric(b, b_encrypted);
-  BENCH_PRINT("Noise budget before: " << decryptor_->invariant_noise_budget(a_encrypted));
+  encryptor_.encrypt_symmetric(a, a_encrypted);
+  encryptor_.encrypt_symmetric(b, b_encrypted);
+  BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
 
   evaluator_.transform_to_ntt_inplace(a_encrypted);
   evaluator_.transform_to_ntt_inplace(b_encrypted);
   evaluator_.add(a_encrypted, b_encrypted, cipher_result);
   evaluator_.transform_from_ntt_inplace(cipher_result);
   
-  decryptor_->decrypt(cipher_result, result);
-  BENCH_PRINT("Noise budget after: " << decryptor_->invariant_noise_budget(cipher_result)); // noise budget is almost the same.
+  decryptor_.decrypt(cipher_result, result);
+  BENCH_PRINT("Noise budget after: " << decryptor_.invariant_noise_budget(cipher_result)); // noise budget is almost the same.
   BENCH_PRINT("NTT + NTT result: " << result.to_string());  // and the result is correct! NTT form polynomial is additive
   PRINT_BAR;
 
@@ -272,7 +272,7 @@ void PirTest::bfv_example() {
     }
   }
   evaluator_.transform_from_ntt_inplace(scalar_mul_result);
-  decryptor_->decrypt(scalar_mul_result, result);
+  decryptor_.decrypt(scalar_mul_result, result);
   BENCH_PRINT("NTT x scalar result: " << result.to_string());  // and the result is correct! NTT form polynomial is multiplicative
   /*
   Now, in the old OnionPIR, this kind of elementwise multiplication is computed for num_poly many times. That is, the smallest operation
@@ -292,7 +292,7 @@ void PirTest::bfv_example() {
               "-DSEAL_THROW_ON_TRANSPARENT_CIPHERTEXT=OFF when building SEAL");
   evaluator_.sub_inplace(fst_mult_result, snd_mult_result);
   evaluator_.transform_from_ntt_inplace(fst_mult_result);
-  decryptor_->decrypt(fst_mult_result, result);
+  decryptor_.decrypt(fst_mult_result, result);
   BENCH_PRINT("You should see a zero ¬_¬: " << result.to_string()); 
 }
 
@@ -305,25 +305,24 @@ void PirTest::serialization_example() {
   auto evaluator_ = seal::Evaluator(context_);
   auto keygen_ = seal::KeyGenerator(context_);
   auto secret_key_ = keygen_.secret_key();
-  auto encryptor_ = new seal::Encryptor(context_, secret_key_);
-  auto decryptor_ = new seal::Decryptor(context_, secret_key_);
+  auto encryptor_ = seal::Encryptor(context_, secret_key_);
+  auto decryptor_ = seal::Decryptor(context_, secret_key_);
 
   std::stringstream data_stream;
 
   // ================== Raw Zero ciphertext ==================
   seal::Ciphertext raw_zero;
-  encryptor_->encrypt_zero_symmetric(raw_zero);
+  encryptor_.encrypt_zero_symmetric(raw_zero);
   auto raw_size = raw_zero.save(data_stream); // store the raw zero in the stream
-
-  // ================== SEAL original method for creating serialized zero ==================
+// ================== SEAL original method for creating serialized zero ==================
   // Original method for creating a serializable object
-  Serializable<Ciphertext> orig_serialized_zero = encryptor_->encrypt_zero_symmetric();
+  Serializable<Ciphertext> orig_serialized_zero = encryptor_.encrypt_zero_symmetric();
   auto s_size = orig_serialized_zero.save(data_stream);   // ! Storing the original zero
 
   // ================== New way to create a ciphertext with a seed ==================
   // New way to create a ciphertext with a seed, do some operations and then convert it to a serializable object.
   seal::Ciphertext new_seeded_zero;
-  encryptor_->encrypt_zero_symmetric_seeded(new_seeded_zero); // This function allows us to change the ciphertext.data(0).
+  encryptor_.encrypt_zero_symmetric_seeded(new_seeded_zero); // This function allows us to change the ciphertext.data(0).
 
   // Add something in the third coeeficient of seeded_zero
   DEBUG_PRINT("Size: " << new_seeded_zero.size());
@@ -366,9 +365,9 @@ void PirTest::serialization_example() {
 
   // decrypt the ciphertexts
   seal::Plaintext raw_pt, orig_pt, new_pt;
-  decryptor_->decrypt(raw_ct, raw_pt);
-  decryptor_->decrypt(orig_ct, orig_pt);
-  decryptor_->decrypt(new_ct, new_pt);
+  decryptor_.decrypt(raw_ct, raw_pt);
+  decryptor_.decrypt(orig_ct, orig_pt);
+  decryptor_.decrypt(new_ct, new_pt);
 
   // ================== Print the results ==================
   BENCH_PRINT("Raw zero size: " << raw_size);
@@ -389,8 +388,8 @@ void PirTest::test_external_product() {
   auto evaluator_ = seal::Evaluator(context_);
   auto keygen_ = seal::KeyGenerator(context_);
   auto secret_key_ = keygen_.secret_key();
-  auto encryptor_ = new seal::Encryptor(context_, secret_key_);
-  auto decryptor_ = new seal::Decryptor(context_, secret_key_);
+  auto encryptor_ = seal::Encryptor(context_, secret_key_);
+  auto decryptor_ = seal::Decryptor(context_, secret_key_);
   const size_t coeff_count = DatabaseConstants::PolyDegree;
 
   // the test data vector a and results are both in BFV scheme.
@@ -406,7 +405,7 @@ void PirTest::test_external_product() {
   BENCH_PRINT(b_str);  
   
   seal::Ciphertext a_encrypted;    // encrypted "a" will be stored here. 
-  encryptor_->encrypt_symmetric(a, a_encrypted);
+  encryptor_.encrypt_symmetric(a, a_encrypted);
 
   // encrypt the plaintext b to GSW ciphertext
   // You can also try different gsw_l and base_log2. But you need to follow the equation:
@@ -415,22 +414,22 @@ void PirTest::test_external_product() {
   const size_t base_log2 = pir_params.get_base_log2();
   GSWEval data_gsw(pir_params, gsw_l, base_log2);
   std::vector<seal::Ciphertext> temp_gsw;
-  data_gsw.plain_to_gsw(b, *encryptor_, secret_key_, temp_gsw); // In OnionPIR, client use a similar function to encrypt the secret key. 
+  data_gsw.plain_to_gsw(b, encryptor_, secret_key_, temp_gsw); // In OnionPIR, client use a similar function to encrypt the secret key. 
   GSWCiphertext b_gsw;
   data_gsw.seal_GSW_vec_to_GSW(b_gsw, temp_gsw);
   data_gsw.gsw_ntt_negacyclic_harvey(b_gsw);  // We need NTT form RGSW.
 
   // actual external product
-  BENCH_PRINT("Noise budget before: " << decryptor_->invariant_noise_budget(a_encrypted));
+  BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
   const size_t num_iter = 10; // And you can do this external product many times when the data in GSW is small. 
   for (size_t i = 0; i < num_iter; ++i) {
     data_gsw.external_product(b_gsw, a_encrypted, a_encrypted); // The decomposition requires coefficient form BFV
     evaluator_.transform_from_ntt_inplace(a_encrypted);
-    decryptor_->decrypt(a_encrypted, result);
+    decryptor_.decrypt(a_encrypted, result);
     // output decrypted result
     BENCH_PRINT("External product result: " << result.to_string());
   }
-  BENCH_PRINT("Noise budget after: " << decryptor_->invariant_noise_budget(a_encrypted));
+  BENCH_PRINT("Noise budget after: " << decryptor_.invariant_noise_budget(a_encrypted));
   PRINT_BAR;
   // ============= Now, let's try profiling the external product ==============
   // I prefer to use samply. It works for both mac and linux. 
@@ -440,7 +439,7 @@ void PirTest::test_external_product() {
   const size_t num_samples = 10000;
   std::vector<seal::Ciphertext> a_encrypted_vec(num_samples);
   for (size_t i = 0; i < num_samples; i++) {
-    encryptor_->encrypt_symmetric(a, a_encrypted_vec[i]);
+    encryptor_.encrypt_symmetric(a, a_encrypted_vec[i]);
   }
   CLEAN_TIMER();
   TIME_START(OTHER_DIM_MUX_EXTERN);
@@ -481,7 +480,7 @@ void PirTest::test_decrypt_mod_q() {
   auto context_ = seal::SEALContext(params);
   auto secret_key_ = client.secret_key_;
   auto evaluator_ = seal::Evaluator(context_);
-  auto encryptor_ = new seal::Encryptor(context_, secret_key_);
+  auto encryptor_ = seal::Encryptor(context_, secret_key_);
 
   const size_t coeff_count = DatabaseConstants::PolyDegree;
 
@@ -490,7 +489,7 @@ void PirTest::test_decrypt_mod_q() {
   a[0] = 1; a[1] = 2; a[2] = 4;
   BENCH_PRINT("Vector a: " << a.to_string());
   seal::Ciphertext a_encrypted;    // encrypted "a" will be stored here. 
-  encryptor_->encrypt_symmetric(a, a_encrypted);
+  encryptor_.encrypt_symmetric(a, a_encrypted);
   const auto coeff_modulus = pir_params.get_coeff_modulus();
   result = client.decrypt_mod_q(a_encrypted, coeff_modulus[0].value());
   BENCH_PRINT("Decrypted result: " << result.to_string());
@@ -790,8 +789,8 @@ void PirTest::test_batch_decomp() {
   auto evaluator_ = seal::Evaluator(context_);
   auto keygen_ = seal::KeyGenerator(context_);
   auto secret_key_ = keygen_.secret_key();
-  auto encryptor_ = new seal::Encryptor(context_, secret_key_);
-  auto decryptor_ = new seal::Decryptor(context_, secret_key_);
+  auto encryptor_ = seal::Encryptor(context_, secret_key_);
+  auto decryptor_ = seal::Decryptor(context_, secret_key_);
   auto ntt_tables = context_data->small_ntt_tables();
   seal::util::RNSBase *rns_base = context_data->rns_tool()->base_q();
   const size_t coeff_count = DatabaseConstants::PolyDegree;
@@ -802,7 +801,7 @@ void PirTest::test_batch_decomp() {
   std::vector<seal::Ciphertext> ct_vec(other_dim_sz);
   for (size_t i = 0; i < other_dim_sz; i++) {
     seal::Ciphertext ct;
-    encryptor_->encrypt_zero_symmetric(ct);
+    encryptor_.encrypt_zero_symmetric(ct);
     ct_vec[i] = ct;
   }
 
@@ -878,8 +877,8 @@ void PirTest::test_fast_expand_query() {
   auto evaluator_ = seal::Evaluator(context_);
   auto keygen_ = seal::KeyGenerator(context_);
   auto secret_key_ = keygen_.secret_key();
-  auto encryptor_ = new seal::Encryptor(context_, secret_key_);
-  auto decryptor_ = new seal::Decryptor(context_, secret_key_);  
+  auto encryptor_ = seal::Encryptor(context_, secret_key_);
+  auto decryptor_ = seal::Decryptor(context_, secret_key_);  
   const size_t coeff_count = DatabaseConstants::PolyDegree;
   std::stringstream query_stream;
   const size_t fst_dim_sz = DatabaseConstants::MaxFstDimSz;
@@ -961,8 +960,8 @@ void PirTest::test_raw_pt_ct_mult() {
   auto evaluator_ = seal::Evaluator(context_);
   auto keygen_ = seal::KeyGenerator(context_);
   auto secret_key_ = keygen_.secret_key();
-  auto encryptor_ = new seal::Encryptor(context_, secret_key_);
-  auto decryptor_ = new seal::Decryptor(context_, secret_key_);
+  auto encryptor_ = seal::Encryptor(context_, secret_key_);
+  auto decryptor_ = seal::Decryptor(context_, secret_key_);
   // ============= Generate the plaintexts ==============
   seal::Plaintext pt1(coeff_count), pt2(coeff_count), pt_ntt;
   uint64_t* pt1_data = pt1.data();
@@ -980,8 +979,8 @@ void PirTest::test_raw_pt_ct_mult() {
   const size_t iter_num = num_pt;
   BENCH_PRINT("num_pt: " << num_pt);
   seal::Ciphertext ct1, ct2;
-  encryptor_->encrypt_symmetric(pt1, ct1);
-  encryptor_->encrypt_symmetric(pt2, ct2);
+  encryptor_.encrypt_symmetric(pt1, ct1);
+  encryptor_.encrypt_symmetric(pt2, ct2);
   evaluator_.transform_to_ntt_inplace(ct2); // only ct2 is in NTT form.
   // ============= Perform the multiplication ==============
   TIME_START("naive ct * naive pt");
@@ -1004,7 +1003,7 @@ void PirTest::test_raw_pt_ct_mult() {
   // ============= Decrypt and print the result ==============
   evaluator_.transform_from_ntt_inplace(ct2);
   seal::Plaintext res_pt;
-  decryptor_->decrypt(ct2, res_pt);
+  decryptor_.decrypt(ct2, res_pt);
   BENCH_PRINT("Result: " << res_pt.to_string().substr(0, 50));
   // ============= Profiling the multiplication ==============
   END_EXPERIMENT();
@@ -1024,7 +1023,7 @@ void PirTest::test_mod_switch() {
   auto params = pir_params.get_seal_params();
   auto context_ = pir_params.get_context();
   auto secret_key_ = client.secret_key_;
-  auto encryptor_ = new seal::Encryptor(context_, secret_key_);
+  auto encryptor_ = seal::Encryptor(context_, secret_key_);
   const size_t coeff_count = DatabaseConstants::PolyDegree;
 
   seal::Plaintext pt(coeff_count), result(coeff_count);
@@ -1042,7 +1041,7 @@ void PirTest::test_mod_switch() {
 
   // encrypt the plaintext and apply modulus switch
   seal::Ciphertext ct; 
-  encryptor_->encrypt_symmetric(pt, ct);
+  encryptor_.encrypt_symmetric(pt, ct);
   server.mod_switch_inplace(ct, small_q);
   result = client.decrypt_mod_q(ct, small_q);
   BENCH_PRINT("Client decrypted: " << result.to_string());
@@ -1101,16 +1100,16 @@ void PirTest::test_sk_mod_switch() {
   auto evaluator1 = seal::Evaluator(context1);
   auto keygen1 = seal::KeyGenerator(context1);
   auto sk1 = keygen1.secret_key();
-  auto encryptor1 = new seal::Encryptor(context1, sk1);
-  auto decryptor1 = new seal::Decryptor(context1, sk1);
+  auto encryptor1 = seal::Encryptor(context1, sk1);
+  auto decryptor1 = seal::Decryptor(context1, sk1);
 
   // test if the encryption and decryption works
   seal::Plaintext pt1(coeff_count), result1;
   pt1[0] = 1; pt1[1] = 2;
   BENCH_PRINT("Plaintext: " << pt1.to_string());
   seal::Ciphertext ct1;
-  encryptor1->encrypt_symmetric(pt1, ct1);
-  decryptor1->decrypt(ct1, result1);
+  encryptor1.encrypt_symmetric(pt1, ct1);
+  decryptor1.decrypt(ct1, result1);
   BENCH_PRINT("Decrypted result: " << result1.to_string());
   BENCH_PRINT("--------------------------------------------------------------------------")
 
@@ -1120,14 +1119,14 @@ void PirTest::test_sk_mod_switch() {
   seal::SecretKey sk2 = client.sk_mod_switch(sk1, params2);
 
   // And this new secret key can be used to encrypt and decrypt normally as if we use a new keygen.
-  auto encryptor2 = new seal::Encryptor(context2, sk2);
-  auto decryptor2 = new seal::Decryptor(context2, sk2);
+  auto encryptor2 = seal::Encryptor(context2, sk2);
+  auto decryptor2 = seal::Decryptor(context2, sk2);
   // test if the encryption and decryption works
   seal::Plaintext pt2(coeff_count), result2;
   pt2[0] = 1; pt2[1] = 2;
   BENCH_PRINT("Plaintext: " << pt2.to_string());
   seal::Ciphertext ct2;
-  encryptor2->encrypt_symmetric(pt2, ct2);
-  decryptor2->decrypt(ct2, result2);
+  encryptor2.encrypt_symmetric(pt2, ct2);
+  decryptor2.decrypt(ct2, result2);
   BENCH_PRINT("Decrypted result: " << result2.to_string());
 }

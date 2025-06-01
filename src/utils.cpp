@@ -2,6 +2,7 @@
 #include <fstream>
 #include <stdexcept>
 
+
 void utils::negacyclic_shift_poly_coeffmod(seal::util::ConstCoeffIter poly, size_t coeff_count,
                                            size_t shift, const seal::Modulus &modulus,
                                            seal::util::CoeffIter result) {
@@ -26,11 +27,10 @@ void utils::negacyclic_shift_poly_coeffmod(seal::util::ConstCoeffIter poly, size
 
 void utils::shift_polynomial(seal::EncryptionParameters &params, seal::Ciphertext &encrypted,
                              seal::Ciphertext &destination, size_t index) {
-  const auto encrypted_count = encrypted.size();
   const auto coeff_count = DatabaseConstants::PolyDegree;
   const auto rns_mod_cnt = params.coeff_modulus().size() - 1;
   destination = encrypted;
-  for (size_t i = 0; i < encrypted_count; i++) {
+  for (size_t i = 0; i < 2; i++) {  // two polynomials in ciphertext
     for (size_t j = 0; j < rns_mod_cnt; j++) {
       negacyclic_shift_poly_coeffmod(encrypted.data(i) + (j * coeff_count), coeff_count, index,
                                      params.coeff_modulus()[j],

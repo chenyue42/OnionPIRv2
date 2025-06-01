@@ -316,55 +316,105 @@ PirServer::expand_query(size_t client_id, seal::Ciphertext &ciphertext) const {
   return cts;
 }
 
+//  single-loop level-order expansion  (root index = 1)
 std::vector<seal::Ciphertext>
-PirServer::fast_expand_qry(size_t client_id,
-                           seal::Ciphertext &ciphertext) const {
+PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) const {
+  // ============== parameters
+  const size_t useful_cnt = pir_params_.get_fst_dim_sz() +
+                            pir_params_.get_l() * (dims_.size() - 1); // u
+  const size_t expan_height = pir_params_.get_expan_height(); // h
+  const size_t w = size_t{1} << expan_height;                 // 2^h
+  const auto &galois_key = client_galois_keys_.at(client_id);
   seal::EncryptionParameters params = pir_params_.get_seal_params();
-  // we want fst_dim_sz many bfv for first dimension, and l many bfv for each other dimension mux. 
-  const size_t useful_cnt = pir_params_.get_fst_dim_sz() + pir_params_.get_l() * (dims_.size() - 1);
-  const size_t expan_height = pir_params_.get_expan_height();
-  const auto& client_galois_key = client_galois_keys_.at(client_id); // used for substitution
-  std::vector<seal::Ciphertext> cts(useful_cnt + useful_cnt % 2); // just in case we have odd number of useful ciphertexts.
-  DEBUG_PRINT("expansion height: " << expan_height << ", useful count: " << useful_cnt);
+  
+  // ============== storage   – index 0 is *unused*, root is slot 1
+  std::vector<seal::Ciphertext> cts(2 * w); // slots 0 … 2w-1
+  cts[1] = ciphertext;                      // c1  ←  input
 
-  /*  Pseudu code:
-  nonzero_cnt = fst_dim_sz + l * (dims.size() - 1)
-  for a = 0 .. logN - 1 do
-    k = 2^a // tree width at level a
-    t = nonzero_cnt / recursive_ceil_half(nonzero_cnt, expan_height - a)
-    for b = t-1 .. 0 do
-      c' = Subs(c_b, n/k + 1)
-      c_{2b + 1} = (c_b - c') * x^{-k}
-      c_{2b} = c_b + c'
-    end
-  end
-  */
+  // ============== level-order walk, skip right-of-u sub-trees
+  for (size_t i = 1; i < w; ++i) { // internal nodes only
+    // k = 2^{⌊log i⌋}   (span of this sub-tree)
+    const int k = int{1} << (std::__bit_width(i) - 1);
 
-  cts[0] = ciphertext;   // c_0 = c in paper
-  for (size_t a = 0; a < expan_height; a++) {
-    // the number of ciphertexts in the current level of the expansion tree
-    const size_t level_size = pow(2, a);
-    const size_t trimed_level_sz = utils::repeated_ceil_half(useful_cnt, expan_height - a);
-    // DEBUG_PRINT("Level size: " << level_size << ", Trimed level size: " << trimed_level_sz);
+    // left-most leaf index of this sub-tree
+    const size_t left_leaf = i * w / k - w; // exact integer
+    if (left_leaf >= useful_cnt)
+      continue; // skip whole sub-tree
     
-    for (int b = trimed_level_sz - 1; b > -1; b--) { // ! we have to reverse the order otherwise we will overwrite the cts[b] before using it.
-      seal::Ciphertext c_prime = cts[b]; 
-      TIME_START(APPLY_GALOIS);
-      evaluator_.apply_galois_inplace(c_prime, DatabaseConstants::PolyDegree / level_size + 1,
-                                      client_galois_key); // Subs(c_b, n/k + 1)
-      TIME_END(APPLY_GALOIS);
-      // ! order matters! 
-      TIME_START("expand extra");
-      seal::Ciphertext temp;
-      evaluator_.sub(cts[b], c_prime, temp);  // temp = c_b - c'
-      utils::shift_polynomial(params, temp, cts[2 * b + 1], -level_size); // temp * x^{-k}, store in c_{2b + 1}
-      evaluator_.add(cts[b], c_prime, cts[2 * b]);
-      TIME_END("expand extra");
-    }
+    // ============== split   c[i] ->  c[2i] , c[2i+1]
+    // c' = Subs(c_i, w/k+1)
+    seal::Ciphertext c_prime = cts[i];
+    TIME_START(APPLY_GALOIS);
+    evaluator_.apply_galois_inplace(c_prime,
+                                    DatabaseConstants::PolyDegree / k + 1, 
+                                    galois_key); 
+    TIME_END(APPLY_GALOIS);
+    TIME_START("add_sub");
+    // c_{2i}   =  c_i + c'
+    evaluator_.add(cts[i], c_prime, cts[2 * i]);
+
+    // c_{2i+1} = (c_i − c') * x^{−k}
+    evaluator_.sub_inplace(cts[i], c_prime);
+    TIME_END("add_sub");
+
+    TIME_START("shift polynomial");
+    utils::shift_polynomial(params, cts[i], cts[2 * i + 1], -k);
+    TIME_END("shift polynomial");
   }
 
-  return cts;
+  // ==============  return the first  u  leaves: heap slots  w … w+u−1
+  return std::vector<seal::Ciphertext>(cts.begin() + w,cts.begin() + w + useful_cnt);
 }
+
+// std::vector<seal::Ciphertext>
+// PirServer::fast_expand_qry(size_t client_id,
+//                            seal::Ciphertext &ciphertext) const {
+//   seal::EncryptionParameters params = pir_params_.get_seal_params();
+//   // we want fst_dim_sz many bfv for first dimension, and l many bfv for each other dimension mux. 
+//   const size_t useful_cnt = pir_params_.get_fst_dim_sz() + pir_params_.get_l() * (dims_.size() - 1);
+//   const size_t expan_height = pir_params_.get_expan_height();
+//   const auto& client_galois_key = client_galois_keys_.at(client_id); // used for substitution
+//   std::vector<seal::Ciphertext> cts(useful_cnt + useful_cnt % 2); // just in case we have odd number of useful ciphertexts.
+//   DEBUG_PRINT("expansion height: " << expan_height << ", useful count: " << useful_cnt);
+
+//   /*  Pseudu code:
+//   nonzero_cnt = fst_dim_sz + l * (dims.size() - 1)
+//   for a = 0 .. logN - 1 do
+//     k = 2^a // tree width at level a
+//     t = nonzero_cnt / recursive_ceil_half(nonzero_cnt, expan_height - a)
+//     for b = t-1 .. 0 do
+//       c' = Subs(c_b, n/k + 1)
+//       c_{2b + 1} = (c_b - c') * x^{-k}
+//       c_{2b} = c_b + c'
+//     end
+//   end
+//   */
+
+//   cts[0] = ciphertext;   // c_0 = c in paper
+//   for (size_t a = 0; a < expan_height; a++) {
+//     // the number of ciphertexts in the current level of the expansion tree
+//     const size_t level_size = pow(2, a);
+//     const size_t trimed_level_sz = utils::repeated_ceil_half(useful_cnt, expan_height - a);
+//     // DEBUG_PRINT("Level size: " << level_size << ", Trimed level size: " << trimed_level_sz);
+    
+//     for (int b = trimed_level_sz - 1; b > -1; b--) { // ! we have to reverse the order otherwise we will overwrite the cts[b] before using it.
+//       seal::Ciphertext c_prime = cts[b]; 
+//       TIME_START(APPLY_GALOIS);
+//       evaluator_.apply_galois_inplace(c_prime, DatabaseConstants::PolyDegree / level_size + 1,
+//                                       client_galois_key); // Subs(c_b, n/k + 1)
+//       TIME_END(APPLY_GALOIS);
+//       // ! order matters! 
+//       TIME_START("expand extra");
+//       seal::Ciphertext temp;
+//       evaluator_.sub(cts[b], c_prime, temp);  // temp = c_b - c'
+//       utils::shift_polynomial(params, temp, cts[2 * b + 1], -level_size); // temp * x^{-k}, store in c_{2b + 1}
+//       evaluator_.add(cts[b], c_prime, cts[2 * b]);
+//       TIME_END("expand extra");
+//     }
+//   }
+
+//   return cts;
+// }
 
 void PirServer::set_client_galois_key(const size_t client_id, std::stringstream &galois_stream) {
   seal::GaloisKeys client_key;

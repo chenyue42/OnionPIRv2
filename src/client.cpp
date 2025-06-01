@@ -30,11 +30,6 @@ std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
   return gsw_enc;
 }
 
-PirClient::~PirClient() {
-  if (decryptor_mod_q_prime_) {
-    delete decryptor_mod_q_prime_;
-  }
-}
 
 size_t PirClient::get_database_plain_index(size_t entry_index) {
   return entry_index / pir_params_.get_num_entries_per_plaintext();
@@ -469,10 +464,6 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
     dummy_ct.data(1)[i] = ct.data(1)[i];
   }
 
-  if (!decryptor_mod_q_prime_) {
-    throw std::runtime_error("decryptor_mod_q_prime_ is not initialized. Please check the initialization of PirClient.");
-  }
-
   // decrypt the new ciphertext using the new sk
   seal::Plaintext result;
   decryptor_mod_q_prime_->decrypt(dummy_ct, result);
@@ -540,6 +531,6 @@ seal::SEALContext PirClient::init_mod_q_prime() {
   seal::SEALContext context_mod_q_prime_ = seal::SEALContext(new_params);
   auto secret_key_mod_q_prime_ = sk_mod_switch(secret_key_, new_params);
   // create a new decryptor and encryptor with the new secret key
-  decryptor_mod_q_prime_ = new seal::Decryptor(context_mod_q_prime_, secret_key_mod_q_prime_);
+  decryptor_mod_q_prime_ = std::make_unique<seal::Decryptor>(context_mod_q_prime_, secret_key_mod_q_prime_);
   return context_mod_q_prime_;
 }
