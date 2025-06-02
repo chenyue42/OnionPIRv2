@@ -584,10 +584,12 @@ void PirTest::test_single_mat_mult() {
   TIME_END(EIGEN_MULT);
 
   // ============= avx mat mat mult 128 bits ==============
+#if defined(__AVX512F__)
   const std::string AVX_MAT_MULT_128 = "AVX mat-mat-128";
   TIME_START(AVX_MAT_MULT_128);
   avx_mat_mat_mult_128(A_data.data(), B_data.data(), C_data128.data(), rows, cols);
   TIME_END(AVX_MAT_MULT_128);
+#endif
 
 
   // ============= Print the results to avoid over optimization ==============
@@ -609,7 +611,9 @@ void PirTest::test_single_mat_mult() {
   print_throughput(LV_MAT_MAT_64, db_size);
   print_throughput(LV_MAT_MAT_128, db_size);
   print_throughput(EIGEN_MULT, db_size);
+#if defined(__AVX512F__)
   print_throughput(AVX_MAT_MULT_128, db_size);
+#endif
 
 }
 
@@ -697,12 +701,14 @@ void PirTest::test_fst_dim_mult() {
   component_wise_mult_128(&A_mat, &B_mat, &C_mat_128);
   TIME_END(ELEM_MULT_128);
 
+#if defined(__AVX512F__)
   // ============= component wise mult direct mod using hexl ==============
   const std::string ELEM_MULT_DIRECT_MOD = "elementwise multiplication direct mod";
   uint64_t mod_val = pir_params.get_coeff_modulus()[0].value();
   TIME_START(ELEM_MULT_DIRECT_MOD);
   component_wise_mult_direct_mod(&A_mat, &B_mat, C_data.data(), mod_val);
   TIME_END(ELEM_MULT_DIRECT_MOD);
+#endif
 
 
   // ============= level mat mult using Eigen ==============
@@ -736,7 +742,6 @@ void PirTest::test_fst_dim_mult() {
   double level_mat_mult_direct_mod_time = GET_AVG_TIME(LV_MAT_MULT_DIRECT_MOD);
   double old_elementwise_mult_time = GET_AVG_TIME(ELEM_MULT);
   double elementwise_mult_128_time = GET_AVG_TIME(ELEM_MULT_128);
-  double elementwise_mult_direct_mod_time = GET_AVG_TIME(ELEM_MULT_DIRECT_MOD);
 
   double naive_throughput = db_size / (naive_mat_mult_time * 1000);
   double naive_throughput_128 = db_size / (naive_mat_mult_128_time * 1000);
@@ -745,7 +750,7 @@ void PirTest::test_fst_dim_mult() {
   double level_mat_mult_direct_mod_throughput = db_size / (level_mat_mult_direct_mod_time * 1000);
   double old_elementwise_mult_throughput = db_size / (old_elementwise_mult_time * 1000); 
   double elementwise_mult_128_throughput = db_size / (elementwise_mult_128_time * 1000);
-  double elementwise_mult_direct_mod_throughput = db_size / (elementwise_mult_direct_mod_time * 1000);
+
 
   BENCH_PRINT("Matrix size: " << db_size / 1024 / 1024 << " MB");
   BENCH_PRINT("Naive level mat mat throughput: \t" << (size_t)naive_throughput << " MB/s");
@@ -755,12 +760,16 @@ void PirTest::test_fst_dim_mult() {
   BENCH_PRINT("Level mat mat direct mod throughput: \t" << (size_t)level_mat_mult_direct_mod_throughput << " MB/s");
   BENCH_PRINT("Elementwise mat throughput: \t\t" << (size_t)old_elementwise_mult_throughput << " MB/s");
   BENCH_PRINT("Elementwise mat 128 throughput: \t" << (size_t)elementwise_mult_128_throughput << " MB/s");
+#if defined(__AVX512F__)
+  double elementwise_mult_direct_mod_time = GET_AVG_TIME(ELEM_MULT_DIRECT_MOD);
+  double elementwise_mult_direct_mod_throughput = db_size / (elementwise_mult_direct_mod_time * 1000);
   BENCH_PRINT("Elementwise mat direct mod throughput: \t" << (size_t)elementwise_mult_direct_mod_throughput << " MB/s");
-  #ifdef HAVE_EIGEN
+#endif
+#ifdef HAVE_EIGEN
   double level_mat_mult_eigen_time = GET_AVG_TIME(EIGEN_MULT);
   double level_mat_mult_eigen_throughput = db_size / (level_mat_mult_eigen_time * 1000);
   BENCH_PRINT("Level mat mat Eigen throughput: \t" << (size_t)level_mat_mult_eigen_throughput << " MB/s");
-  #endif
+#endif
 }
 
 

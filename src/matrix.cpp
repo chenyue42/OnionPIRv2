@@ -1,6 +1,9 @@
 #include "matrix.h"
 #include <cstring>
+
+#ifdef ONIONPIR_USE_HEXL
 #include "hexl/hexl.hpp"
+#endif
 #ifdef HAVE_EIGEN
 #include <Eigen/Dense>
 #endif
@@ -352,7 +355,7 @@ void component_wise_mult_128(matrix_t *A, matrix_t *B, matrix128_t *out) {
   }
 }
 
-
+#ifdef ONIONPIR_USE_HEXL
 void component_wise_mult_direct_mod(matrix_t *A, matrix_t *B, uint64_t *out, const uint64_t mod) {
   const size_t m = A->rows; 
   const size_t n = A->cols; 
@@ -384,6 +387,7 @@ void component_wise_mult_direct_mod(matrix_t *A, matrix_t *B, uint64_t *out, con
   // free the temporary output array
   delete[] tmp_out;
 }
+#endif
 
 
 // ======================== THIRD PARTIES ========================
@@ -422,6 +426,7 @@ void level_mat_mult_eigen(matrix_t *A, matrix_t *B, matrix_t *out) {
 
 // ======================== CRAZY AVX STUFF ========================
 
+#if defined(__AVX512F__)
 void avx_mat_mat_mult_128(const uint64_t *__restrict A,
                           const uint64_t *__restrict B,
                           uint128_t *__restrict out, const size_t rows,
@@ -462,3 +467,4 @@ void avx_mat_mat_mult_128(const uint64_t *__restrict A,
         out[i*2 + 1] = acc1;
     }
 }
+#endif
