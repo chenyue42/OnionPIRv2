@@ -709,7 +709,7 @@ void PirTest::test_fst_dim_mult() {
   component_wise_mult_128(&A_mat, &B_mat, &C_mat_128);
   TIME_END(ELEM_MULT_128);
 
-#if defined(__AVX512F__)
+#if defined(__AVX512F__) && defined(ONIONPIR_USE_HEXL)
   // ============= component wise mult direct mod using hexl ==============
   const std::string ELEM_MULT_DIRECT_MOD = "elementwise multiplication direct mod";
   uint64_t mod_val = pir_params.get_coeff_modulus()[0].value();
