@@ -175,7 +175,7 @@ void PirTest::bfv_example() {
   auto keygen_ = seal::KeyGenerator(context_);
   auto secret_key_ = keygen_.secret_key();
   auto encryptor_ = seal::Encryptor(context_, secret_key_);
-  auto decryptor_ = seal::Decryptor(context_, secret_key_);
+  seal::Decryptor* decryptor_ = new seal::Decryptor(context_, secret_key_);
   // =============================================================
   BENCH_PRINT("coeff_count: " << coeff_count);
   BENCH_PRINT("Num of coeff mods that SEAL uses: "
@@ -194,11 +194,11 @@ void PirTest::bfv_example() {
   encryptor_.encrypt_symmetric(a, a_encrypted);
   encryptor_.encrypt_symmetric(b, b_encrypted);
   
-  BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
+  BENCH_PRINT("Noise budget before: " << decryptor_->invariant_noise_budget(a_encrypted));
   evaluator_.multiply(a_encrypted, b_encrypted, cipher_result);
-  decryptor_.decrypt(cipher_result, result);
+  decryptor_->decrypt(cipher_result, result);
   // You can see that this direct multiplication consumes a lot of noise budget.
-  BENCH_PRINT("Noise budget after: " << decryptor_.invariant_noise_budget(cipher_result));
+  BENCH_PRINT("Noise budget after: " << decryptor_->invariant_noise_budget(cipher_result));
   BENCH_PRINT("BFV x BFV result: " << result.to_string());
   PRINT_BAR;
   // ============= Now let's try addition in coefficient form ==============
@@ -210,10 +210,10 @@ void PirTest::bfv_example() {
 
   encryptor_.encrypt_symmetric(a, a_encrypted);
   encryptor_.encrypt_symmetric(b, b_encrypted);
-  BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
+  BENCH_PRINT("Noise budget before: " << decryptor_->invariant_noise_budget(a_encrypted));
   evaluator_.add(a_encrypted, b_encrypted, cipher_result);
-  decryptor_.decrypt(cipher_result, result);
-  BENCH_PRINT("Noise budget after: " << decryptor_.invariant_noise_budget(cipher_result));
+  decryptor_->decrypt(cipher_result, result);
+  BENCH_PRINT("Noise budget after: " << decryptor_->invariant_noise_budget(cipher_result));
   BENCH_PRINT("BFV + BFV result: " << result.to_string());
   PRINT_BAR;
 
@@ -225,15 +225,15 @@ void PirTest::bfv_example() {
   BENCH_PRINT("Vector b: " << b.to_string());
   encryptor_.encrypt_symmetric(a, a_encrypted);
   encryptor_.encrypt_symmetric(b, b_encrypted);
-  BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
+  BENCH_PRINT("Noise budget before: " << decryptor_->invariant_noise_budget(a_encrypted));
 
   evaluator_.transform_to_ntt_inplace(a_encrypted);
   evaluator_.transform_to_ntt_inplace(b_encrypted);
   evaluator_.add(a_encrypted, b_encrypted, cipher_result);
   evaluator_.transform_from_ntt_inplace(cipher_result);
   
-  decryptor_.decrypt(cipher_result, result);
-  BENCH_PRINT("Noise budget after: " << decryptor_.invariant_noise_budget(cipher_result)); // noise budget is almost the same.
+  decryptor_->decrypt(cipher_result, result);
+  BENCH_PRINT("Noise budget after: " << decryptor_->invariant_noise_budget(cipher_result)); // noise budget is almost the same.
   BENCH_PRINT("NTT + NTT result: " << result.to_string());  // and the result is correct! NTT form polynomial is additive
   PRINT_BAR;
 
@@ -242,13 +242,13 @@ void PirTest::bfv_example() {
   // scalar[0] = 2;
   // scalar[1] = 3;
 
-  scalar[0] = 1ul << 40;
-  scalar[1] = 1ul << 40;
-  scalar[3] = 1ul << 40;
+  scalar[0] = 1ul << 46;
+  scalar[1] = 1ul << 46;
+  scalar[3] = 1ul << 46;
   BENCH_PRINT("Vector a: " << a.to_string());
   BENCH_PRINT("Scalar: " << scalar.to_string());
   evaluator_.transform_from_ntt_inplace(a_encrypted);
-  BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
+  BENCH_PRINT("Noise budget before: " << decryptor_->invariant_noise_budget(a_encrypted));
   evaluator_.transform_to_ntt_inplace(a_encrypted);
   evaluator_.transform_to_ntt_inplace(scalar, context_.first_parms_id()); // This happens in preprocess_ntt
   // Now instead of using multiply_plain, I want to demonstrate what happens in the first dimension evaluation. 
@@ -279,9 +279,9 @@ void PirTest::bfv_example() {
     }
   }
   evaluator_.transform_from_ntt_inplace(scalar_mul_result);
-  decryptor_.decrypt(scalar_mul_result, result);
+  decryptor_->decrypt(scalar_mul_result, result);
   BENCH_PRINT("NTT x scalar result: " << result.to_string());  // and the result is correct! NTT form polynomial is multiplicative
-  BENCH_PRINT("Noise budget after: " << decryptor_.invariant_noise_budget(scalar_mul_result)); // noise budget is almost the same.
+  BENCH_PRINT("Noise budget after: " << decryptor_->invariant_noise_budget(scalar_mul_result)); // noise budget is almost the same.
   /*
   Now, in the old OnionPIR, this kind of elementwise multiplication is computed for num_poly many times. That is, the smallest operation
   is this vector-vector elementwise multiplication. However, this is bad for cache. We have further comparison in matrix.h
@@ -300,7 +300,7 @@ void PirTest::bfv_example() {
               "-DSEAL_THROW_ON_TRANSPARENT_CIPHERTEXT=OFF when building SEAL");
   evaluator_.sub_inplace(fst_mult_result, snd_mult_result);
   evaluator_.transform_from_ntt_inplace(fst_mult_result);
-  decryptor_.decrypt(fst_mult_result, result);
+  decryptor_->decrypt(fst_mult_result, result);
   BENCH_PRINT("You should see a zero ¬_¬: " << result.to_string()); 
 }
 
