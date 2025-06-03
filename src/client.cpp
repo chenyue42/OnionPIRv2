@@ -240,13 +240,16 @@ size_t PirClient::create_galois_keys(std::stringstream &galois_key_stream) {
   return written_size;
 }
 
-seal::Plaintext PirClient::decrypt_result(const seal::Ciphertext& reply) {
+seal::Plaintext PirClient::decrypt_reply(const seal::Ciphertext& reply) {
   // most likely we are going to use our own decryption since we perform single mod mod-switch
-  return decrypt_mod_q(reply, pir_params_.get_small_q());
+  return decrypt_mod_q(reply);
+}
 
+seal::Plaintext PirClient::decrypt_ct(const seal::Ciphertext& ct) {
   // otherwise, use the default decryptor of SEAL as follows:
-  // seal::Plaintext result;
-  // decryptor_.decrypt(reply, result);
+  seal::Plaintext result;
+  decryptor_.decrypt(ct, result);
+  return result;
 }
 
 Entry PirClient::get_entry_from_plaintext(const size_t entry_index, const seal::Plaintext plaintext) const {

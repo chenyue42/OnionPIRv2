@@ -206,7 +206,7 @@ namespace DatabaseConstants {
   // constexpr size_t GSW_L = 5;                         // parameter for GSW scheme
   // constexpr size_t GSW_L_KEY = 10;                    // GSW for query expansion
   // constexpr size_t PlainMod = 17;
-  // constexpr size_t SmallQWidth = 26;                  // modulus switching width
+  // constexpr size_t SmallQWidth = 27;                  // modulus switching width
   // constexpr std::array<size_t, 2> CoeffMods = {60, 60}; // log q = 60.
 
 
@@ -231,7 +231,7 @@ namespace DatabaseConstants {
   constexpr size_t GSW_L = 5;                       // parameter for GSW scheme
   constexpr size_t GSW_L_KEY = 10;                   // GSW for query expansion
   constexpr size_t PlainMod = 17;
-  constexpr size_t SmallQWidth = 26;  // modulus switching width
+  constexpr size_t SmallQWidth = 27;  // modulus switching width
   constexpr std::array<size_t, 2> CoeffMods = {60, 60}; // log q = 60.
 
   // ! ========================== 2^23 * 1KB = 8GB (general test case when n = 2048) ==========================

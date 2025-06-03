@@ -27,16 +27,16 @@ void print_throughput(const std::string &name, const size_t db_size) {
 
 void PirTest::run_tests() {
   test_pir();
-  // bfv_example();
+  bfv_example();
   // serialization_example();
-  // test_external_product();
+  test_external_product();
   // test_single_mat_mult();
   // test_fst_dim_mult();
   // test_batch_decomp();
-  // test_fast_expand_query();
+  test_fast_expand_query();
   // test_raw_pt_ct_mult();
   // test_decrypt_mod_q();
-  // test_mod_switch();
+  test_mod_switch();
   // test_sk_mod_switch();
 }
 
@@ -104,7 +104,7 @@ void PirTest::test_pir() {
     // client gets result from the server and decrypts it
     seal::Ciphertext reconstructed_result = client.load_resp_from_stream(resp_stream);
     TIME_START(CLIENT_TOT_TIME);
-    seal::Plaintext decrypted_result = client.decrypt_result(reconstructed_result);
+    seal::Plaintext decrypted_result = client.decrypt_reply(reconstructed_result);
     Entry response_entry = client.get_entry_from_plaintext(query_index, decrypted_result);
     TIME_END(CLIENT_TOT_TIME);
 
@@ -187,8 +187,8 @@ void PirTest::bfv_example() {
   seal::Plaintext a(coeff_count), b(coeff_count), result;
   a[0] = 1; a[1] = 9;
   b[0] = 3; b[1] = 6;
-  BENCH_PRINT("Vector a: " << a.to_string());
-  BENCH_PRINT("Vector b: " << b.to_string());
+  BENCH_PRINT("Plaintext a: " << a.to_string());
+  BENCH_PRINT("Plaintext b: " << b.to_string());
 
   seal::Ciphertext a_encrypted, b_encrypted, cipher_result;
   encryptor_.encrypt_symmetric(a, a_encrypted);
@@ -239,10 +239,17 @@ void PirTest::bfv_example() {
 
   // ============= Now let's try BFV multiplied by a constant in ntt form ==============
   seal::Plaintext scalar(coeff_count);
-  scalar[0] = 2;
-  scalar[1] = 3;
+  // scalar[0] = 2;
+  // scalar[1] = 3;
+
+  scalar[0] = 1ul << 40;
+  scalar[1] = 1ul << 40;
+  scalar[3] = 1ul << 40;
   BENCH_PRINT("Vector a: " << a.to_string());
   BENCH_PRINT("Scalar: " << scalar.to_string());
+  evaluator_.transform_from_ntt_inplace(a_encrypted);
+  BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
+  evaluator_.transform_to_ntt_inplace(a_encrypted);
   evaluator_.transform_to_ntt_inplace(scalar, context_.first_parms_id()); // This happens in preprocess_ntt
   // Now instead of using multiply_plain, I want to demonstrate what happens in the first dimension evaluation. 
   // This is demonstrating what you can do in ntt form, but the actual order of computation in OnionPIRv2 fst dim can be different.
@@ -274,9 +281,10 @@ void PirTest::bfv_example() {
   evaluator_.transform_from_ntt_inplace(scalar_mul_result);
   decryptor_.decrypt(scalar_mul_result, result);
   BENCH_PRINT("NTT x scalar result: " << result.to_string());  // and the result is correct! NTT form polynomial is multiplicative
+  BENCH_PRINT("Noise budget after: " << decryptor_.invariant_noise_budget(scalar_mul_result)); // noise budget is almost the same.
   /*
   Now, in the old OnionPIR, this kind of elementwise multiplication is computed for num_poly many times. That is, the smallest operation
-  is this vector-vector elementwise multiplication. However, this is actually bad for the cache. TODO: I need to find a way to optimize this.
+  is this vector-vector elementwise multiplication. However, this is bad for cache. We have further comparison in matrix.h
   */
   PRINT_BAR;
 
@@ -396,12 +404,11 @@ void PirTest::test_external_product() {
   seal::Plaintext a(coeff_count), result;
   std::vector<uint64_t> b(coeff_count); // vector b is in the context of GSW scheme.
   a[0] = 1; a[1] = 2; a[2] = 4;
-  b[0] = 2; // You can also try 1, then you can do external product hundreds of times.
+  b[0] = 2; // ! You can also try 1, then you can do external product hundreds of times.
   BENCH_PRINT("Vector a: " << a.to_string());
   std::string b_str = "Vector b: ";
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 5; i++)
     b_str += std::to_string(b[i]) + " ";
-  }
   BENCH_PRINT(b_str);  
   
   seal::Ciphertext a_encrypted;    // encrypted "a" will be stored here. 
@@ -410,7 +417,8 @@ void PirTest::test_external_product() {
   // encrypt the plaintext b to GSW ciphertext
   // You can also try different gsw_l and base_log2. But you need to follow the equation:
   // base_log2 = (bits + l - 1) / l; where bits is the bit width of the ciphertext modulus. 
-  const size_t gsw_l = pir_params.get_l();
+  const size_t gsw_l = pir_params.get_l(); 
+  BENCH_PRINT("RGSW_L: " << gsw_l);
   const size_t base_log2 = pir_params.get_base_log2();
   GSWEval data_gsw(pir_params, gsw_l, base_log2);
   std::vector<seal::Ciphertext> temp_gsw;
@@ -421,7 +429,7 @@ void PirTest::test_external_product() {
 
   // actual external product
   BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
-  const size_t num_iter = 10; // And you can do this external product many times when the data in GSW is small. 
+  const size_t num_iter = 10; // ! And you can do this external product many times when the data in GSW is small. 
   for (size_t i = 0; i < num_iter; ++i) {
     data_gsw.external_product(b_gsw, a_encrypted, a_encrypted); // The decomposition requires coefficient form BFV
     evaluator_.transform_from_ntt_inplace(a_encrypted);
@@ -923,23 +931,28 @@ void PirTest::test_fast_expand_query() {
   client.test_budget(normal_query);
   client.test_budget(fast_query);
   // decrypt the query and print it
-  auto normal_decrypted = client.decrypt_result(normal_query);
-  auto fast_decrypted = client.decrypt_result(fast_query);
+  auto normal_decrypted = client.decrypt_ct(normal_query);
+  auto fast_decrypted = client.decrypt_ct(fast_query);
   BENCH_PRINT("raw packed query: " << normal_decrypted.to_string());
   BENCH_PRINT("fast packed query: " << fast_decrypted.to_string());
+  client.test_budget(normal_query);
+  client.test_budget(fast_query);
   PRINT_BAR;
 
   // ============= Expand the query ==============
+  DEBUG_PRINT("a");
   auto normal_exp_q = server.expand_query(client_id, normal_query);
+  DEBUG_PRINT("b");
   auto fast_exp_q = server.fast_expand_qry(client_id, fast_query);
 
   client.test_budget(normal_exp_q[query_idx % fst_dim_sz]);
   client.test_budget(fast_exp_q[query_idx % fst_dim_sz]);
 
   std::vector<seal::Plaintext> normal_exp_pt, fast_exp_pt;
-  for (size_t i = 0; i < normal_exp_q.size(); i++) {
-    normal_exp_pt.push_back(client.decrypt_result(normal_exp_q[i]));
-    fast_exp_pt.push_back(client.decrypt_result(fast_exp_q[i]));
+
+  for (size_t i = 0; i < useful_cnt; i++) {
+    normal_exp_pt.push_back(client.decrypt_ct(normal_exp_q[i]));
+    fast_exp_pt.push_back(client.decrypt_ct(fast_exp_q[i]));
   }
   BENCH_PRINT("normal Expanded query: " << normal_exp_pt[query_idx % fst_dim_sz].to_string());
   BENCH_PRINT("fast Expanded query: " << fast_exp_pt[query_idx % fst_dim_sz].to_string());
@@ -1033,6 +1046,7 @@ void PirTest::test_mod_switch() {
   auto context_ = pir_params.get_context();
   auto secret_key_ = client.secret_key_;
   auto encryptor_ = seal::Encryptor(context_, secret_key_);
+  auto decryptor_ = seal::Decryptor(context_, secret_key_);
   const size_t coeff_count = DatabaseConstants::PolyDegree;
 
   seal::Plaintext pt(coeff_count), result(coeff_count);
@@ -1051,6 +1065,7 @@ void PirTest::test_mod_switch() {
   // encrypt the plaintext and apply modulus switch
   seal::Ciphertext ct; 
   encryptor_.encrypt_symmetric(pt, ct);
+  BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(ct));
   server.mod_switch_inplace(ct, small_q);
   result = client.decrypt_mod_q(ct, small_q);
   BENCH_PRINT("Client decrypted: " << result.to_string());

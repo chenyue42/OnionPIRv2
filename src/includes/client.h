@@ -27,7 +27,9 @@ public:
   static size_t write_query_to_stream(const seal::Ciphertext &query, std::stringstream &data_stream);
   static size_t write_gsw_to_stream(const std::vector<Ciphertext> &gsw, std::stringstream &gsw_stream);
   size_t create_galois_keys(std::stringstream &galois_key_stream);
-  seal::Plaintext decrypt_result(const seal::Ciphertext& reply);
+  // decrypt the result returned from PIR. Assume modulus switching is applied.
+  seal::Plaintext decrypt_reply(const seal::Ciphertext& reply);
+  seal::Plaintext decrypt_ct(const seal::Ciphertext& ct);
   // Retrieves an entry from the plaintext containing the entry.
   std::vector<Ciphertext> generate_gsw_from_key();
   
@@ -36,7 +38,7 @@ public:
 
   inline void test_budget(seal::Ciphertext &ct) {
     // calculate the noise budget of the ciphertext
-    BENCH_PRINT("Noise budget in the query: " << decryptor_.invariant_noise_budget(ct) << " bits");
+    BENCH_PRINT("Noise budget: " << decryptor_.invariant_noise_budget(ct) << " bits");
   }
 
   // load the response from the stream and recover the ciphertext
