@@ -3,7 +3,12 @@
 #include "utils.h"
 #include <stdint.h>
 #include <stddef.h>
-#include <immintrin.h>
+
+#if defined(__AVX512F__)
+    #include <immintrin.h>
+#elif defined(__AVX2__)
+    #include <immintrin.h>
+#endif
 
 // define a structure for a matrix
 typedef struct {
@@ -66,8 +71,10 @@ void level_mat_mat_direct_mod(matrix_t *A, matrix_t *B, matrix_t *out, const sea
 // Perform the Matrix Multiplication over a direct product over component wise vector multiplication.
 void component_wise_mult(matrix_t *A, matrix_t *B, matrix_t *out);
 void component_wise_mult_128(matrix_t *A, matrix_t *B, matrix128_t *out);
+#if defined(__AVX512F__)
 // This is using intel::hexl::EltwiseMultMod for each component wise multiplication.
 void component_wise_mult_direct_mod(matrix_t *A, matrix_t *B, uint64_t *out, const uint64_t mod);
+#endif
 
 // ======================== THIRD PARTIES ========================
 // Currently, I don't know any libraries that can do 64x64->128 multiplication.
@@ -89,6 +96,7 @@ inline void mult_add_mod(uint64_t &a, uint64_t &b, uint64_t &c, const seal::Modu
 }
 
 
+#if defined(__AVX512F__)
 // ======================== CRAZY AVX STUFF ========================
 // ! I asked gpt to generate these AVX codes. I have no idea what they do.
 // ! I only observed that they are very slow, slower than the naive implementation.
@@ -135,7 +143,10 @@ static inline void mul_64x64_128(__m512i a, __m512i b, __m512i* lo, __m512i* hi)
     *lo = lower;
     *hi = higher;
 }
+#endif
 
+
+#if defined(__AVX512F__)
 //------------------------------------------------------------------------------
 // Horizontal reduction: given two __m512i vectors representing the low and high parts of
 // eight 128-bit values, reduce them to a single uint128_t sum.
@@ -151,7 +162,9 @@ static inline uint128_t horizontal_reduce_128(__m512i lo, __m512i hi) {
     }
     return sum;
 }
+#endif
 
+#if defined(__AVX512F__)
 //------------------------------------------------------------------------------
 // Function: avx_mat_mat_mult_128
 //
@@ -166,3 +179,4 @@ void avx_mat_mat_mult_128(const uint64_t *__restrict A,
                           const uint64_t *__restrict B,
                           uint128_t *__restrict out, const size_t rows,
                           const size_t cols);
+#endif

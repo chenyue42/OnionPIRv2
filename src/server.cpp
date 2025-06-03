@@ -7,7 +7,14 @@
 #include <memory>
 #include <stdexcept>
 #include <fstream>
-#include <immintrin.h>
+#include <bit>
+#include <cstdint>
+
+#if defined(__AVX512F__)
+    #include <immintrin.h>
+#elif defined(__AVX2__)
+    #include <immintrin.h>
+#endif
 
 #ifdef _DEBUG
 #include <bitset>
@@ -333,8 +340,7 @@ PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) c
 
   // ============== level-order walk, skip right-of-u sub-trees
   for (size_t i = 1; i < w; ++i) { // internal nodes only
-    // k = 2^{⌊log i⌋}   (span of this sub-tree)
-    const int k = int{1} << (std::__bit_width(i) - 1);
+    const int k = int{1} << (std::bit_width(i) - 1); // k = 2^{⌊log i⌋}   (span of this sub-tree)
 
     // left-most leaf index of this sub-tree
     const size_t left_leaf = i * w / k - w; // exact integer
