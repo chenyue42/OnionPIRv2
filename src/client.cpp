@@ -471,12 +471,10 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
   seal::Plaintext result;
   decryptor_mod_q_prime_->decrypt(dummy_ct, result);
 
-#ifdef _DEBUG
   // print the noise budget
   double noise_budget = decryptor_mod_q_prime_->invariant_noise_budget(dummy_ct);
-  DEBUG_PRINT("Noise budget after decryption: " << noise_budget);
-#endif
-  
+  BENCH_PRINT("Noise budget after decryption: " << noise_budget);
+
   return result;
 }
 

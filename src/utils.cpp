@@ -166,7 +166,7 @@ Entry utils::generate_entry(const uint64_t entry_id, const size_t entry_size, st
   // fill the rest of the entry with random bytes
   random_file.read(reinterpret_cast<char *>(entry.data() + 8), entry_size - 8);
   // for (size_t i = 8; i < entry_size; ++i) {
-  //   entry[i] = static_cast<uint8_t>(255);
+  //   entry[i] = static_cast<uint8_t>(250);
   // }
   return entry;
 }
