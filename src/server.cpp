@@ -153,6 +153,7 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
   matrix_t db_mat { db_aligned_.get(), other_dim_sz, fst_dim_sz, coeff_val_cnt };
   matrix_t query_mat { query_data.data(), fst_dim_sz, 2, coeff_val_cnt };
   matrix128_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
+  // TODO: should run delay_modulus more often if N_0 is large. Say N_0 = 1000, then we might need mod to avoid overflow.
   TIME_START(CORE_TIME);
   // level_mat_mult_128(&db_mat, &query_mat, &inter_res_mat);
   // TODO: optimize the mat_mat_128 inside this function.
