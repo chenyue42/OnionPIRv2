@@ -163,7 +163,12 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
   TIME_START(FST_DELEY_MOD_TIME);
   std::vector<seal::Ciphertext> result; // output vector
   result.reserve(other_dim_sz);
-  delay_modulus(result, inter_res_.data());
+  if (other_dim_sz < 16) {
+    delay_modulus_small(result, inter_res_.data());
+  }
+  else {
+    delay_modulus(result, inter_res_.data());
+  }
   TIME_END(FST_DELEY_MOD_TIME);
 
   return result;
@@ -234,6 +239,56 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint1
       evaluator_.transform_from_ntt_inplace(cts[idx]);
       result.emplace_back(std::move(cts[idx]));
     }
+  }
+}
+
+void PirServer::delay_modulus_small(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res) {
+  const size_t other_dim_sz = pir_params_.get_other_dim_sz();
+  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  const auto coeff_modulus = pir_params_.get_coeff_modulus();
+  const size_t inter_padding = other_dim_sz * 2;  // distance between coefficients in inter_res
+  
+  // Process each ciphertext individually for small cases
+  for (size_t j = 0; j < other_dim_sz; j++) {
+    // Create a single ciphertext
+    seal::Ciphertext ct(context_);
+    ct.resize(2);  // each ciphertext stores 2 polynomials
+
+    // Compute the base indices for this ciphertext's two intermediate parts
+    const size_t base0 = j * 2;
+    const size_t base1 = j * 2 + 1;
+
+    // Initialize intermediate indices and ciphertext write indices
+    size_t inter_idx0 = 0;  // for poly0
+    size_t inter_idx1 = 0;  // for poly1
+    size_t ct_idx0 = 0;     // write index for poly0
+    size_t ct_idx1 = 0;     // write index for poly1
+
+    // Process each modulus and coefficient
+    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+      const seal::Modulus &modulus = coeff_modulus[mod_id];
+      for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
+        // Process polynomial 0
+        uint128_t x0 = inter_res[base0 + inter_idx0 * inter_padding];
+        uint64_t raw0[2] = { static_cast<uint64_t>(x0), static_cast<uint64_t>(x0 >> 64) };
+        ct.data(0)[ct_idx0++] = util::barrett_reduce_128(raw0, modulus);
+
+        // Process polynomial 1
+        uint128_t x1 = inter_res[base1 + inter_idx1 * inter_padding];
+        uint64_t raw1[2] = { static_cast<uint64_t>(x1), static_cast<uint64_t>(x1 >> 64) };
+        ct.data(1)[ct_idx1++] = util::barrett_reduce_128(raw1, modulus);
+        
+        // Advance intermediate indices
+        inter_idx0++;
+        inter_idx1++;
+      }
+    }
+
+    // Mark ciphertext as being in NTT form and then transform back
+    ct.is_ntt_form() = true;
+    evaluator_.transform_from_ntt_inplace(ct);
+    result.emplace_back(std::move(ct));
   }
 }
 

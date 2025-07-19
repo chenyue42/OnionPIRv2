@@ -88,6 +88,10 @@ private:
   // we delay the mod operation until the end. We also use barret reduction for the mod operation.
   void delay_modulus(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res);
   
+  // This is a helper for evaluate the first dimension when other_dim_sz < 16.
+  // It processes ciphertexts individually without unrolling.
+  void delay_modulus_small(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res);
+  
   // Transforms the plaintexts in the database into their NTT representation.
   // This speeds up computation but takes up more memory.  
   void preprocess_ntt();
