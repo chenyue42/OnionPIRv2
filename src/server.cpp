@@ -57,6 +57,7 @@ void PirServer::gen_data() {
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   const size_t num_en_per_pt = pir_params_.get_num_entries_per_plaintext();
   const size_t entry_size = pir_params_.get_entry_size();
+  std::cout << "entry_size: " << entry_size << std::endl;
 
   for (size_t row = 0; row < other_dim_sz; ++row) {
     std::vector<Entry> one_chunk(fst_dim_sz * num_en_per_pt, Entry(entry_size));
@@ -577,6 +578,42 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   DEBUG_PRINT("Modulus switching done.");
   return result[0];
 }
+
+
+seal::Ciphertext PirServer::make_query_no_expand(std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> gsw_vec) {
+  // ========================== Evaluations ==========================
+  // Evaluate the first dimension
+  TIME_START(FST_DIM_TIME);
+  std::vector<seal::Ciphertext> result = evaluate_first_dim(bfv_vec);
+  TIME_END(FST_DIM_TIME);
+
+  // Evaluate the other dimensions
+  TIME_START(OTHER_DIM_TIME);
+  if (dims_.size() != 1) {
+    for (size_t i = 1; i < dims_.size(); i++) {
+      other_dim_mux(result, gsw_vec[i - 1]);
+    }
+  }
+  TIME_END(OTHER_DIM_TIME);
+
+  // ========================== Post-processing ==========================
+  TIME_START(MOD_SWITCH);
+  // modulus switching so to reduce the response size by half
+  if(pir_params_.get_rns_mod_cnt() > 1) {
+    DEBUG_PRINT("Modulus switching to the next modulus...");
+    evaluator_.mod_switch_to_next_inplace(result[0]); // result.size() == 1.
+  }
+  // we can always switch to the small modulus it correctness is guaranteed.
+  DEBUG_PRINT("Modulus switching for a single modulus...");
+  const uint64_t small_q = pir_params_.get_small_q();
+  mod_switch_inplace(result[0], small_q);
+
+  TIME_END(MOD_SWITCH);
+  DEBUG_PRINT("Modulus switching done.");
+  return result[0];
+}
+
+
 
 size_t PirServer::save_resp_to_stream(const seal::Ciphertext &response,
                                       std::stringstream &stream) {

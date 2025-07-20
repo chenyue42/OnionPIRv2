@@ -1,6 +1,8 @@
 #pragma once
 
 #include "pir.h"
+#include "gsw_eval.h"
+
 class PirClient {
 public:
   PirClient(const PirParams &pirparms);
@@ -21,6 +23,11 @@ public:
 
   // similar to generate_query, but preparing query for fast_expand_qry.
   seal::Ciphertext fast_generate_query(const size_t entry_index);
+
+  // Generate a query without compression techniques to test the noise growth.
+  void generate_expanded_query(const size_t entry_index, std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> &gsw_vec);
+
+
   // helper function for fast_generate_query
   void add_gsw_to_query(seal::Ciphertext &query, const std::vector<size_t> query_indices);
 

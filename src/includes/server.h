@@ -26,6 +26,8 @@ public:
 
   // Given the client id and a packed client query, this function first unpacks the query, then returns the retrieved encrypted result.
   seal::Ciphertext make_query(const size_t client_id, std::stringstream &query_stream);
+  // Skip the expansion step to test the noise growth.
+  seal::Ciphertext make_query_no_expand(std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> gsw_vec);
 
   // return the number of bits needed to represent the server reponse
   size_t save_resp_to_stream(const seal::Ciphertext &response, std::stringstream &resp_stream);
