@@ -84,6 +84,14 @@ size_t PirParams::get_num_bits_per_plaintext() const {
   return get_num_bits_per_coeff() * seal_params_.poly_modulus_degree();
 }
 
+const size_t PirParams::get_ct_mod_width() const {
+  size_t ct_mod_width = 0;
+  for (size_t i = 0; i < get_rns_mod_cnt(); ++i) {
+    ct_mod_width += seal_params_.coeff_modulus()[i].bit_count();
+  }
+  return ct_mod_width;
+}
+
 size_t PirParams::get_num_entries_per_plaintext() const {
   const size_t total_bits = get_num_bits_per_plaintext();
   if (total_bits % (entry_size_ * 8) != 0) {
@@ -123,7 +131,7 @@ void PirParams::print_params() const {
     std::cout << seal_params_.coeff_modulus()[i].bit_count() << " + ";
   }
   std::cout << seal_params_.coeff_modulus().back().bit_count();
-  std::cout << "] bits" << std::endl;
+  std::cout << "] = " << get_ct_mod_width() << " bits" << std::endl;
 
   // print the coeff_modulus
   std::cout << "  seal_params_.coeff_modulus()\t\t\t= [";

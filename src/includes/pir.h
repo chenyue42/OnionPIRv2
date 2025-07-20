@@ -34,6 +34,7 @@ public:
    * after aligning the end of an entry to the end of a plaintext.
    */
   size_t get_num_bits_per_plaintext() const;
+  const size_t get_ct_mod_width() const;
 
   inline seal::EncryptionParameters get_seal_params() const { return seal_params_; }
   inline seal::SEALContext get_context() const { return context_; }
@@ -66,6 +67,9 @@ public:
   // The height of the expansion tree during packing unpacking stages
   inline const size_t get_expan_height() const {
     return std::ceil(std::log2(get_fst_dim_sz() + get_l() * (dims_.size() - 1)));
+  }  // the theoretical size of RGSW(sk) without pseudorandom seed
+  inline const size_t get_gsw_key_size() const {
+    return get_ct_mod_width() * get_coeff_val_cnt() * 2 * l_key_ / 8;
   }
 
   // ================== helper functions ==================

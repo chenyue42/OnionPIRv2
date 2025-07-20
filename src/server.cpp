@@ -426,6 +426,7 @@ PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) c
 void PirServer::set_client_galois_key(const size_t client_id, std::stringstream &galois_stream) {
   seal::GaloisKeys client_key;
   client_key.load(context_, galois_stream);
+  BENCH_PRINT("Number of galois keys: " << client_key.data().size());
   client_galois_keys_[client_id] = client_key;
 }
 
@@ -515,9 +516,11 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
     evaluator_.mod_switch_to_next_inplace(result[0]); // result.size() == 1.
   }
   // we can always switch to the small modulus it correctness is guaranteed.
-  DEBUG_PRINT("Modulus switching for a single modulus...");
-  const uint64_t small_q = pir_params_.get_small_q();
-  mod_switch_inplace(result[0], small_q);
+  if (DatabaseConstants::SmallQWidth < DatabaseConstants::CoeffMods[0]) {
+    DEBUG_PRINT("Modulus switching for a single modulus...");
+    const uint64_t small_q = pir_params_.get_small_q();
+    mod_switch_inplace(result[0], small_q);
+  }
 
   TIME_END(MOD_SWITCH);
   DEBUG_PRINT("Modulus switching done.");

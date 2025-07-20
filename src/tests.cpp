@@ -148,7 +148,8 @@ void PirTest::test_pir() {
   BENCH_PRINT("Success rate: " << success_count << "/" << EXPERIMENT_ITERATIONS);
   BENCH_PRINT("galois key size: " << galois_key_size << " bytes");
   BENCH_PRINT("gsw key size: " << gsw_key_size << " bytes");
-  BENCH_PRINT("total key size: " << static_cast<double>(galois_key_size + gsw_key_size) / 1024 / 1024 << "MB");
+  BENCH_PRINT("gsw key theoretical size: " << pir_params.get_gsw_key_size() << " bytes");
+  BENCH_PRINT("total key size: " << static_cast<double>(galois_key_size + gsw_key_size) / 1024 << "KB");
   BENCH_PRINT("query size: " << query_size << " bytes = " << static_cast<double>(query_size) / 1024 << " KB");
   BENCH_PRINT("response size: " << resp_size << " bytes = " << static_cast<double>(resp_size) / 1024 << " KB");
   
