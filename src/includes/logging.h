@@ -21,7 +21,7 @@
   BENCH_PRINT("==============================================================" \
               "================");
 
-constexpr std::size_t WARMUP_ITERATIONS = 3;
+constexpr std::size_t WARMUP_ITERATIONS = 0;
 
 // predefine some name for logging
 #define CORE_TIME "Core"

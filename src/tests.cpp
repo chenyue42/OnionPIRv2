@@ -97,6 +97,21 @@ void PirTest::test_pir() {
     seal::Ciphertext response = server.make_query(client_id, query_stream);
     TIME_END(SERVER_TOT_TIME);
 
+
+    // // =============== PIR without compression ================
+    // TIME_START(CLIENT_TOT_TIME);
+    // std::vector<seal::Ciphertext> bfv_vec;
+    // std::vector<GSWCiphertext> gsw_vec;
+    // client.generate_expanded_query(query_index, bfv_vec, gsw_vec);
+    // std::cout << "gsw_vec.size() = " << gsw_vec.size() << std::endl;
+    // TIME_END(CLIENT_TOT_TIME);
+
+    // // ============= SERVER ===============
+    // TIME_START(SERVER_TOT_TIME);
+    // seal::Ciphertext response = server.make_query_no_expand(bfv_vec, gsw_vec);
+    // TIME_END(SERVER_TOT_TIME);
+    // // ============== end PIR without compression ==============
+
     // ---------- server send the response to the client -----------
     resp_size = server.save_resp_to_stream(response, resp_stream);
 
@@ -426,11 +441,7 @@ void PirTest::test_external_product() {
   BENCH_PRINT("RGSW_L: " << gsw_l);
   const size_t base_log2 = pir_params.get_base_log2();
   GSWEval data_gsw(pir_params, gsw_l, base_log2);
-  std::vector<seal::Ciphertext> temp_gsw;
-  data_gsw.plain_to_gsw(b, encryptor_, secret_key_, temp_gsw); // In OnionPIR, client use a similar function to encrypt the secret key. 
-  GSWCiphertext b_gsw;
-  data_gsw.seal_GSW_vec_to_GSW(b_gsw, temp_gsw);
-  data_gsw.gsw_ntt_negacyclic_harvey(b_gsw);  // We need NTT form RGSW.
+  GSWCiphertext b_gsw = data_gsw.plain_to_gsw(b, encryptor_, secret_key_); // In OnionPIR, client use a similar function to encrypt the secret key. 
 
   // actual external product
   BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(a_encrypted));
@@ -909,6 +920,8 @@ void PirTest::test_fast_expand_query() {
   PirClient client(pir_params);
   PirServer server(pir_params);
   const size_t client_id = client.get_client_id();
+
+  pir_params.print_params();
 
   // ============= setup the server ==============
   std::stringstream galois_key_stream, gsw_stream, data_stream;

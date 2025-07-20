@@ -57,6 +57,7 @@ void PirServer::gen_data() {
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   const size_t num_en_per_pt = pir_params_.get_num_entries_per_plaintext();
   const size_t entry_size = pir_params_.get_entry_size();
+  std::cout << "entry_size: " << entry_size << std::endl;
 
   for (size_t row = 0; row < other_dim_sz; ++row) {
     std::vector<Entry> one_chunk(fst_dim_sz * num_en_per_pt, Entry(entry_size));
@@ -164,7 +165,12 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
   TIME_START(FST_DELEY_MOD_TIME);
   std::vector<seal::Ciphertext> result; // output vector
   result.reserve(other_dim_sz);
-  delay_modulus(result, inter_res_.data());
+  if (other_dim_sz < 16) {
+    delay_modulus_small(result, inter_res_.data());
+  }
+  else {
+    delay_modulus(result, inter_res_.data());
+  }
   TIME_END(FST_DELEY_MOD_TIME);
 
   return result;
@@ -235,6 +241,56 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint1
       evaluator_.transform_from_ntt_inplace(cts[idx]);
       result.emplace_back(std::move(cts[idx]));
     }
+  }
+}
+
+void PirServer::delay_modulus_small(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res) {
+  const size_t other_dim_sz = pir_params_.get_other_dim_sz();
+  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  const auto coeff_modulus = pir_params_.get_coeff_modulus();
+  const size_t inter_padding = other_dim_sz * 2;  // distance between coefficients in inter_res
+  
+  // Process each ciphertext individually for small cases
+  for (size_t j = 0; j < other_dim_sz; j++) {
+    // Create a single ciphertext
+    seal::Ciphertext ct(context_);
+    ct.resize(2);  // each ciphertext stores 2 polynomials
+
+    // Compute the base indices for this ciphertext's two intermediate parts
+    const size_t base0 = j * 2;
+    const size_t base1 = j * 2 + 1;
+
+    // Initialize intermediate indices and ciphertext write indices
+    size_t inter_idx0 = 0;  // for poly0
+    size_t inter_idx1 = 0;  // for poly1
+    size_t ct_idx0 = 0;     // write index for poly0
+    size_t ct_idx1 = 0;     // write index for poly1
+
+    // Process each modulus and coefficient
+    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+      const seal::Modulus &modulus = coeff_modulus[mod_id];
+      for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
+        // Process polynomial 0
+        uint128_t x0 = inter_res[base0 + inter_idx0 * inter_padding];
+        uint64_t raw0[2] = { static_cast<uint64_t>(x0), static_cast<uint64_t>(x0 >> 64) };
+        ct.data(0)[ct_idx0++] = util::barrett_reduce_128(raw0, modulus);
+
+        // Process polynomial 1
+        uint128_t x1 = inter_res[base1 + inter_idx1 * inter_padding];
+        uint64_t raw1[2] = { static_cast<uint64_t>(x1), static_cast<uint64_t>(x1 >> 64) };
+        ct.data(1)[ct_idx1++] = util::barrett_reduce_128(raw1, modulus);
+        
+        // Advance intermediate indices
+        inter_idx0++;
+        inter_idx1++;
+      }
+    }
+
+    // Mark ciphertext as being in NTT form and then transform back
+    ct.is_ntt_form() = true;
+    evaluator_.transform_from_ntt_inplace(ct);
+    result.emplace_back(std::move(ct));
   }
 }
 
@@ -526,6 +582,42 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   DEBUG_PRINT("Modulus switching done.");
   return result[0];
 }
+
+
+seal::Ciphertext PirServer::make_query_no_expand(std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> gsw_vec) {
+  // ========================== Evaluations ==========================
+  // Evaluate the first dimension
+  TIME_START(FST_DIM_TIME);
+  std::vector<seal::Ciphertext> result = evaluate_first_dim(bfv_vec);
+  TIME_END(FST_DIM_TIME);
+
+  // Evaluate the other dimensions
+  TIME_START(OTHER_DIM_TIME);
+  if (dims_.size() != 1) {
+    for (size_t i = 1; i < dims_.size(); i++) {
+      other_dim_mux(result, gsw_vec[i - 1]);
+    }
+  }
+  TIME_END(OTHER_DIM_TIME);
+
+  // ========================== Post-processing ==========================
+  TIME_START(MOD_SWITCH);
+  // modulus switching so to reduce the response size by half
+  if(pir_params_.get_rns_mod_cnt() > 1) {
+    DEBUG_PRINT("Modulus switching to the next modulus...");
+    evaluator_.mod_switch_to_next_inplace(result[0]); // result.size() == 1.
+  }
+  // we can always switch to the small modulus it correctness is guaranteed.
+  DEBUG_PRINT("Modulus switching for a single modulus...");
+  const uint64_t small_q = pir_params_.get_small_q();
+  mod_switch_inplace(result[0], small_q);
+
+  TIME_END(MOD_SWITCH);
+  DEBUG_PRINT("Modulus switching done.");
+  return result[0];
+}
+
+
 
 size_t PirServer::save_resp_to_stream(const seal::Ciphertext &response,
                                       std::stringstream &stream) {

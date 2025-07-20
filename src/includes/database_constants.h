@@ -149,4 +149,28 @@ namespace DatabaseConstants {
   // constexpr std::array<size_t, 2> CoeffMods = { 32, 61 }; // 107-bit security
 
 
+
+
+  // ! ==========================  small entry 34-bit ct mods (n=1024)==========================
+  constexpr size_t MaxFstDimSz = 256;               // Maximum size of the first dimension. Actual size can only be smaller.
+  constexpr size_t PolyDegree = 1024;
+  constexpr size_t NumEntries = 1 << 15;            // number of entries in the database
+  constexpr size_t EntrySize = 0;                   // 0 means calculated automatically. Take the largest possible value.
+  constexpr size_t GSW_L = 20;                      // parameter for GSW scheme
+  constexpr size_t GSW_L_KEY = 20;                  // GSW for query expansion
+  constexpr size_t PlainMod = 5;
+  constexpr size_t SmallQWidth = 34;                // modulus switching width.
+  constexpr std::array<size_t, 2> CoeffMods = { 34, 61 };
+
+  // ! ==========================  small entry 32-bit ct mods (n=1024)==========================
+  // constexpr size_t MaxFstDimSz = 128;               // Maximum size of the first dimension. Actual size can only be smaller.
+  // constexpr size_t PolyDegree = 1024;
+  // constexpr size_t NumEntries = 1 << 15;            // number of entries in the database
+  // constexpr size_t EntrySize = 0;                   // 0 means calculated automatically. Take the largest possible value.
+  // constexpr size_t GSW_L = 28;                      // parameter for GSW scheme
+  // constexpr size_t GSW_L_KEY = 28;                  // GSW for query expansion
+  // constexpr size_t PlainMod = 3;
+  // constexpr size_t SmallQWidth = 32;                // modulus switching width.
+  // constexpr std::array<size_t, 2> CoeffMods = { 32, 61 };
+
 } // namespace DatabaseConstants

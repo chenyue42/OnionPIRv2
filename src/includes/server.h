@@ -26,6 +26,8 @@ public:
 
   // Given the client id and a packed client query, this function first unpacks the query, then returns the retrieved encrypted result.
   seal::Ciphertext make_query(const size_t client_id, std::stringstream &query_stream);
+  // Skip the expansion step to test the noise growth.
+  seal::Ciphertext make_query_no_expand(std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> gsw_vec);
 
   // return the number of bits needed to represent the server reponse
   size_t save_resp_to_stream(const seal::Ciphertext &response, std::stringstream &resp_stream);
@@ -87,6 +89,10 @@ private:
   // Instead of doing a mod operation after every addition and multiplication during the matrix multiplication,
   // we delay the mod operation until the end. We also use barret reduction for the mod operation.
   void delay_modulus(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res);
+  
+  // This is a helper for evaluate the first dimension when other_dim_sz < 16.
+  // It processes ciphertexts individually without unrolling.
+  void delay_modulus_small(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res);
   
   // Transforms the plaintexts in the database into their NTT representation.
   // This speeds up computation but takes up more memory.  

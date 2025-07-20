@@ -164,6 +164,35 @@ seal::Ciphertext PirClient::fast_generate_query(const size_t entry_index) {
 }
 
 
+void PirClient::generate_expanded_query(const size_t entry_index, std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> &gsw_vec) {
+  // compute the query indices
+  const size_t plaintext_index = get_database_plain_index(entry_index);
+  std::vector<size_t> query_indices = get_query_indices(plaintext_index);
+  PRINT_INT_ARRAY("\t\tquery_indices", query_indices.data(), query_indices.size());
+  assert(bfv_vec.size() == 0);
+  assert(gsw_vec.size() == 0);
+
+  // encrypt the first dimension
+  for (size_t i = 0; i < dims_[0]; i++)  {
+    seal::Ciphertext temp_bfv;
+    seal::Plaintext plain_query(DatabaseConstants::PolyDegree);
+    plain_query[0] = (i == query_indices[0]) ? 1 : 0;
+    encryptor_.encrypt_symmetric(plain_query, temp_bfv);
+    bfv_vec.push_back(temp_bfv); // store the first dimension in the bfv vector
+  }
+
+  // handle the rest dimensions
+  GSWEval data_gsw(pir_params_, pir_params_.get_l(), pir_params_.get_base_log2());
+  for (size_t i = 1; i < dims_.size(); i++) {
+    std::vector<uint64_t> plain_query(DatabaseConstants::PolyDegree);
+    plain_query[0] = (query_indices[i] == 1) ? 1 : 0;
+    // transform plain_query to NTT form
+    GSWCiphertext query_gsw = data_gsw.plain_to_gsw(plain_query, encryptor_, secret_key_); // In OnionPIR, client use a similar function to encrypt the secret key. 
+    gsw_vec.push_back(query_gsw);
+  }
+}
+
+
 void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size_t> query_indices) {
   // no further dimensions
   if (query_indices.size() == 1) { return; }
@@ -209,8 +238,6 @@ void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size
 }
 
 
-
-
 size_t PirClient::write_query_to_stream(const seal::Ciphertext &query, std::stringstream &data_stream) {
   return query.save(data_stream);
 }
@@ -231,9 +258,8 @@ size_t PirClient::create_galois_keys(std::stringstream &galois_key_stream) {
   // expansion height is the height of the expansion tree such that
   // 2^get_expan_height() is equal to the number of packed values padded to the next power of 2.
   const size_t expan_height = pir_params_.get_expan_height();
-  const size_t poly_degree = DatabaseConstants::PolyDegree;
   for (size_t i = 0; i < expan_height; i++) {
-    galois_elts.push_back(1 + (poly_degree >> i));
+    galois_elts.push_back(1 + (DatabaseConstants::PolyDegree >> i));
   }
   // PRINT_INT_ARRAY("galois_elts: ", galois_elts, galois_elts.size());
   auto written_size = keygen_.create_galois_keys(galois_elts).save(galois_key_stream);
@@ -253,9 +279,8 @@ seal::Plaintext PirClient::decrypt_ct(const seal::Ciphertext& ct) {
 }
 
 Entry PirClient::get_entry_from_plaintext(const size_t entry_index, const seal::Plaintext plaintext) const {
-  // Offset in the plaintext in bits
-  const size_t start_position_in_plaintext = (entry_index % pir_params_.get_num_entries_per_plaintext()) *
-                                       pir_params_.get_entry_size() * 8;
+  const size_t entry_size = pir_params_.get_entry_size(); // in bytes
+  const size_t start_position_in_plaintext = (entry_index % pir_params_.get_num_entries_per_plaintext()) * entry_size;
 
   // Offset in the plaintext by coefficient
   const size_t num_bits_per_coeff = pir_params_.get_num_bits_per_coeff();
@@ -264,25 +289,33 @@ Entry PirClient::get_entry_from_plaintext(const size_t entry_index, const seal::
   // Offset in the coefficient by bits
   const size_t coeff_offset = start_position_in_plaintext % num_bits_per_coeff;
 
-  // Size of entry in bits
-  const size_t entry_size = pir_params_.get_entry_size();
-  Entry result;
+  // Get the actual coefficient count and polynomial degree
+  // We need this because the decrypted pt might have < DatabaseConstants::PolyDegree coefficients.
+  // Thanks SEAL :/ 
+  const size_t actual_coeff_count = plaintext.coeff_count();
+  // Helper function to safely get coefficient value with zero padding
+  auto get_coeff_safe = [&](size_t idx) -> uint64_t {
+    if (idx < actual_coeff_count) {
+      return plaintext.data()[idx];
+    } else {
+      return 0; // Pad with zeros for coefficients beyond actual_coeff_count
+    }
+  };
 
-  uint128_t data_buffer = plaintext.data()[coeff_index] >> coeff_offset;
+  uint128_t data_buffer = get_coeff_safe(coeff_index) >> coeff_offset;
   uint128_t data_offset = num_bits_per_coeff - coeff_offset;
-
+  Entry result;
   while (result.size() < entry_size) {
     if (data_offset >= 8) {
       result.push_back(data_buffer & 0xFF);
       data_buffer >>= 8; data_offset -= 8;
     } else {
       coeff_index += 1;
-      uint128_t next_buffer = plaintext.data()[coeff_index];
+      uint128_t next_buffer = get_coeff_safe(coeff_index);
       data_buffer |= next_buffer << data_offset;
       data_offset += num_bits_per_coeff;
     }
   }
-
   return result;
 }
 
