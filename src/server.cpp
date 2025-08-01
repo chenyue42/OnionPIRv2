@@ -55,24 +55,41 @@ void PirServer::gen_data() {
   db_.reset(new std::optional<seal::Plaintext>[num_pt_]);
   const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
-  const size_t num_en_per_pt = pir_params_.get_num_entries_per_plaintext();
-  const size_t entry_size = pir_params_.get_entry_size();
-  std::cout << "entry_size: " << entry_size << std::endl;
+  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  const uint64_t plain_mod = pir_params_.get_plain_mod();
+  
+  BENCH_PRINT("Generating random plaintext polynomials...");
+
+  // Open file to store original plaintexts for verification
+  std::ofstream original_pt_file(RAW_DB_FILE, std::ios::binary);
+  if (!original_pt_file.is_open()) {
+    throw std::invalid_argument("Unable to open " RAW_DB_FILE " for writing");
+  }
 
   for (size_t row = 0; row < other_dim_sz; ++row) {
-    std::vector<Entry> one_chunk(fst_dim_sz * num_en_per_pt, Entry(entry_size));
     for (size_t col = 0; col < fst_dim_sz; ++col) {
       const size_t poly_id = row * fst_dim_sz + col;
-      for (size_t local_id = 0; local_id < num_en_per_pt; ++local_id) {
-        const size_t entry_id = poly_id * num_en_per_pt + local_id;
-        one_chunk[col * num_en_per_pt + local_id] = utils::generate_entry(entry_id, entry_size, random_file);
+      
+      // Generate a random plaintext polynomial
+      seal::Plaintext plaintext(coeff_count);
+      uint64_t* coeffs = plaintext.data();
+      
+      // Fill with random coefficients (mod plain_mod)
+      for (size_t i = 0; i < coeff_count; ++i) {
+        uint64_t rand_val;
+        random_file.read(reinterpret_cast<char*>(&rand_val), sizeof(uint64_t));
+        coeffs[i] = rand_val % plain_mod;
       }
+      
+      // Save original plaintext to file before NTT transformation
+      original_pt_file.write(reinterpret_cast<const char*>(coeffs), coeff_count * sizeof(uint64_t));
+      
+      db_[poly_id] = std::move(plaintext);
     }
-    write_one_chunk(one_chunk);
-    push_database_chunk(one_chunk, row);
-    // utils::print_progress(row+1, other_dim_sz);
   }
   random_file.close();
+  original_pt_file.close();
+  
   // transform the ntt_db_ from coefficient form to ntt form. db_ is not transformed.
   preprocess_ntt();
   realign_db();
@@ -503,20 +520,22 @@ void PirServer::set_client_gsw_key(const size_t client_id, std::stringstream &gs
 }
 
 
-Entry PirServer::direct_get_entry(const size_t entry_idx) const {
-  // read the entry from raw_db_file
-  std::ifstream in_file(RAW_DB_FILE, std::ios::binary);
-  if (!in_file.is_open()) {
-    throw std::invalid_argument("Unable to open file for reading");
+// Get original plaintext from file (before NTT transformation)
+seal::Plaintext PirServer::direct_get_original_plaintext(const size_t plaintext_idx) const {
+  std::ifstream original_pt_file(RAW_DB_FILE, std::ios::binary);
+  if (!original_pt_file.is_open()) {
+    throw std::invalid_argument("Unable to open " RAW_DB_FILE " for reading");
   }
-  // Read the entry from the file
-  auto entry_size = pir_params_.get_entry_size();
-  in_file.seekg(entry_idx * entry_size);
-  Entry entry(entry_size);
-  in_file.read(reinterpret_cast<char *>(entry.data()), entry_size);
-  in_file.close();
-
-  return entry;
+  
+  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  const size_t offset = plaintext_idx * coeff_count * sizeof(uint64_t);
+  
+  original_pt_file.seekg(offset);
+  seal::Plaintext plaintext(coeff_count);
+  original_pt_file.read(reinterpret_cast<char*>(plaintext.data()), coeff_count * sizeof(uint64_t));
+  original_pt_file.close();
+  
+  return plaintext;
 }
 
 
@@ -673,74 +692,6 @@ size_t PirServer::save_resp_to_stream(const seal::Ciphertext &response,
   return total_bytes;
 }
 
-void PirServer::push_database_chunk(std::vector<Entry> &chunk_entry, const size_t chunk_idx) {
-  // Flattens data into vector of u8s and pads each entry with 0s to entry_size number of bytes.
-  // This is actually resizing from entry.size() to pir_params_.get_entry_size()
-  // This is redundent if the given entries uses the same pir parameters.
-  for (Entry &entry : chunk_entry) {
-    if (entry.size() != 0 && entry.size() <= pir_params_.get_entry_size()) {
-      entry.resize(pir_params_.get_entry_size(), 0);
-    }
-
-    if (entry.size() > pir_params_.get_entry_size()) {
-        std::invalid_argument("Entry size is too large");
-    }
-  }
-
-  const size_t bits_per_coeff = pir_params_.get_num_bits_per_coeff();
-  const size_t num_entries_per_plaintext = pir_params_.get_num_entries_per_plaintext();
-  const size_t num_pt_per_chunk = chunk_entry.size() / num_entries_per_plaintext;  // number of plaintexts in the new chunk
-  const uint128_t coeff_mask = (uint128_t(1) << (bits_per_coeff)) - 1;  // bits_per_coeff many 1s
-  const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();  // number of plaintexts in the first dimension
-  const size_t chunk_offset = fst_dim_sz * chunk_idx;  // offset for the current chunk
-
-  // Now we handle plaintexts one by one.
-  for (size_t i = 0; i < num_pt_per_chunk; i++) {
-    seal::Plaintext plaintext(DatabaseConstants::PolyDegree);
-
-    // Loop through the entries that corresponds to the current plaintext. 
-    // Then calculate the total size (in bytes) of this plaintext.
-    // NOTE: it is possible that some entry is empty, which has size 0.
-    size_t additive_sum_size = 0;
-    for (size_t j = num_entries_per_plaintext * i;
-         j < std::min(num_entries_per_plaintext * (i + 1), chunk_entry.size()); j++) {
-      additive_sum_size += chunk_entry[j].size();
-    }
-
-    if (additive_sum_size == 0) {
-      continue; // leave std::nullopt in the chunk if the plaintext is empty.
-    }
-
-    size_t index = 0;  // index for the current coefficient to be filled
-    uint128_t data_buffer = 0;
-    size_t data_offset = 0;
-    // For each entry in the current plaintext
-    for (size_t j = num_entries_per_plaintext * i;
-         j < std::min(num_entries_per_plaintext * (i + 1), chunk_entry.size()); j++) {
-      // For each byte in this entry
-      for (size_t k = 0; k < pir_params_.get_entry_size(); k++) {
-        // data_buffer temporarily stores the data from entry bytes
-        data_buffer += uint128_t(chunk_entry[j][k]) << data_offset;
-        data_offset += 8;
-        // When we have enough data to fill a coefficient
-        // We will one by one fill the coefficients with the data_buffer.
-        while (data_offset >= bits_per_coeff) {
-          plaintext[index] = data_buffer & coeff_mask;
-          index++;
-          data_buffer >>= bits_per_coeff;
-          data_offset -= bits_per_coeff;
-        }
-      }
-    }
-    // add remaining data to a new coefficient
-    if (data_offset > 0) {
-      plaintext[index] = data_buffer & coeff_mask;
-      index++;
-    }
-    db_[i + chunk_offset] = std::move(plaintext);
-  }
-}
-
 void PirServer::preprocess_ntt() {
   BENCH_PRINT("\nTransforming the database to NTT form...");
   // tutorial on Number Theoretic Transform (NTT): https://youtu.be/Pct3rS4Y0IA?si=25VrCwBJuBjtHqoN
@@ -801,21 +752,6 @@ void PirServer::fill_inter_res() {
   // allocate memory for the intermediate result
   inter_res_.resize(elem_cnt);
 }
-
-void PirServer::write_one_chunk(std::vector<Entry> &data) {
-  // write the database to a binary file in CACHE_DIR
-  std::string filename = std::string(RAW_DB_FILE);
-  std::ofstream out_file(filename, std::ios::binary | std::ios::app); // append to the file
-  if (out_file.is_open()) {
-    for (auto &entry : data) {
-      out_file.write(reinterpret_cast<const char *>(entry.data()), entry.size());
-    }
-    out_file.close();
-  } else {
-    std::cerr << "Unable to open file for writing" << std::endl;
-  }
-}
-
 
 void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext, const uint64_t q) {
   if (ciphertext.is_ntt_form()) {

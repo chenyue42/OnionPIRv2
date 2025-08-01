@@ -15,17 +15,17 @@ public:
   2. Creates a plain_query (pt in paper), add the first dimension, then encrypts it.
   3. For the rest dimensions, calculate required RGSW coefficients and insert
   them into the ciphertext. Result is $\tilde c$ in paper.
-  @param entry_index The input to the PIR blackbox.
+  @param pt_idx The input to the PIR blackbox.
   @return returns a seal::Ciphertext with a a seed stored in
   c_1, which should not be touched before doing serialization.
   */
-  seal::Ciphertext generate_query(const size_t entry_index);
+  seal::Ciphertext generate_query(const size_t pt_idx);
 
   // similar to generate_query, but preparing query for fast_expand_qry.
-  seal::Ciphertext fast_generate_query(const size_t entry_index);
+  seal::Ciphertext fast_generate_query(const size_t pt_idx);
 
   // Generate a query without compression techniques to test the noise growth.
-  void generate_expanded_query(const size_t entry_index, std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> &gsw_vec);
+  void generate_expanded_query(const size_t pt_idx, std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> &gsw_vec);
 
 
   // helper function for fast_generate_query
@@ -37,10 +37,9 @@ public:
   // decrypt the result returned from PIR. Assume modulus switching is applied.
   seal::Plaintext decrypt_reply(const seal::Ciphertext& reply);
   seal::Plaintext decrypt_ct(const seal::Ciphertext& ct);
-  // Retrieves an entry from the plaintext containing the entry.
+  // Retrieves a plaintext from the plaintext containing the plaintext.
   std::vector<Ciphertext> generate_gsw_from_key();
   
-  Entry get_entry_from_plaintext(const size_t entry_index, const seal::Plaintext plaintext) const;
   inline size_t get_client_id() const { return client_id_; }
 
   inline void test_budget(seal::Ciphertext &ct) {
@@ -74,11 +73,9 @@ private:
   seal::SEALContext context_mod_q_prime_;
   std::vector<size_t> dims_;
   
-  // Gets the corresponding plaintext index in a database for a given entry index
-  size_t get_database_plain_index(size_t entry_index);
 
   // Gets the query indices for a given plaintext
-  std::vector<size_t> get_query_indices(size_t plaintext_index);
+  std::vector<size_t> get_query_indices(size_t pt_idx);
 
   // switching the secret key mod old_q to mod new_q
   // This matters since sk is a tenary polynomial, which contains -1 mod q.

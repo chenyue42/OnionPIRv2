@@ -84,12 +84,12 @@ void PirTest::test_pir() {
 
     // ===================== ONLINE PHASE =====================
     // Client start generating query
-    size_t query_index = rand() % pir_params.get_num_entries();
+    size_t query_pt_idx = rand() % pir_params.get_num_pt();
 
     // ============= CLIENT ===============
     TIME_START(CLIENT_TOT_TIME);
     // seal::Ciphertext query = client.generate_query(query_index);
-    seal::Ciphertext query = client.fast_generate_query(query_index);
+    seal::Ciphertext query = client.fast_generate_query(query_pt_idx);
     query_size = client.write_query_to_stream(query, query_stream);
     TIME_END(CLIENT_TOT_TIME);
     
@@ -121,26 +121,25 @@ void PirTest::test_pir() {
     seal::Ciphertext reconstructed_result = client.load_resp_from_stream(resp_stream);
     TIME_START(CLIENT_TOT_TIME);
     seal::Plaintext decrypted_result = client.decrypt_reply(reconstructed_result);
-    Entry response_entry = client.get_entry_from_plaintext(query_index, decrypted_result);
     TIME_END(CLIENT_TOT_TIME);
 
     // test noise budget
 
 
     // ============= Directly get the plaintext from server. Not part of PIR.
-    Entry actual_entry = server.direct_get_entry(query_index);
-    // extract and print the actual entry index
-    uint64_t actual_entry_idx = utils::get_entry_idx(actual_entry);
-    uint64_t resp_entry_idx = utils::get_entry_idx(response_entry);
+    seal::Plaintext actual_plaintext = server.direct_get_original_plaintext(query_pt_idx);
+    // extract and print the actual plaintext index
+    uint64_t actual_plaintext_idx = query_pt_idx;
+    uint64_t resp_plaintext_idx = query_pt_idx;
     
     END_EXPERIMENT();
     // ============= PRINTING RESULTS ===============    
-    DEBUG_PRINT("\t\tquery / resp / actual idx:\t" << query_index << " / " << resp_entry_idx << " / " << actual_entry_idx);
+    DEBUG_PRINT("\t\tquery / resp / actual idx:\t" << query_pt_idx << " / " << resp_plaintext_idx << " / " << actual_plaintext_idx);
     #ifdef _DEBUG
     PRINT_RESULTS(i+1);
     #endif
 
-    if (utils::entry_is_equal(response_entry, actual_entry)) {
+    if (utils::plaintext_is_equal(decrypted_result, actual_plaintext)) {
       // print a green success message
       std::cout << "\033[1;32mSuccess!\033[0m" << std::endl;
       success_count++;
@@ -148,9 +147,9 @@ void PirTest::test_pir() {
       // print a red failure message
       std::cout << "\033[1;31mFailure!\033[0m" << std::endl;
       std::cout << "PIR Result:\t";
-      utils::print_entry(response_entry, 20);
-      std::cout << "Actual Entry:\t";
-      utils::print_entry(actual_entry, 20);
+      utils::print_plaintext(decrypted_result, 20);
+      std::cout << "Actual Plaintext:\t";
+      utils::print_plaintext(actual_plaintext, 20);
     }
   }
 

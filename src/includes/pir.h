@@ -9,11 +9,6 @@
 using namespace seal::util;
 using namespace seal;
 
-// ================== TYPE DEFINITIONS ==================
-// Each entry is a vector of bytes
-typedef std::vector<uint8_t> Entry;
-typedef uint64_t Key; // key in the key-value pair. 
-
 // ================== CLASS DEFINITIONS ==================
 class PirParams {
 public:
@@ -26,26 +21,19 @@ public:
     * @brief Calculates the number of entries that each plaintext can contain,
     aligning the end of an entry to the end of a plaintext.
    */
-  size_t get_num_entries_per_plaintext() const;
-  size_t get_num_bits_per_coeff() const;
+  inline const size_t get_num_bits_per_coeff() const { return seal_params_.plain_modulus().bit_count() - 1; }
 
-  /**
-   * @brief Calculates the number of bytes of data each plaintext contains,
-   * after aligning the end of an entry to the end of a plaintext.
-   */
-  size_t get_num_bits_per_plaintext() const;
   const size_t get_ct_mod_width() const;
 
   inline seal::EncryptionParameters get_seal_params() const { return seal_params_; }
   inline seal::SEALContext get_context() const { return context_; }
-  inline double get_DBSize_MB() const { return static_cast<double>(num_entries_) * entry_size_ / 1024 / 1024; }
+  inline size_t get_pt_size() const { return get_num_bits_per_coeff() * DatabaseConstants::PolyDegree / 8; }  // size of each plaintext in bytes
+  inline double get_DBSize_MB() const { return static_cast<double>(num_pt_) * get_pt_size() / 1024 / 1024; }
   inline double get_physical_storage_MB() const {
     // After NTT, plaintext will have same size as ciphertext.
     return static_cast<double>(get_coeff_val_cnt()) * num_pt_ * 8 / 1024 / 1024;
   }
-  inline size_t get_num_entries() const { return num_entries_; }
   inline size_t get_num_pt() const { return num_pt_; }
-  inline size_t get_entry_size() const { return entry_size_; }
   inline std::vector<size_t> get_dims() const { return dims_; }
   inline size_t get_l() const { return l_; }
   inline size_t get_l_key() const { return l_key_; }
@@ -82,9 +70,7 @@ private:
   uint64_t small_q_ = 0; // small modulus used for modulus switching. Use only when rns_mod_cnt == 1
   size_t base_log2_;         // log of base for data RGSW
   size_t base_log2_key_;     // log of base for key RGSW
-  size_t num_entries_;  // number of entries in the database. Will be padded to multiples of other dimension size.
   size_t num_pt_;            // number of plaintexts in the database
-  size_t entry_size_;    // size of each entry in bytes
   size_t total_dims_ = DatabaseConstants::TotalDims;        // total number of dimensions (d in paper)
   std::vector<size_t> dims_; // Number of dimensions
   seal::EncryptionParameters seal_params_;

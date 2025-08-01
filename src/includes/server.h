@@ -21,9 +21,6 @@ public:
    */
   void gen_data();
 
-  // push one chunk of entry to the given database
-  void push_database_chunk(std::vector<Entry> &chunk_entry, const size_t chunk_idx);
-
   // Given the client id and a packed client query, this function first unpacks the query, then returns the retrieved encrypted result.
   seal::Ciphertext make_query(const size_t client_id, std::stringstream &query_stream);
   // Skip the expansion step to test the noise growth.
@@ -43,12 +40,13 @@ public:
   void set_client_galois_key(const size_t client_id, std::stringstream &gsw_stream);
   void set_client_gsw_key(const size_t client_id, std::stringstream &gsw_stream);
 
+
   /**
-  Asking the server to return the entry at the given (abstract) index.
+  Asking the server to return the original plaintext (before NTT transformation) at the given index.
   This is not doing PIR. So this reveals the index to the server. This is
   only for testing purposes.
   */
-  Entry direct_get_entry(const size_t index) const;
+  seal::Plaintext direct_get_original_plaintext(const size_t index) const;
 
   friend class PirTest;
 
@@ -102,9 +100,6 @@ private:
 
   // Fill the intermediate_db_ with some ciphertext. We just need to allocate the memory.
   void fill_inter_res();
-
-  // write one chunk of the database to a binary file in CACHE_DIR
-  void write_one_chunk(std::vector<Entry> &chunk);
 
   void prep_query(const std::vector<seal::Ciphertext> &fst_dim_query, std::vector<uint64_t>& query_data);
 

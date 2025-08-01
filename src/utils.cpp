@@ -89,52 +89,38 @@ std::uint64_t utils::generate_prime(size_t bit_width) {
       // Ensure candidate is odd, as even numbers greater than 2 cannot be prime
       candidate |= 1;
   } while (!seal::util::is_prime(seal::Modulus(candidate)));
-
-  BENCH_PRINT("Plaintext prime: " << candidate);
   return candidate;
 }
 
-// converting a uint64_t to a std::vector<uint8_t> of size 8. Assyming the input vector has at least 8 elements.
-void utils::writeIdxToEntry(const uint64_t idx, Entry &entry) {
-  // Convert id to bytes and write them to the start of the entry.
-  for (size_t i = 0; i < 8; ++i) {
-    // Extract the i-th byte from the least significant to the most significant
-    entry[7 - i] = static_cast<uint8_t>((idx >> (i * 8)) & 0xFF);
-  }
-}
-
-uint64_t utils::get_entry_idx(const Entry &entry) {
-  uint64_t idx = 0;
-  for (size_t i = 0; i < 8; ++i) {
-    idx |= static_cast<uint64_t>(entry[7 - i]) << (i * 8);
-  }
-  return idx;
-}
-
-
-void utils::print_entry(const Entry &entry, const size_t count) {
+// New functions for plaintext handling
+void utils::print_plaintext(const seal::Plaintext &plaintext, const size_t count) {
   size_t cnt = 0;
-  for (auto &val : entry) {
-    if (cnt < count) { 
-      std::cout << (size_t)val << ", ";
-    }
+  const size_t coeff_count = plaintext.coeff_count();
+  for (size_t i = 0; i < coeff_count && cnt < count; ++i) {
+    std::cout << plaintext.data()[i] << ", ";
     cnt += 1;
   }
   std::cout << std::endl;
 }
 
-
-bool utils::entry_is_equal(const Entry &entry1, const Entry &entry2) {
-  for (size_t i = 0; i < entry1.size(); i++) {
-    if (entry1[i] != entry2[i]) {
-      std::cerr << "Entries are not equal" << std::endl;
+bool utils::plaintext_is_equal(const seal::Plaintext &plaintext1, const seal::Plaintext &plaintext2) {
+  const size_t coeff_count1 = plaintext1.coeff_count();
+  const size_t coeff_count2 = plaintext2.coeff_count();
+  
+  if (coeff_count1 != coeff_count2) {
+    std::cerr << "Plaintexts have different coefficient counts" << std::endl;
+    return false;
+  }
+  
+  for (size_t i = 0; i < coeff_count1; i++) {
+    if (plaintext1.data()[i] != plaintext2.data()[i]) {
+      std::cerr << "Plaintexts are not equal at coefficient " << i << std::endl;
       return false;
     }
   }
-  std::cout << "Entries are equal" << std::endl;
+  std::cout << "Plaintexts are equal" << std::endl;
   return true;
 }
-
 
 void utils::print_progress(size_t current, size_t total) {
     float progress = static_cast<float>(current) / total;
@@ -154,21 +140,6 @@ void utils::print_progress(size_t current, size_t total) {
     }
     std::cout << "] " << size_t(progress * 100.0) << " %";
     std::cout.flush();
-}
-
-
-Entry utils::generate_entry(const uint64_t entry_id, const size_t entry_size, std::ifstream &random_file) {
-  Entry entry(entry_size);
-
-  // write the entry_id to the first 8 bytes of the entry
-  utils::writeIdxToEntry(entry_id, entry);
-
-  // fill the rest of the entry with random bytes
-  // random_file.read(reinterpret_cast<char *>(entry.data() + 8), entry_size - 8);
-  for (size_t i = 8; i < entry_size; ++i) {
-    entry[i] = static_cast<uint8_t>(128);
-  }
-  return entry;
 }
 
 

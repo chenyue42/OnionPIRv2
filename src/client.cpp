@@ -31,14 +31,10 @@ std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
 }
 
 
-size_t PirClient::get_database_plain_index(size_t entry_index) {
-  return entry_index / pir_params_.get_num_entries_per_plaintext();
-}
-
-std::vector<size_t> PirClient::get_query_indices(size_t plaintext_index) {
+std::vector<size_t> PirClient::get_query_indices(size_t pt_idx) {
   std::vector<size_t> query_indices;
-  const size_t col_idx = plaintext_index % dims_[0];  // the first dimension
-  size_t row_idx = plaintext_index / dims_[0];  // the rest of the dimensions
+  const size_t col_idx = pt_idx % dims_[0];  // the first dimension
+  size_t row_idx = pt_idx / dims_[0];  // the rest of the dimensions
   size_t remain_pt_num = pir_params_.get_num_pt() / dims_[0];
 
   query_indices.push_back(col_idx);
@@ -54,12 +50,11 @@ std::vector<size_t> PirClient::get_query_indices(size_t plaintext_index) {
 
 
 
-seal::Ciphertext PirClient::generate_query(const size_t entry_index) {
+seal::Ciphertext PirClient::generate_query(const size_t pt_idx) {
 
   // ================== Setup parameters ==================
   // Get the corresponding index of the plaintext in the database
-  const size_t plaintext_index = get_database_plain_index(entry_index);
-  std::vector<size_t> query_indices = get_query_indices(plaintext_index);
+  std::vector<size_t> query_indices = get_query_indices(pt_idx);
   PRINT_INT_ARRAY("\t\tquery_indices", query_indices.data(), query_indices.size());
   const size_t bits_per_ciphertext = 1 << pir_params_.get_expan_height(); // padding msg_size to the next power of 2
 
@@ -127,11 +122,10 @@ seal::Ciphertext PirClient::generate_query(const size_t entry_index) {
 }
 
 
-seal::Ciphertext PirClient::fast_generate_query(const size_t entry_index) {
+seal::Ciphertext PirClient::fast_generate_query(const size_t pt_idx) {
   // ================== Setup parameters ==================
   // Get the corresponding index of the plaintext in the database
-  const size_t plaintext_index = get_database_plain_index(entry_index);
-  std::vector<size_t> query_indices = get_query_indices(plaintext_index);
+  std::vector<size_t> query_indices = get_query_indices(pt_idx);
   PRINT_INT_ARRAY("\t\tquery_indices", query_indices.data(), query_indices.size());
   const size_t expan_height = pir_params_.get_expan_height();
   const size_t bits_per_ciphertext = 1 << expan_height; // padding msg_size to the next power of 2
@@ -164,10 +158,9 @@ seal::Ciphertext PirClient::fast_generate_query(const size_t entry_index) {
 }
 
 
-void PirClient::generate_expanded_query(const size_t entry_index, std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> &gsw_vec) {
+void PirClient::generate_expanded_query(const size_t pt_idx, std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> &gsw_vec) {
   // compute the query indices
-  const size_t plaintext_index = get_database_plain_index(entry_index);
-  std::vector<size_t> query_indices = get_query_indices(plaintext_index);
+  std::vector<size_t> query_indices = get_query_indices(pt_idx);
   PRINT_INT_ARRAY("\t\tquery_indices", query_indices.data(), query_indices.size());
   assert(bfv_vec.size() == 0);
   assert(gsw_vec.size() == 0);
@@ -278,46 +271,6 @@ seal::Plaintext PirClient::decrypt_ct(const seal::Ciphertext& ct) {
   return result;
 }
 
-Entry PirClient::get_entry_from_plaintext(const size_t entry_index, const seal::Plaintext plaintext) const {
-  const size_t entry_size = pir_params_.get_entry_size(); // in bytes
-  const size_t start_position_in_plaintext = (entry_index % pir_params_.get_num_entries_per_plaintext()) * entry_size;
-
-  // Offset in the plaintext by coefficient
-  const size_t num_bits_per_coeff = pir_params_.get_num_bits_per_coeff();
-  size_t coeff_index = start_position_in_plaintext / num_bits_per_coeff;
-
-  // Offset in the coefficient by bits
-  const size_t coeff_offset = start_position_in_plaintext % num_bits_per_coeff;
-
-  // Get the actual coefficient count and polynomial degree
-  // We need this because the decrypted pt might have < DatabaseConstants::PolyDegree coefficients.
-  // Thanks SEAL :/ 
-  const size_t actual_coeff_count = plaintext.coeff_count();
-  // Helper function to safely get coefficient value with zero padding
-  auto get_coeff_safe = [&](size_t idx) -> uint64_t {
-    if (idx < actual_coeff_count) {
-      return plaintext.data()[idx];
-    } else {
-      return 0; // Pad with zeros for coefficients beyond actual_coeff_count
-    }
-  };
-
-  uint128_t data_buffer = get_coeff_safe(coeff_index) >> coeff_offset;
-  uint128_t data_offset = num_bits_per_coeff - coeff_offset;
-  Entry result;
-  while (result.size() < entry_size) {
-    if (data_offset >= 8) {
-      result.push_back(data_buffer & 0xFF);
-      data_buffer >>= 8; data_offset -= 8;
-    } else {
-      coeff_index += 1;
-      uint128_t next_buffer = get_coeff_safe(coeff_index);
-      data_buffer |= next_buffer << data_offset;
-      data_offset += num_bits_per_coeff;
-    }
-  }
-  return result;
-}
 
 // =======================================================================
 // Below is my previous attempt to decrypt the ciphertext using new modulus.

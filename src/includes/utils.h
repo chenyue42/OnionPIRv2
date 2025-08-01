@@ -75,30 +75,12 @@ gsw_gadget(size_t l, uint64_t base_log2, size_t rns_mod_cnt,
 // Generate a prime that is bit_width long
 std::uint64_t generate_prime(size_t bit_width);
 
-void writeIdxToEntry(const uint64_t idx, Entry &entry);
+// New functions for plaintext handling
+void print_plaintext(const seal::Plaintext &plaintext, size_t count = 10);
 
-// Extract first 8 bytes of the given Entry and format it as a uint64_t and
-// return.
-uint64_t get_entry_idx(const Entry &entry);
-
-void print_entry(const Entry &entry, size_t count = 10);
-
-bool entry_is_equal(const Entry &entry1, const Entry &entry2);
+bool plaintext_is_equal(const seal::Plaintext &plaintext1, const seal::Plaintext &plaintext2);
 
 void print_progress(size_t current, size_t total);
-
-/**
- * @brief Given an entry id and the length of the entry, generate a random entry
- * using random number generator.
- *
- * @param entry_id entry id. Not used in implementation, but can be useful if we
- * want to generate entries with specific ids.
- * @param len length(size) of the entry. Each entry is a vector of bytes.
- * @param random_file random file for quick entry generation.
- * @return Entry
- */
-Entry generate_entry(const uint64_t entry_id, const size_t entry_size,
-                     std::ifstream &random_file);
 
 size_t next_pow_of_2(const size_t n);
 
