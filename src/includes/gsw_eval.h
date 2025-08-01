@@ -64,10 +64,15 @@ class GSWEval {
                       GSWCiphertext &output);
 
     // Although we don't need this function in the normal OnionPIR protocol, we provide this function for testing the external product. 
-    void plain_to_gsw(std::vector<uint64_t> const &plaintext,
-                      seal::Encryptor const &encryptor,
-                      seal::SecretKey const &sk,
-                      std::vector<seal::Ciphertext> &output);
+    // void plain_to_gsw(std::vector<uint64_t> const &plaintext,
+    //                   seal::Encryptor const &encryptor,
+    //                   seal::SecretKey const &sk,
+    //                   std::vector<seal::Ciphertext> &output);
+
+    // Although we don't need this function in the normal OnionPIR protocol, we provide this function for testing the external product. 
+    GSWCiphertext plain_to_gsw(std::vector<uint64_t> const &plaintext,
+                               seal::Encryptor const &encryptor,
+                               seal::SecretKey const &sk);
 
     void plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
                          seal::Encryptor const &encryptor,

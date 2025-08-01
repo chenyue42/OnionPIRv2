@@ -34,6 +34,7 @@ public:
    * after aligning the end of an entry to the end of a plaintext.
    */
   size_t get_num_bits_per_plaintext() const;
+  const size_t get_ct_mod_width() const;
 
   inline seal::EncryptionParameters get_seal_params() const { return seal_params_; }
   inline seal::SEALContext get_context() const { return context_; }
@@ -52,7 +53,8 @@ public:
   inline size_t get_base_log2() const { return base_log2_; }
   inline size_t get_base_log2_key() const { return base_log2_key_; }
   // In terms of number of plaintexts
-  inline size_t get_fst_dim_sz() const { return dims_[0]; }
+  // inline size_t get_fst_dim_sz() const { return dims_[0]; }
+  inline size_t get_fst_dim_sz() const { return DatabaseConstants::FstDimSz; }
   // In terms of number of plaintexts
   // when other_dim_sz == 1, it means we only use the first dimension.
   inline size_t get_other_dim_sz() const { return num_pt_ / dims_[0]; }
@@ -64,7 +66,10 @@ public:
   }
   // The height of the expansion tree during packing unpacking stages
   inline const size_t get_expan_height() const {
-    return std::ceil(std::log2(dims_[0] + get_l() * (dims_.size() - 1)));
+    return std::ceil(std::log2(get_fst_dim_sz() + get_l() * (dims_.size() - 1)));
+  }  // the theoretical size of RGSW(sk) without pseudorandom seed
+  inline const size_t get_gsw_key_size() const {
+    return get_ct_mod_width() * get_coeff_val_cnt() * 2 * l_key_ / 8;
   }
 
   // ================== helper functions ==================
@@ -77,9 +82,10 @@ private:
   uint64_t small_q_ = 0; // small modulus used for modulus switching. Use only when rns_mod_cnt == 1
   size_t base_log2_;         // log of base for data RGSW
   size_t base_log2_key_;     // log of base for key RGSW
-  size_t num_entries_ = DatabaseConstants::NumEntries;  // number of entries in the database. Will be padded to multiples of other dimension size.
+  size_t num_entries_;  // number of entries in the database. Will be padded to multiples of other dimension size.
   size_t num_pt_;            // number of plaintexts in the database
   size_t entry_size_;    // size of each entry in bytes
+  size_t total_dims_ = DatabaseConstants::TotalDims;        // total number of dimensions (d in paper)
   std::vector<size_t> dims_; // Number of dimensions
   seal::EncryptionParameters seal_params_;
   seal::SEALContext context_;

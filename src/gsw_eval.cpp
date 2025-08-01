@@ -285,18 +285,21 @@ void GSWEval::query_to_gsw(std::vector<seal::Ciphertext> query, GSWCiphertext gs
   }
 }
 
-void GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
-                  seal::Encryptor const &encryptor, seal::SecretKey const &sk,
-                  std::vector<seal::Ciphertext> &output) { 
-  output.clear(); 
+GSWCiphertext GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
+                  seal::Encryptor const &encryptor, seal::SecretKey const &sk) { 
+  GSWCiphertext output;
+  std::vector<seal::Ciphertext> temp;
   // when poly_id = 0, we are working on the first half of the GSWCiphertext
   for (size_t poly_id = 0; poly_id < 2; poly_id++) {
     for (size_t k = 0; k < l_; k++) {
       seal::Ciphertext cipher; 
       plain_to_gsw_one_row(plaintext, encryptor, sk, k, poly_id, cipher);
-      output.push_back(cipher);
+      temp.push_back(cipher);
     }
   }
+  seal_GSW_vec_to_GSW(output, temp);
+  gsw_ntt_negacyclic_harvey(output);
+  return output;
 }
 
 void GSWEval::plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
