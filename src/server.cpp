@@ -69,7 +69,7 @@ void PirServer::gen_data() {
     }
     write_one_chunk(one_chunk);
     push_database_chunk(one_chunk, row);
-    utils::print_progress(row+1, other_dim_sz);
+    // utils::print_progress(row+1, other_dim_sz);
   }
   random_file.close();
   // transform the ntt_db_ from coefficient form to ntt form. db_ is not transformed.

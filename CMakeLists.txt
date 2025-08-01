@@ -15,7 +15,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)   # fail if the compiler can't do C++20
 set(CMAKE_CXX_EXTENSIONS  OFF)        # use -std=c++20, not gnu++20
 
 # Automatically enables all available optimizations for your local machine, including AVX2 and AVX512
-set(CMAKE_CXX_FLAGS "-O3 -pg -MD -march=native -mtune=native")  # Enable all optimizations
+set(CMAKE_CXX_FLAGS "-O3 -MD -march=native -mtune=native")  # Enable all optimizations
 
 # Add perf when building in Debug mode
 if (CMAKE_BUILD_TYPE MATCHES Debug)
@@ -28,17 +28,20 @@ option(USE_HEXL "Enable Intel HEXL optimizations" ON)
 if (USE_HEXL)
     message(STATUS "HEXL support enabled.")
     add_compile_definitions(ONIONPIR_USE_HEXL)
-    # Also include its path if needed:
-    include_directories(/path/to/hexl/include)  # Adjust this!
+    
+    # Set HEXL installation path
+    set(HEXL_DIR "/u/yuec12/OnionPIRv2/hexl_install/lib64/cmake/hexl-1.2.6")
+    
+    # Find HEXL package
+    find_package(HEXL REQUIRED)
+    if(HEXL_FOUND)
+        message(STATUS "HEXL found at: ${HEXL_DIR}")
+    else()
+        message(FATAL_ERROR "HEXL not found. Please install HEXL or disable USE_HEXL option.")
+    endif()
 else()
     message(STATUS "HEXL support disabled.")
 endif()
-
-
-
-
-
-
 
 
 option(NOAVX512 "Disable AVX-512" OFF)
@@ -65,8 +68,14 @@ file(GLOB_RECURSE SRC_FILES src/*.cpp)
 add_executable(Onion-PIR ${SRC_FILES})
 
 # Find and link SEAL library
+set(SEAL_DIR "/u/yuec12/OnionPIRv2/seal_install/lib64/cmake/SEAL-4.1")
 find_package(SEAL 4.1 REQUIRED)
 target_link_libraries(Onion-PIR PUBLIC SEAL::seal)
+
+# Link HEXL if enabled
+if (USE_HEXL AND HEXL_FOUND)
+    target_link_libraries(Onion-PIR PUBLIC HEXL::hexl)
+endif()
 
 # Attempt to find Eigen3 quietly
 find_package(Eigen3 3.3 QUIET)

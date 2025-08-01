@@ -23,6 +23,9 @@ class PirTest {
     // simulation of the first dimension multiplication
     void test_fst_dim_mult();
 
+    // ======================== System Information ========================
+    void print_cpu_info();
+
     // ======================== Other tests ========================
     void test_prime_gen();
     void test_batch_decomp();

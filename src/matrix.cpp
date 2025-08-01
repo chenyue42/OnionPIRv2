@@ -392,6 +392,7 @@ void component_wise_mult_direct_mod(matrix_t *A, matrix_t *B, uint64_t *out, con
 
 // ======================== THIRD PARTIES ========================
 
+#ifdef HAVE_EIGEN
 void level_mat_mult_eigen(matrix_t *A, matrix_t *B, matrix_t *out) {
     const size_t rows = A->rows;   
     const size_t cols = A->cols;   
@@ -422,6 +423,7 @@ void level_mat_mult_eigen(matrix_t *A, matrix_t *B, matrix_t *out) {
         matC.noalias() = matA * matB;
     }
 }
+#endif
 
 
 // ======================== CRAZY AVX STUFF ========================

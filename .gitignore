@@ -27,3 +27,6 @@ outputs/
 .vscode/
 note&analysis/
 PIR_papers/
+hexl_install/
+seal_install/
+*.sbatch
