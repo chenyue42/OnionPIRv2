@@ -67,13 +67,12 @@ std::vector<size_t> PirClient::get_query_indices(size_t pt_idx) {
     perfect_idx = sl + corrected_idx / 2;
   }
   
-  // Only add more indices if h > 0
-  if (h > 0) {
-    size_t curr_level_sz = 1 << (h-1);
-    while (curr_level_sz > 1) {
-      query_indices.push_back(perfect_idx % 2);
-      perfect_idx = perfect_idx / 2;
-      curr_level_sz = curr_level_sz / 2;
+  // For the remaining perfect tree levels, emit bits MSB-first
+  if (h > 1) {
+    // There are (h - 1) bits for the perfect subtree
+    for (size_t k = h - 2; k + 1 > 0; k--) {
+      query_indices.push_back((perfect_idx >> k) & 1ULL);
+      if (k == 0) break;
     }
   }
   

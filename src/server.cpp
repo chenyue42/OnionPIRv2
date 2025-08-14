@@ -325,10 +325,11 @@ seal::Ciphertext PirServer::evaluate_other_dim(std::vector<seal::Ciphertext> &mi
   
   for (size_t a = 1; a < selectors.size(); a++) { // starting from the second to the last level
     const size_t level_sz = (1 << (h - a));
-    for (size_t i = 0; i < level_sz; i += 2) {
+    const size_t half = level_sz >> 1;
+    for (size_t i = 0; i < half; i++) {
       auto &x = mid_db[i];
-      auto &y = mid_db[i + 1];
-      ext_prod_mux(x, y, selectors[a], mid_db[i / 2]);
+      auto &y = mid_db[i + half];
+      ext_prod_mux(x, y, selectors[a], mid_db[i]);
     }
   }
   return mid_db[0];
@@ -364,8 +365,12 @@ void PirServer::ext_prod_mux(seal::Ciphertext &x, seal::Ciphertext &y, GSWCipher
 
     // ========== result = y + x ==========
     TIME_START(OTHER_DIM_ADD_SUB); 
-    // evaluator_.add_inplace(result, y);  // x + b * (y - x)
-    evaluator_.add(x, y, result);
+    // If result aliases x, we can add in-place to avoid an extra copy
+    if (&result == &x) {
+      evaluator_.add_inplace(x, y);  // x = x + y = x + b*(y - x)
+    } else {
+      evaluator_.add(x, y, result);
+    }
     TIME_END(OTHER_DIM_ADD_SUB);
 }
 

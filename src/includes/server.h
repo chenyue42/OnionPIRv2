@@ -52,6 +52,7 @@ public:
    */
   seal::Ciphertext evaluate_other_dim(std::vector<seal::Ciphertext> &intermediate_db, std::vector<GSWCiphertext> &selectors);
 
+  // compute x = b * (y - x) + x
   void ext_prod_mux(seal::Ciphertext &x, seal::Ciphertext &y, GSWCiphertext &selection_cipher, seal::Ciphertext &result);
 
 
