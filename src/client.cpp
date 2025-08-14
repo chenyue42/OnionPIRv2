@@ -19,7 +19,7 @@ std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
   const auto sk_ = secret_key_.data();
   const auto ntt_tables = context_.first_context_data()->small_ntt_tables();
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  const size_t coeff_count = DBConsts::PolyDegree;
   std::vector<uint64_t> sk_ntt(sk_.data(), sk_.data() + coeff_count * rns_mod_cnt);
 
   RNSIter secret_key_iter(sk_ntt.data(), coeff_count);
@@ -32,19 +32,51 @@ std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
 
 
 std::vector<size_t> PirClient::get_query_indices(size_t pt_idx) {
-  std::vector<size_t> query_indices;
   const size_t col_idx = pt_idx % dims_[0];  // the first dimension
-  size_t row_idx = pt_idx / dims_[0];  // the rest of the dimensions
-  size_t remain_pt_num = pir_params_.get_num_pt() / dims_[0];
+  const size_t row_idx = pt_idx / dims_[0];  // the rest of the dimensions
+  const size_t other_dim_sz = pir_params_.get_other_dim_sz();
+  const size_t d = dims_.size();
+  const size_t h = d - 1; // the height of the further dimension complete binary tree.
+  
+  std::vector<size_t> query_indices = {col_idx};
 
-  query_indices.push_back(col_idx);
-  for (size_t i = 1; i < dims_.size(); i++) {
-    size_t dim_size = dims_[i];
-    remain_pt_num /= dim_size;
-    query_indices.push_back(row_idx / remain_pt_num);
-    row_idx = row_idx % remain_pt_num;
+  // Handle single dimension case
+  if (d == 1) {
+    // For single dimension, we only need the column index
+    DEBUG_PRINT("Single dimension case - returning col_idx: " << col_idx);
+    return query_indices;
   }
+  
+  const size_t r = 2 * other_dim_sz - (1 << h);   // the number of elements in the last level of the complete binary tree.
+  const size_t sl = other_dim_sz - r;
 
+  // the last r elements lives in the last level of the complete binary tree.
+  // It is an even number but it is not a power of 2.
+  // The rest sl elements lives in the second to last level of the complete binary tree.
+  // Observe that other_dim_sz - r/2 = 2^(h-1), which is the number of nodes in the second to last level of the complete binary tree.
+  // we use the first selection bit to compute the mux for the first r elements.
+  // The rest is a normal perfect binary tree. 
+  // the first selection bit is special:
+  size_t perfect_idx;
+  if (row_idx < other_dim_sz - r) {
+    query_indices.push_back(0);
+    perfect_idx = row_idx;
+  } else {
+    size_t corrected_idx = row_idx - sl;
+    query_indices.push_back(corrected_idx % 2);
+    perfect_idx = sl + corrected_idx / 2;
+  }
+  
+  // Only add more indices if h > 0
+  if (h > 0) {
+    size_t curr_level_sz = 1 << (h-1);
+    while (curr_level_sz > 1) {
+      query_indices.push_back(perfect_idx % 2);
+      perfect_idx = perfect_idx / 2;
+      curr_level_sz = curr_level_sz / 2;
+    }
+  }
+  
   return query_indices;
 }
 
@@ -61,7 +93,7 @@ seal::Ciphertext PirClient::generate_query(const size_t pt_idx) {
   // Algorithm 1 from the OnionPIR Paper
 
   // empty plaintext
-  seal::Plaintext plain_query(DatabaseConstants::PolyDegree); 
+  seal::Plaintext plain_query(DBConsts::PolyDegree); 
   // We set the corresponding coefficient to the inverse so the value of the
   // expanded ciphertext will be 1
   uint64_t inverse = 0;
@@ -107,7 +139,7 @@ seal::Ciphertext PirClient::generate_query(const size_t pt_idx) {
     if (query_indices[i] == 1) {
       for (size_t k = 0; k < l; k++) {
         for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-          const size_t pad = mod_id * DatabaseConstants::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
+          const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
           const size_t coef_pos = dims_[0] + (i-1) * l + k + pad;  // the position of the coefficient in the query
           uint128_t mod = coeff_modulus[mod_id].value();
           // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
@@ -133,7 +165,7 @@ seal::Ciphertext PirClient::fast_generate_query(const size_t pt_idx) {
   // Algorithm 1 from the OnionPIR Paper
 
   // empty plaintext
-  seal::Plaintext plain_query(DatabaseConstants::PolyDegree); // we allow 4096 coefficients in the plaintext polynomial to be set as suggested in the paper.
+  seal::Plaintext plain_query(DBConsts::PolyDegree); // we allow 4096 coefficients in the plaintext polynomial to be set as suggested in the paper.
   // We set the corresponding coefficient to the inverse so the value of the
   // expanded ciphertext will be 1
   uint64_t inverse = 0;
@@ -168,7 +200,7 @@ void PirClient::generate_expanded_query(const size_t pt_idx, std::vector<seal::C
   // encrypt the first dimension
   for (size_t i = 0; i < dims_[0]; i++)  {
     seal::Ciphertext temp_bfv;
-    seal::Plaintext plain_query(DatabaseConstants::PolyDegree);
+    seal::Plaintext plain_query(DBConsts::PolyDegree);
     plain_query[0] = (i == query_indices[0]) ? 1 : 0;
     encryptor_.encrypt_symmetric(plain_query, temp_bfv);
     bfv_vec.push_back(temp_bfv); // store the first dimension in the bfv vector
@@ -177,7 +209,7 @@ void PirClient::generate_expanded_query(const size_t pt_idx, std::vector<seal::C
   // handle the rest dimensions
   GSWEval data_gsw(pir_params_, pir_params_.get_l(), pir_params_.get_base_log2());
   for (size_t i = 1; i < dims_.size(); i++) {
-    std::vector<uint64_t> plain_query(DatabaseConstants::PolyDegree);
+    std::vector<uint64_t> plain_query(DBConsts::PolyDegree);
     plain_query[0] = (query_indices[i] == 1) ? 1 : 0;
     // transform plain_query to NTT form
     GSWCiphertext query_gsw = data_gsw.plain_to_gsw(plain_query, encryptor_, secret_key_); // In OnionPIR, client use a similar function to encrypt the secret key. 
@@ -219,7 +251,7 @@ void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size
         const size_t coef_pos = fst_dim_sz + (i-1) * l + k;  // the position of the coefficient in the resulting query
         const size_t reversed_idx = utils::bit_reverse(coef_pos, expan_height);  // the position of the coefficient in the query
         for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-          const size_t pad = mod_id * DatabaseConstants::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
+          const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
           uint128_t mod = coeff_modulus[mod_id].value();
           // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
           uint128_t coef = gadget[mod_id][k] * inv[mod_id] % mod;
@@ -252,7 +284,7 @@ size_t PirClient::create_galois_keys(std::stringstream &galois_key_stream) {
   // 2^get_expan_height() is equal to the number of packed values padded to the next power of 2.
   const size_t expan_height = pir_params_.get_expan_height();
   for (size_t i = 0; i < expan_height; i++) {
-    galois_elts.push_back(1 + (DatabaseConstants::PolyDegree >> i));
+    galois_elts.push_back(1 + (DBConsts::PolyDegree >> i));
   }
   // PRINT_INT_ARRAY("galois_elts: ", galois_elts, galois_elts.size());
   auto written_size = keygen_.create_galois_keys(galois_elts).save(galois_key_stream);
@@ -285,7 +317,7 @@ seal::Plaintext PirClient::decrypt_ct(const seal::Ciphertext& ct) {
 //   auto context_ = pir_params_.get_context();
 //   const size_t plain_mod = pir_params_.get_plain_mod();
 //   auto ntt_tables = context_.get_context_data(params.parms_id())->small_ntt_tables();
-//   const size_t coeff_count = DatabaseConstants::PolyDegree;
+//   const size_t coeff_count = DBConsts::PolyDegree;
 //   MemoryPoolHandle pool_ = MemoryManager::GetPool(mm_prof_opt::mm_force_new, true);
 //   seal::Plaintext phase(coeff_count), result(coeff_count);
 
@@ -354,7 +386,7 @@ seal::Ciphertext PirClient::load_resp_from_stream(std::stringstream &resp_stream
   const size_t small_q = pir_params_.get_small_q();
   const size_t small_q_width =
       static_cast<size_t>(std::ceil(std::log2(small_q)));
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
 
   std::vector<uint64_t> c0(coeff_count);
   std::vector<uint64_t> c1(coeff_count);
@@ -399,7 +431,7 @@ seal::Ciphertext PirClient::load_resp_from_stream(std::stringstream &resp_stream
 
 
 seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint64_t small_q) const {
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
   const auto seal_params = pir_params_.get_seal_params();
   const auto full_mods = seal_params.coeff_modulus();
   
@@ -412,7 +444,7 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint6
 
   // create a new secret key with new modulus
   seal::EncryptionParameters new_params(seal::scheme_type::bfv);
-  new_params.set_poly_modulus_degree(DatabaseConstants::PolyDegree);
+  new_params.set_poly_modulus_degree(DBConsts::PolyDegree);
   new_params.set_plain_modulus(pir_params_.get_plain_mod());
   new_params.set_coeff_modulus({small_q, full_mods.back()}); // use the same last modulus as the original one.
 
@@ -447,7 +479,7 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
   dummy_ct.resize(context_mod_q_prime_, 2);
 
   // create a new ciphertext under new context, then copy the data from the input ct, then decrypt using the new sk.
-  for (size_t i = 0; i < DatabaseConstants::PolyDegree; i++) {
+  for (size_t i = 0; i < DBConsts::PolyDegree; i++) {
     // copy the data from the input ct to the new ct
     dummy_ct.data(0)[i] = ct.data(0)[i];
     dummy_ct.data(1)[i] = ct.data(1)[i];
@@ -466,7 +498,7 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
 
 
 seal::SecretKey PirClient::sk_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const {
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
   const seal::SEALContext old_context = pir_params_.get_context();
     const seal::SEALContext new_context(new_params);
   const auto old_context_data = old_context.key_context_data();
@@ -511,7 +543,7 @@ seal::SEALContext PirClient::init_mod_q_prime() {
 
   // create a new secret key with new modulus
   seal::EncryptionParameters new_params(seal::scheme_type::bfv);
-  new_params.set_poly_modulus_degree(DatabaseConstants::PolyDegree);
+  new_params.set_poly_modulus_degree(DBConsts::PolyDegree);
   new_params.set_plain_modulus(pir_params_.get_plain_mod());
   new_params.set_coeff_modulus({small_q, full_mods.back()}); // use the same last modulus as the original one.
 

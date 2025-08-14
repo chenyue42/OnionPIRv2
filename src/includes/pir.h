@@ -17,17 +17,15 @@ public:
   PirParams(const PirParams &pir_params) = default;
 
   // ================== getters ==================
-  /**
-    * @brief Calculates the number of entries that each plaintext can contain,
-    aligning the end of an entry to the end of a plaintext.
-   */
-  inline const size_t get_num_bits_per_coeff() const { return seal_params_.plain_modulus().bit_count() - 1; }
+  // number of usable bits per coefficient
 
   const size_t get_ct_mod_width() const;
 
+  inline const size_t get_num_bits_per_coeff() const { return DBConsts::PlainMod - 1; }
   inline seal::EncryptionParameters get_seal_params() const { return seal_params_; }
   inline seal::SEALContext get_context() const { return context_; }
-  inline size_t get_pt_size() const { return get_num_bits_per_coeff() * DatabaseConstants::PolyDegree / 8; }  // size of each plaintext in bytes
+  // size of each plaintext in bytes
+  inline size_t get_pt_size() const { return get_num_bits_per_coeff() * DBConsts::PolyDegree / 8; }
   inline double get_DBSize_MB() const { return static_cast<double>(num_pt_) * get_pt_size() / 1024 / 1024; }
   inline double get_physical_storage_MB() const {
     // After NTT, plaintext will have same size as ciphertext.
@@ -41,21 +39,19 @@ public:
   inline size_t get_base_log2() const { return base_log2_; }
   inline size_t get_base_log2_key() const { return base_log2_key_; }
   // In terms of number of plaintexts
-  // inline size_t get_fst_dim_sz() const { return dims_[0]; }
-  inline size_t get_fst_dim_sz() const { return DatabaseConstants::FstDimSz; }
+  inline size_t get_fst_dim_sz() const { return dims_[0]; }
   // In terms of number of plaintexts
   // when other_dim_sz == 1, it means we only use the first dimension.
   inline size_t get_other_dim_sz() const { return num_pt_ / dims_[0]; }
   inline size_t get_rns_mod_cnt() const { return seal_params_.coeff_modulus().size() - 1; }
-  inline size_t get_coeff_val_cnt() const { return DatabaseConstants::PolyDegree * get_rns_mod_cnt(); }
+  inline size_t get_coeff_val_cnt() const { return DBConsts::PolyDegree * get_rns_mod_cnt(); }
   inline uint64_t get_plain_mod() const { return seal_params_.plain_modulus().value(); }
   inline std::vector<Modulus> get_coeff_modulus() const {
     return context_.first_context_data()->parms().coeff_modulus();
   }
   // The height of the expansion tree during packing unpacking stages
-  inline const size_t get_expan_height() const {
-    return std::ceil(std::log2(get_fst_dim_sz() + get_l() * (dims_.size() - 1)));
-  }  // the theoretical size of RGSW(sk) without pseudorandom seed
+  inline const size_t get_expan_height() const { return DBConsts::TREE_HEIGHT; }
+  // the theoretical size of RGSW(sk) without pseudorandom seed
   inline const size_t get_gsw_key_size() const {
     return get_ct_mod_width() * get_coeff_val_cnt() * 2 * l_key_ / 8;
   }
@@ -65,13 +61,13 @@ public:
   void print_params() const;
 
 private:
-  static constexpr size_t l_ = DatabaseConstants::GSW_L;                  // l for GSW
-  static constexpr size_t l_key_ = DatabaseConstants::GSW_L_KEY;          // l for GSW key
+  static constexpr size_t l_ = DBConsts::GSW_L;                  // l for GSW
+  static constexpr size_t l_key_ = DBConsts::GSW_L_KEY;          // l for GSW key
   uint64_t small_q_ = 0; // small modulus used for modulus switching. Use only when rns_mod_cnt == 1
   size_t base_log2_;         // log of base for data RGSW
   size_t base_log2_key_;     // log of base for key RGSW
   size_t num_pt_;            // number of plaintexts in the database
-  size_t total_dims_ = DatabaseConstants::TotalDims;        // total number of dimensions (d in paper)
+  size_t total_dims_;
   std::vector<size_t> dims_; // Number of dimensions
   seal::EncryptionParameters seal_params_;
   seal::SEALContext context_;

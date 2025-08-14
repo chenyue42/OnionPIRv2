@@ -13,6 +13,7 @@ class PirTest {
     void bfv_example();
     void test_external_product(); 
     void test_decrypt_mod_q();
+    void test_ext_prod_mux();
 
     // ======================== SEAL Serialization ========================
     void serialization_example();
@@ -33,4 +34,5 @@ class PirTest {
     void test_raw_pt_ct_mult();
     void test_mod_switch();
     void test_sk_mod_switch();
+    void test_db_shape();
 };

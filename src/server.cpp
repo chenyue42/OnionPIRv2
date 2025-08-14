@@ -55,10 +55,8 @@ void PirServer::gen_data() {
   db_.reset(new std::optional<seal::Plaintext>[num_pt_]);
   const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  const size_t coeff_count = DBConsts::PolyDegree;
   const uint64_t plain_mod = pir_params_.get_plain_mod();
-  
-  BENCH_PRINT("Generating random plaintext polynomials...");
 
   // Open file to store original plaintexts for verification
   std::ofstream original_pt_file(RAW_DB_FILE, std::ios::binary);
@@ -79,6 +77,7 @@ void PirServer::gen_data() {
         uint64_t rand_val;
         random_file.read(reinterpret_cast<char*>(&rand_val), sizeof(uint64_t));
         coeffs[i] = rand_val % plain_mod;
+        // coeffs[i] = poly_id % plain_mod;
       }
       
       // Save original plaintext to file before NTT transformation
@@ -173,7 +172,6 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
   matrix128_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
   // TODO: should run delay_modulus more often if N_0 is large. Say N_0 = 1000, then we might need mod to avoid overflow.
   TIME_START(CORE_TIME);
-  // level_mat_mult_128(&db_mat, &query_mat, &inter_res_mat);
   // TODO: optimize the mat_mat_128 inside this function.
   naive_level_mat_mat_128(&db_mat, &query_mat, &inter_res_mat);
   TIME_END(CORE_TIME);
@@ -182,12 +180,7 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
   TIME_START(FST_DELEY_MOD_TIME);
   std::vector<seal::Ciphertext> result; // output vector
   result.reserve(other_dim_sz);
-  if (other_dim_sz < 16) {
-    delay_modulus_small(result, inter_res_.data());
-  }
-  else {
-    delay_modulus(result, inter_res_.data());
-  }
+  delay_modulus(result, inter_res_.data());
   TIME_END(FST_DELEY_MOD_TIME);
 
   return result;
@@ -197,7 +190,7 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
 void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res) {
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
   const auto coeff_modulus = pir_params_.get_coeff_modulus();
   const size_t inter_padding = other_dim_sz * 2;  // distance between coefficients in inter_res
   
@@ -206,8 +199,11 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint1
   // with a stride of inter_padding, which causes many cache misses.
   constexpr size_t unroll_factor = 16;
 
-  // Process ciphertexts in blocks of unroll_factor.
-  for (size_t j = 0; j < other_dim_sz; j += unroll_factor) {
+  // Process ciphertexts in blocks of unroll_factor for the main part
+  const size_t main_blocks = other_dim_sz / unroll_factor;
+  for (size_t block = 0; block < main_blocks; block++) {
+    const size_t j = block * unroll_factor;
+    
     // Create an array of ciphertexts.
     std::array<seal::Ciphertext, unroll_factor> cts;
     for (size_t idx = 0; idx < unroll_factor; idx++) {
@@ -259,17 +255,10 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint1
       result.emplace_back(std::move(cts[idx]));
     }
   }
-}
 
-void PirServer::delay_modulus_small(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res) {
-  const size_t other_dim_sz = pir_params_.get_other_dim_sz();
-  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
-  const auto coeff_modulus = pir_params_.get_coeff_modulus();
-  const size_t inter_padding = other_dim_sz * 2;  // distance between coefficients in inter_res
-  
-  // Process each ciphertext individually for small cases
-  for (size_t j = 0; j < other_dim_sz; j++) {
+  // Handle remaining ciphertexts individually for edge cases
+  const size_t remaining_start = main_blocks * unroll_factor;
+  for (size_t j = remaining_start; j < other_dim_sz; j++) {
     // Create a single ciphertext
     seal::Ciphertext ct(context_);
     ct.resize(2);  // each ciphertext stores 2 polynomials
@@ -311,10 +300,43 @@ void PirServer::delay_modulus_small(std::vector<seal::Ciphertext> &result, const
   }
 }
 
-void PirServer::other_dim_mux(std::vector<seal::Ciphertext> &result,
-                              GSWCiphertext &selection_cipher) {
+seal::Ciphertext PirServer::evaluate_other_dim(std::vector<seal::Ciphertext> &mid_db, std::vector<GSWCiphertext> &selectors) {
+  // Handle single dimension case
+  if (dims_.size() == 1) {
+    // For single dimension, we just return the first (and only) ciphertext
+    return mid_db[0];
+  }
+  
+  size_t h = dims_.size() - 1;
+  const size_t other_dim_sz = pir_params_.get_other_dim_sz();
+  // For multiple dimensions, calculate the results vector size properly
+  const size_t perfect_size = (1 << (h - 1)); // second to last level size
+  
+  // handling the last level
+  const size_t last_level_sz = 2 * other_dim_sz - (1 << h);
+  const size_t offset = other_dim_sz - last_level_sz;
+  
+  for (size_t i = 0; i < last_level_sz; i += 2) { // i is the index within the last level.
+    size_t corrected_idx = i + offset;  // index in the database.
+    auto &x = mid_db[corrected_idx];
+    auto &y = mid_db[corrected_idx + 1];
+    ext_prod_mux(x, y, selectors[0], mid_db[i / 2 + offset]);
+  }
+  
+  for (size_t a = 1; a < selectors.size(); a++) { // starting from the second to the last level
+    const size_t level_sz = (1 << (h - a));
+    for (size_t i = 0; i < level_sz; i += 2) {
+      auto &x = mid_db[i];
+      auto &y = mid_db[i + 1];
+      ext_prod_mux(x, y, selectors[a], mid_db[i / 2]);
+    }
+  }
+  return mid_db[0];
+}
 
-  /**
+
+void PirServer::ext_prod_mux(seal::Ciphertext &x, seal::Ciphertext &y, GSWCiphertext &selection_cipher, seal::Ciphertext &result) {
+    /**
    * Note that we only have a single GSWCiphertext for this selection.
    * Here is the logic:
    * We want to select the correct half of the "result" vector. 
@@ -324,10 +346,6 @@ void PirServer::other_dim_mux(std::vector<seal::Ciphertext> &result,
    * The simple formula is: 
    * result = RGSW(b) * (y - x) + x, where "*" is the external product, "+" and "-" are homomorphic operations.
    */
-  const size_t block_size = result.size() / 2;
-  for (size_t i = 0; i < block_size; i++) {
-    auto &x = result[i];
-    auto &y = result[i + block_size];
 
     // ========== y = y - x ==========
     TIME_START(OTHER_DIM_ADD_SUB);
@@ -346,10 +364,9 @@ void PirServer::other_dim_mux(std::vector<seal::Ciphertext> &result,
 
     // ========== result = y + x ==========
     TIME_START(OTHER_DIM_ADD_SUB); 
-    evaluator_.add_inplace(result[i], y);  // x + b * (y - x)
+    // evaluator_.add_inplace(result, y);  // x + b * (y - x)
+    evaluator_.add(x, y, result);
     TIME_END(OTHER_DIM_ADD_SUB);
-  }
-  result.resize(block_size);
 }
 
 // This function is using the algorithm 5 in Constant-weight PIR: Single-round Keyword PIR via Constant-weight Equality Operators.
@@ -384,7 +401,7 @@ PirServer::expand_query(size_t client_id, seal::Ciphertext &ciphertext) const {
     for (size_t b = 0; b < level_size; b++) {
       seal::Ciphertext c_prime = cts[b];
       TIME_START(APPLY_GALOIS);
-      evaluator_.apply_galois_inplace(c_prime, DatabaseConstants::PolyDegree / level_size + 1,
+      evaluator_.apply_galois_inplace(c_prime, DBConsts::PolyDegree / level_size + 1,
                                       client_galois_key); // Subs(c_b, n/k + 1)
       TIME_END(APPLY_GALOIS);
       seal::Ciphertext temp;
@@ -426,7 +443,7 @@ PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) c
     seal::Ciphertext c_prime = cts[i];
     TIME_START(APPLY_GALOIS);
     evaluator_.apply_galois_inplace(c_prime,
-                                    DatabaseConstants::PolyDegree / k + 1, 
+                                    DBConsts::PolyDegree / k + 1, 
                                     galois_key); 
     TIME_END(APPLY_GALOIS);
     TIME_START("add_sub");
@@ -480,7 +497,7 @@ PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) c
 //     for (int b = trimed_level_sz - 1; b > -1; b--) { // ! we have to reverse the order otherwise we will overwrite the cts[b] before using it.
 //       seal::Ciphertext c_prime = cts[b]; 
 //       TIME_START(APPLY_GALOIS);
-//       evaluator_.apply_galois_inplace(c_prime, DatabaseConstants::PolyDegree / level_size + 1,
+//       evaluator_.apply_galois_inplace(c_prime, DBConsts::PolyDegree / level_size + 1,
 //                                       client_galois_key); // Subs(c_b, n/k + 1)
 //       TIME_END(APPLY_GALOIS);
 //       // ! order matters! 
@@ -499,7 +516,6 @@ PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) c
 void PirServer::set_client_galois_key(const size_t client_id, std::stringstream &galois_stream) {
   seal::GaloisKeys client_key;
   client_key.load(context_, galois_stream);
-  BENCH_PRINT("Number of galois keys: " << client_key.data().size());
   client_galois_keys_[client_id] = client_key;
 }
 
@@ -527,7 +543,7 @@ seal::Plaintext PirServer::direct_get_original_plaintext(const size_t plaintext_
     throw std::invalid_argument("Unable to open " RAW_DB_FILE " for reading");
   }
   
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  const size_t coeff_count = DBConsts::PolyDegree;
   const size_t offset = plaintext_idx * coeff_count * sizeof(uint64_t);
   
   original_pt_file.seekg(offset);
@@ -539,7 +555,7 @@ seal::Plaintext PirServer::direct_get_original_plaintext(const size_t plaintext_
 }
 
 
-seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream &query_stream) {
+seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream &query_stream, seal::Decryptor &decryptor) {
   // receive the query from the client
   seal::Ciphertext query; 
   query.load(context_, query_stream);
@@ -547,8 +563,8 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   // ========================== Expansion & conversion ==========================
   // Query expansion
   TIME_START(EXPAND_TIME);
-  // std::vector<seal::Ciphertext> query_vector = expand_query(client_id, query);
-  std::vector<seal::Ciphertext> query_vector = fast_expand_qry(client_id, query);
+  std::vector<seal::Ciphertext> query_vector = expand_query(client_id, query);
+  // std::vector<seal::Ciphertext> query_vector = fast_expand_qry(client_id, query);
   TIME_END(EXPAND_TIME);
 
   // Reconstruct RGSW queries
@@ -557,8 +573,8 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   if (dims_.size() != 1) {  // if we do need futher dimensions
     for (size_t i = 1; i < dims_.size(); i++) {
       std::vector<seal::Ciphertext> lwe_vector; // BFV ciphertext, size l * 2. This vector will be reconstructed as a single RGSW ciphertext.
-      for (size_t k = 0; k < DatabaseConstants::GSW_L; k++) {
-        auto ptr = dims_[0] + (i - 1) * DatabaseConstants::GSW_L + k;
+      for (size_t k = 0; k < DBConsts::GSW_L; k++) {
+        auto ptr = dims_[0] + (i - 1) * DBConsts::GSW_L + k;
         lwe_vector.push_back(query_vector[ptr]);
       }
       // Converting the BFV ciphertexts to GSW ciphertext by doing external product
@@ -571,16 +587,12 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   // Evaluate the first dimension
   TIME_START(FST_DIM_TIME);
   query_vector.resize(dims_[0]);
-  std::vector<seal::Ciphertext> result = evaluate_first_dim(query_vector);
+  std::vector<seal::Ciphertext> mid_db = evaluate_first_dim(query_vector);
   TIME_END(FST_DIM_TIME);
 
   // Evaluate the other dimensions
   TIME_START(OTHER_DIM_TIME);
-  if (dims_.size() != 1) {
-    for (size_t i = 1; i < dims_.size(); i++) {
-      other_dim_mux(result, gsw_vec[i - 1]);
-    }
-  }
+  seal::Ciphertext result = evaluate_other_dim(mid_db, gsw_vec);
   TIME_END(OTHER_DIM_TIME);
 
   // ========================== Post-processing ==========================
@@ -588,18 +600,18 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   // modulus switching so to reduce the response size by half
   if(pir_params_.get_rns_mod_cnt() > 1) {
     DEBUG_PRINT("Modulus switching to the next modulus...");
-    evaluator_.mod_switch_to_next_inplace(result[0]); // result.size() == 1.
+    evaluator_.mod_switch_to_next_inplace(result); // result.size() == 1.
   }
   // we can always switch to the small modulus it correctness is guaranteed.
-  if (DatabaseConstants::SmallQWidth < DatabaseConstants::CoeffMods[0]) {
+  if (DBConsts::SmallQWidth < DBConsts::CoeffMods[0]) {
     DEBUG_PRINT("Modulus switching for a single modulus...");
     const uint64_t small_q = pir_params_.get_small_q();
-    mod_switch_inplace(result[0], small_q);
+    mod_switch_inplace(result, small_q);
   }
 
   TIME_END(MOD_SWITCH);
   DEBUG_PRINT("Modulus switching done.");
-  return result[0];
+  return result;
 }
 
 
@@ -612,11 +624,7 @@ seal::Ciphertext PirServer::make_query_no_expand(std::vector<seal::Ciphertext> &
 
   // Evaluate the other dimensions
   TIME_START(OTHER_DIM_TIME);
-  if (dims_.size() != 1) {
-    for (size_t i = 1; i < dims_.size(); i++) {
-      other_dim_mux(result, gsw_vec[i - 1]);
-    }
-  }
+  // evaluate_other_dim(result, gsw_vec);
   TIME_END(OTHER_DIM_TIME);
 
   // ========================== Post-processing ==========================
@@ -646,7 +654,7 @@ size_t PirServer::save_resp_to_stream(const seal::Ciphertext &response,
   const size_t small_q = pir_params_.get_small_q();
   const size_t small_q_width =
       static_cast<size_t>(std::ceil(std::log2(small_q)));
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
 
   // --- 2.  Bit-packing state -------------------------------------------------
   uint8_t byte_buf = 0;   // currently accumulated bits (LSB-first)
@@ -704,7 +712,7 @@ void PirServer::preprocess_ntt() {
 
   // print the the first 5 coefficients of the first plaintext in uint64_t
   DEBUG_PRINT("After NTT, the coefficients look like:")
-  auto temp_pt = db_[0].value();
+  auto temp_pt = db_[1].value();
   for (size_t i = 0; i < 5; i++) {
     DEBUG_PRINT(std::bitset<64>(temp_pt.data()[i]));
   }
@@ -748,7 +756,7 @@ void PirServer::fill_inter_res() {
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   // number of uint128_t we need to store in the intermediate result
-  const size_t elem_cnt = other_dim_sz * DatabaseConstants::PolyDegree * rns_mod_cnt * 2;
+  const size_t elem_cnt = other_dim_sz * DBConsts::PolyDegree * rns_mod_cnt * 2;
   // allocate memory for the intermediate result
   inter_res_.resize(elem_cnt);
 }
@@ -758,7 +766,7 @@ void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext, const uint64_t 
     throw std::invalid_argument("Ciphertext is in NTT form, cannot mod switch.");
   }
 
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
 
   // current ciphertext modulus
   const size_t Q = pir_params_.get_coeff_modulus()[0].value(); 
@@ -771,7 +779,7 @@ void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext, const uint64_t 
   
   const long double scale = static_cast<double>(q) / static_cast<double>(Q);
   
-  for (size_t i = 0; i < DatabaseConstants::PolyDegree; i++) {
+  for (size_t i = 0; i < DBConsts::PolyDegree; i++) {
     data0[i] = (uint64_t)std::round((long double)data0[i] * scale);
     data1[i] = (uint64_t)std::round((long double)data1[i] * scale);
   }

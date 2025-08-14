@@ -13,7 +13,7 @@
 
 
 void GSWEval::gsw_ntt_negacyclic_harvey(GSWCiphertext &gsw) {
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const auto context = pir_params_.get_context();
   auto ntt_tables = context.first_context_data()->small_ntt_tables();
@@ -50,8 +50,8 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
 
   // ============================ Parameters ============================
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
-  const size_t coeff_val_cnt = DatabaseConstants::PolyDegree * rns_mod_cnt; // polydegree * RNS moduli count
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
+  const size_t coeff_val_cnt = DBConsts::PolyDegree * rns_mod_cnt; // polydegree * RNS moduli count
 
   // ============================ Decomposition ============================
   // Decomposing the BFV ciphertext to 2l polynomials. Transform to NTT form.
@@ -132,7 +132,7 @@ void GSWEval::decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<ui
   const uint128_t base = uint128_t(1) << base_log2_;
   const uint128_t mask = base - 1;
   const auto &coeff_modulus = pir_params_.get_coeff_modulus();
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt();
   const auto &context_data = pir_params_.get_context().first_context_data();
@@ -199,7 +199,7 @@ void GSWEval::decomp_rlwe_single_mod(seal::Ciphertext const &ct, std::vector<std
   // Get parameters
   const uint64_t base = uint64_t(1) << base_log2_;
   const uint64_t mask = base - 1;
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
 
   // ============================ Right Shift ============================
   // we do right shift on both polynomials
@@ -236,7 +236,7 @@ void GSWEval::decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,
   }
 
   // ============================ Parameters ============================
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const auto &context_data = pir_params_.get_context().first_context_data();
   const auto ntt_tables = context_data->small_ntt_tables();
@@ -255,7 +255,7 @@ void GSWEval::query_to_gsw(std::vector<seal::Ciphertext> query, GSWCiphertext gs
                            GSWCiphertext &output) {
   const size_t curr_l = query.size();
   output.resize(curr_l);
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
 
   // We get the first half directly from the query
@@ -310,7 +310,7 @@ void GSWEval::plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
 
   // Accessing context data within this function instead of passing these parameters
   const auto &context = pir_params_.get_context();
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
   const auto &coeff_modulus = pir_params_.get_coeff_modulus();
   const size_t rns_mod_cnt = coeff_modulus.size();
   assert(plaintext.size() == coeff_count * rns_mod_cnt || plaintext.size() == coeff_count);
@@ -362,7 +362,7 @@ void GSWEval::plain_to_half_gsw_one_row(std::vector<uint64_t> const &plaintext,
   // Accessing context data within this function instead of passing these parameters
   const auto &context = pir_params_.get_context();
   const auto &params = context.first_context_data()->parms();
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
   const auto &coeff_modulus = pir_params_.get_coeff_modulus();
   const size_t rns_mod_cnt = coeff_modulus.size();
   assert(plaintext.size() == coeff_count * rns_mod_cnt || plaintext.size() == coeff_count);
@@ -408,7 +408,7 @@ void GSWEval::plain_to_half_gsw_one_row(std::vector<uint64_t> const &plaintext,
 }
 
 void GSWEval::seal_GSW_vec_to_GSW(GSWCiphertext &output, const std::vector<seal::Ciphertext> &gsw_vec) {
-  constexpr size_t coeff_count = DatabaseConstants::PolyDegree;
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
 
   output.clear();

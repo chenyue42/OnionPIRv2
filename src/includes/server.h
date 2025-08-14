@@ -22,24 +22,14 @@ public:
   void gen_data();
 
   // Given the client id and a packed client query, this function first unpacks the query, then returns the retrieved encrypted result.
-  seal::Ciphertext make_query(const size_t client_id, std::stringstream &query_stream);
+  seal::Ciphertext make_query(const size_t client_id, std::stringstream &query_stream, seal::Decryptor &decryptor);
   // Skip the expansion step to test the noise growth.
   seal::Ciphertext make_query_no_expand(std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> gsw_vec);
 
   // return the number of bits needed to represent the server reponse
   size_t save_resp_to_stream(const seal::Ciphertext &response, std::stringstream &resp_stream);
-
-  /**
-   * @brief A clever way to evaluate the external product for second to last dimensions. 
-   * 
-   * @param result The BFV ciphertexts
-   * @param selection_cipher A single RGSW(b) ciphertext, where b \in {0, 1}. 0 to get the first half of the result, 1 to get the second half.
-   */
-  void other_dim_mux(std::vector<seal::Ciphertext> &result, GSWCiphertext &selection_cipher);
-  
   void set_client_galois_key(const size_t client_id, std::stringstream &gsw_stream);
   void set_client_gsw_key(const size_t client_id, std::stringstream &gsw_stream);
-
 
   /**
   Asking the server to return the original plaintext (before NTT transformation) at the given index.
@@ -47,6 +37,23 @@ public:
   only for testing purposes.
   */
   seal::Plaintext direct_get_original_plaintext(const size_t index) const;
+
+
+  // high level: homomorphic matrix vector multiplication between plaintext database and query ciphertext
+  // input selection_vector should stay in coefficient form.
+  // output will be in coefficient form.
+  std::vector<seal::Ciphertext> evaluate_first_dim(std::vector<seal::Ciphertext> &selection_vector);
+
+  /**
+   * @brief A clever way to evaluate the external product for second to last dimensions. 
+   * 
+   * @param intermediate_db The BFV ciphertexts after the first dimension evaluation.
+   * @param selectors A vector of RGSW(b) ciphertexts, where b \in {0, 1}. 0 to get the first half of the result, 1 to get the second half.
+   */
+  seal::Ciphertext evaluate_other_dim(std::vector<seal::Ciphertext> &intermediate_db, std::vector<GSWCiphertext> &selectors);
+
+  void ext_prod_mux(seal::Ciphertext &x, seal::Ciphertext &y, GSWCiphertext &selection_cipher, seal::Ciphertext &result);
+
 
   friend class PirTest;
 
@@ -65,7 +72,7 @@ private:
   GSWEval data_gsw_;
 
   // Expands the query BFV ciphertext into a vector of BFV ciphertexts,
-  // where the first DatabaseConstants::MaxFstDim many ciphertexts is the first dimension query,
+  // where the first DBConsts::MaxFstDim many ciphertexts is the first dimension query,
   // and the rest will be used to reconstruct the RGSW ciphertexts for the other dimensions.
   std::vector<seal::Ciphertext> expand_query(size_t client_id, seal::Ciphertext &ciphertext) const;
 
@@ -77,20 +84,11 @@ private:
   // The expand query used in Cheetah is not suitable for this, though we don't
   // need special permutation for packing when using it.
   std::vector<seal::Ciphertext> fast_expand_qry(size_t client_id, seal::Ciphertext &ciphertext) const;
-  
-  // high level: homomorphic matrix vector multiplication between plaintext database and query ciphertext
-  // input selection_vector should stay in coefficient form.
-  // output will be in coefficient form.
-  std::vector<seal::Ciphertext> evaluate_first_dim(std::vector<seal::Ciphertext> &selection_vector);
 
   // This is a helper for evaluate the first dimension. 
   // Instead of doing a mod operation after every addition and multiplication during the matrix multiplication,
   // we delay the mod operation until the end. We also use barret reduction for the mod operation.
   void delay_modulus(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res);
-  
-  // This is a helper for evaluate the first dimension when other_dim_sz < 16.
-  // It processes ciphertexts individually without unrolling.
-  void delay_modulus_small(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res);
   
   // Transforms the plaintexts in the database into their NTT representation.
   // This speeds up computation but takes up more memory.  

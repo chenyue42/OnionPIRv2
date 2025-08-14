@@ -28,7 +28,7 @@ typedef struct {
 
 // ! mat_vec functions means matrix-vector multiplication. 
 // It is used for testing the performance of each method. Otherwise,
-// we are doing out = A * B, where A = m * n, B = n * 2, n = DatabaseConstants::MaxFstDimSz
+// we are doing out = A * B, where A = m * n, B = n * 2, n = DBConsts::MaxFstDimSz
 
 // ======================== NAIVE STUFF ========================
 void naive_mat_vec(matrix_t *A, matrix_t *B, matrix_t *out);

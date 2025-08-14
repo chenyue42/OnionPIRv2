@@ -30,6 +30,7 @@ void PirTest::run_tests() {
   // bfv_example();
   // serialization_example();
   // test_external_product();
+  // test_ext_prod_mux();
   // test_single_mat_mult();
   // test_fst_dim_mult();
   // test_batch_decomp();
@@ -38,7 +39,8 @@ void PirTest::run_tests() {
   // test_decrypt_mod_q();
   // test_mod_switch();
   // test_sk_mod_switch();
-  print_cpu_info();
+  // test_db_shape();
+  // print_cpu_info();
 }
 
 
@@ -88,14 +90,14 @@ void PirTest::test_pir() {
 
     // ============= CLIENT ===============
     TIME_START(CLIENT_TOT_TIME);
-    // seal::Ciphertext query = client.generate_query(query_index);
-    seal::Ciphertext query = client.fast_generate_query(query_pt_idx);
+    seal::Ciphertext query = client.generate_query(query_pt_idx);
+    // seal::Ciphertext query = client.fast_generate_query(query_pt_idx);
     query_size = client.write_query_to_stream(query, query_stream);
     TIME_END(CLIENT_TOT_TIME);
     
     // ============= SERVER ===============
     TIME_START(SERVER_TOT_TIME);
-    seal::Ciphertext response = server.make_query(client_id, query_stream);
+    seal::Ciphertext response = server.make_query(client_id, query_stream, client.decryptor_);
     TIME_END(SERVER_TOT_TIME);
 
 
@@ -128,15 +130,12 @@ void PirTest::test_pir() {
 
     // ============= Directly get the plaintext from server. Not part of PIR.
     seal::Plaintext actual_plaintext = server.direct_get_original_plaintext(query_pt_idx);
-    // extract and print the actual plaintext index
-    uint64_t actual_plaintext_idx = query_pt_idx;
-    uint64_t resp_plaintext_idx = query_pt_idx;
     
     END_EXPERIMENT();
     // ============= PRINTING RESULTS ===============    
-    DEBUG_PRINT("\t\tquery / resp / actual idx:\t" << query_pt_idx << " / " << resp_plaintext_idx << " / " << actual_plaintext_idx);
+    // DEBUG_PRINT("\t\tquery / resp / actual idx:\t" << query_pt_idx << " / " << resp_plaintext_idx << " / " << actual_plaintext_idx);
     #ifdef _DEBUG
-    PRINT_RESULTS(i+1);
+    // PRINT_RESULTS(i+1);
     #endif
 
     if (utils::plaintext_is_equal(decrypted_result, actual_plaintext)) {
@@ -183,7 +182,7 @@ void PirTest::bfv_example() {
   params.set_poly_modulus_degree(coeff_count); // example: a_1 x^4095 + a_2 x^4094 + ...
   const uint64_t pt_mod = utils::generate_prime(49); // 49 bits for the plain modulus, then you can use 48 bits for storing data.
   params.set_plain_modulus(pt_mod);
-  std::vector<int> bit_sizes({60, 60,60}); // You can also try our own DatabaseConstants::CoeffMods
+  std::vector<int> bit_sizes({60, 60,60}); // You can also try our own DBConsts::CoeffMods
   const auto coeff_modulus = CoeffModulus::Create(coeff_count, bit_sizes);
   params.set_coeff_modulus(coeff_modulus);
   // ================== END OF SEAL PARAMS INIT ==================
@@ -418,7 +417,7 @@ void PirTest::test_external_product() {
   auto secret_key_ = keygen_.secret_key();
   auto encryptor_ = seal::Encryptor(context_, secret_key_);
   auto decryptor_ = seal::Decryptor(context_, secret_key_);
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  const size_t coeff_count = DBConsts::PolyDegree;
 
   // the test data vector a and results are both in BFV scheme.
   seal::Plaintext a(coeff_count), result;
@@ -494,6 +493,46 @@ void PirTest::test_external_product() {
   PRINT_RESULTS(); 
 }
 
+
+void PirTest::test_ext_prod_mux() {
+  print_func_name(__FUNCTION__);
+  PirParams pir_params;
+  PirServer server(pir_params);
+  PirClient client(pir_params);
+  const size_t coeff_count = DBConsts::PolyDegree;
+
+  // create two ciphertexts
+  seal::Plaintext a(coeff_count), b(coeff_count);
+  a[0] = 508; a[1] = 509; a[2] = 510;
+  b[0] = 511; b[1] = 512; b[2] = 513;
+  seal::Ciphertext a_encrypted, b_encrypted;
+  client.encryptor_.encrypt_symmetric(a, a_encrypted);
+  client.encryptor_.encrypt_symmetric(b, b_encrypted);
+
+  // create a GSW ciphertext of 1
+  const size_t gsw_l = pir_params.get_l(); 
+  const size_t base_log2 = pir_params.get_base_log2();
+  GSWEval data_gsw(pir_params, gsw_l, base_log2);
+  std::vector<uint64_t> one(coeff_count);
+  std::vector<uint64_t> zero(coeff_count);
+  one[0] = 1; 
+  zero[0] = 0;
+  GSWCiphertext one_gsw = data_gsw.plain_to_gsw(one, client.encryptor_, client.secret_key_);
+  GSWCiphertext zero_gsw = data_gsw.plain_to_gsw(zero, client.encryptor_, client.secret_key_);
+
+  // test the mux
+  seal::Ciphertext result;
+  seal::Plaintext result_pt;
+  server.ext_prod_mux(a_encrypted, b_encrypted, one_gsw, result);
+  client.decryptor_.decrypt(result, result_pt);
+  BENCH_PRINT("Mux result: " << result_pt.to_string());
+
+  server.ext_prod_mux(a_encrypted, b_encrypted, zero_gsw, result);
+  client.decryptor_.decrypt(result, result_pt);
+  BENCH_PRINT("Mux result: " << result_pt.to_string());
+  PRINT_BAR;
+}
+
 void PirTest::test_decrypt_mod_q() {
   // this is testing if custom decryption works for the original modulus. (no modulus switching involved)
   // ! Use Small parameters for this test
@@ -506,7 +545,7 @@ void PirTest::test_decrypt_mod_q() {
   auto evaluator_ = seal::Evaluator(context_);
   auto encryptor_ = seal::Encryptor(context_, secret_key_);
 
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  const size_t coeff_count = DBConsts::PolyDegree;
 
   // the test data vector a and results are both in BFV scheme.
   seal::Plaintext a(coeff_count), result;
@@ -658,7 +697,7 @@ void PirTest::test_fst_dim_mult() {
   constexpr size_t m = 1 << 9; // the other_dim_sz
   constexpr size_t n = 512;
   constexpr size_t p = 2; // coz we have only 2 polynomials in the ciphertext.
-  constexpr size_t k = DatabaseConstants::PolyDegree;
+  constexpr size_t k = DBConsts::PolyDegree;
   constexpr size_t db_size = m * n * k * sizeof(uint64_t);  // we only care the big matrix
   PirParams pir_params;
   BENCH_PRINT("Matrix size: " << db_size / 1024 / 1024 << " MB");
@@ -830,7 +869,7 @@ void PirTest::test_batch_decomp() {
   auto decryptor_ = seal::Decryptor(context_, secret_key_);
   auto ntt_tables = context_data->small_ntt_tables();
   seal::util::RNSBase *rns_base = context_data->rns_tool()->base_q();
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  const size_t coeff_count = DBConsts::PolyDegree;
   auto pool = seal::MemoryManager::GetPool();
 
 
@@ -916,7 +955,7 @@ void PirTest::test_fast_expand_query() {
   auto secret_key_ = keygen_.secret_key();
   auto encryptor_ = seal::Encryptor(context_, secret_key_);
   auto decryptor_ = seal::Decryptor(context_, secret_key_);  
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  const size_t coeff_count = DBConsts::PolyDegree;
   std::stringstream query_stream;
   const size_t fst_dim_sz = 512;
   const size_t useful_cnt = pir_params.get_fst_dim_sz() + pir_params.get_l() * (pir_params.get_dims().size() - 1);
@@ -992,7 +1031,7 @@ void PirTest::test_raw_pt_ct_mult() {
   params.set_poly_modulus_degree(coeff_count); // example: a_1 x^4095 + a_2 x^4094 + ...
   const uint64_t pt_mod = utils::generate_prime(17); // 49 bits for the plain modulus, then you can use 48 bits for storing data.
   params.set_plain_modulus(pt_mod);
-  std::vector<int> bit_sizes({60,60}); // You can also try our own DatabaseConstants::CoeffMods
+  std::vector<int> bit_sizes({60,60}); // You can also try our own DBConsts::CoeffMods
   const auto coeff_modulus = CoeffModulus::Create(coeff_count, bit_sizes);
   params.set_coeff_modulus(coeff_modulus);
   const size_t bits_per_coeff = params.plain_modulus().bit_count() - 1;
@@ -1069,7 +1108,7 @@ void PirTest::test_mod_switch() {
   auto secret_key_ = client.secret_key_;
   auto encryptor_ = seal::Encryptor(context_, secret_key_);
   auto decryptor_ = seal::Decryptor(context_, secret_key_);
-  const size_t coeff_count = DatabaseConstants::PolyDegree;
+  const size_t coeff_count = DBConsts::PolyDegree;
 
   seal::Plaintext pt(coeff_count), result(coeff_count);
   for (size_t i = 0; i < 10; ++i) {
@@ -1116,7 +1155,7 @@ void PirTest::test_sk_mod_switch() {
   const uint64_t pt_mod = utils::generate_prime(17); // 49 bits for the plain modulus, then you can use 48 bits for storing data.
   params1.set_plain_modulus(pt_mod);
   params2.set_plain_modulus(pt_mod);
-  std::vector<int> bit_sizes1({60,60}); // set this same as DatabaseConstants::CoeffMods
+  std::vector<int> bit_sizes1({60,60}); // set this same as DBConsts::CoeffMods
   std::vector<int> bit_sizes2({30,60});
 
   const auto coeff_modulus1 = CoeffModulus::Create(coeff_count, bit_sizes1);
@@ -1228,4 +1267,13 @@ void PirTest::print_cpu_info() {
   system("lscpu | grep -E 'Flags|avx|sse|fma'");
   
   PRINT_BAR;
+}
+
+void PirTest::test_db_shape() {
+  print_func_name(__FUNCTION__);
+  std::vector<size_t> dims;
+  utils::calculate_db_shape(1000000, 5, 9, dims);
+  PRINT_INT_ARRAY("dims", dims.data(), dims.size());
+  utils::calculate_db_shape(1000000, 6, 8, dims);
+  PRINT_INT_ARRAY("dims", dims.data(), dims.size());
 }

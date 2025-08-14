@@ -13,14 +13,14 @@ seal::EncryptionParameters PirParams::init_seal_params() {
 
   seal::EncryptionParameters params(seal::scheme_type::bfv);
   params.set_poly_modulus_degree(
-      DatabaseConstants::PolyDegree); // example: a_1 x^4095 + a_2 x^4094 + ...
+      DBConsts::PolyDegree); // example: a_1 x^4095 + a_2 x^4094 + ...
 
-  const uint64_t pt_mod = utils::generate_prime(DatabaseConstants::PlainMod);
+  const uint64_t pt_mod = utils::generate_prime(DBConsts::PlainMod);
   params.set_plain_modulus(pt_mod);
-  std::vector<int> bit_sizes(DatabaseConstants::CoeffMods.begin(),
-                             DatabaseConstants::CoeffMods.end());
+  std::vector<int> bit_sizes(DBConsts::CoeffMods.begin(),
+                             DBConsts::CoeffMods.end());
   const auto coeff_modulus =
-      CoeffModulus::Create(DatabaseConstants::PolyDegree, bit_sizes);
+      CoeffModulus::Create(DBConsts::PolyDegree, bit_sizes);
   params.set_coeff_modulus(coeff_modulus);
 
   return params;
@@ -31,32 +31,29 @@ PirParams::PirParams()
   // =============== Setting modulus ===============
   const uint64_t pt_mod = seal_params_.plain_modulus().value();
   // setup the modulus switching mod.
-  small_q_ = CoeffModulus::Create(DatabaseConstants::PolyDegree,
-                                {DatabaseConstants::SmallQWidth, DatabaseConstants::CoeffMods.back()})[0].value();
+  small_q_ = CoeffModulus::Create(DBConsts::PolyDegree,
+                                {DBConsts::SmallQWidth, DBConsts::CoeffMods.back()})[0].value();
 
   // ================== GSW related parameters ==================
-  const auto coeff_modulus = seal_params_.coeff_modulus();
-  size_t bits = 0; // will store log(q) in bits
-  for (size_t i = 0; i < coeff_modulus.size() - 1; i++) {
-    bits += coeff_modulus[i].bit_count();
-  } 
-
   // The number of bits for representing the largest modulus possible in the
   // given context. See analysis folder. This line rounds bits/l up to the
   // nearest integer.
-  base_log2_ = (bits + l_ - 1) / l_;
-  base_log2_key_ = (bits + l_key_ - 1) / l_key_;
+  size_t ct_mod_width = get_ct_mod_width();
+  base_log2_ = (ct_mod_width + l_ - 1) / l_;
+  base_log2_key_ = (ct_mod_width + l_key_ - 1) / l_key_;
 
   // =============== Database shape calculation ===============
-  // All dimensions are fixed to 2 except the first one.
-  dims_.push_back(DatabaseConstants::FstDimSz);
-  for (size_t i = 1; i < DatabaseConstants::TotalDims; i++) {
-    dims_.push_back(2);
+  // calculate the target number of plaintexts
+  size_t target_num_pt = DBConsts::DB_SIZE_MB * 1024 * 1024 / get_pt_size();
+  DEBUG_PRINT("target_num_pt: " << target_num_pt);
+  utils::calculate_db_shape(target_num_pt, l_, DBConsts::TREE_HEIGHT, dims_);
+  DEBUG_PRINT("dims: ");
+  for (const auto &dim : dims_) {
+    DEBUG_PRINT(dim);
   }
-
-  auto other_dim_sz = 1 << (DatabaseConstants::TotalDims - 1);
-  num_pt_ = DatabaseConstants::FstDimSz * other_dim_sz;
-
+  total_dims_ = dims_.size();
+  size_t other_dim_sz = utils::roundup_div(target_num_pt, dims_[0]);
+  num_pt_ = dims_[0] * other_dim_sz;
 }
 
 const size_t PirParams::get_ct_mod_width() const {
