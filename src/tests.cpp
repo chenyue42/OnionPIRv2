@@ -26,6 +26,7 @@ void print_throughput(const std::string &name, const size_t db_size) {
 }
 
 void PirTest::run_tests() {
+  std::cout << "Running tests..." << std::endl;
   test_pir();
   // bfv_example();
   // serialization_example();

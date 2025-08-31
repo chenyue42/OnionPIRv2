@@ -2,6 +2,7 @@
 
 #include "gsw_eval.h"
 #include "pir.h"
+#include "aligned_allocator.h"
 #include <optional>
 
 #define RAW_DB_FILE "./rawDB.bin"
@@ -66,7 +67,7 @@ private:
   std::map<size_t, seal::GaloisKeys> client_galois_keys_;
   std::map<size_t, GSWCiphertext> client_gsw_keys_;
   Database db_; // pointer to the entire database vector
-  std::unique_ptr<uint64_t[]> db_aligned_; // aligned database for fast first dim
+  std::unique_ptr<uint64_t[], AlignedDeleter<uint64_t>> db_aligned_; // aligned database for fast first dim
   std::vector<uint128_t> inter_res_; // pointer to the intermediate result vector for fst dim
   PirParams pir_params_;
   GSWEval key_gsw_;

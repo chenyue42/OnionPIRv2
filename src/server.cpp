@@ -33,8 +33,7 @@ PirServer::PirServer(const PirParams &pir_params)
   db_ = std::make_unique<std::optional<seal::Plaintext>[]>(num_pt_);
   // after NTT, each database polynomial coefficient will be in mod q. Hence,
   // each pt coefficient will be represented by rns_mod_cnt many uint64_t, same as the ciphertext. 
-  db_aligned_ = std::make_unique<uint64_t[]>(num_pt_ * pir_params_.get_coeff_val_cnt());
-  // db_aligned_ = (uint64_t *)std::aligned_alloc(64, num_pt_ * pir_params_.get_coeff_val_cnt() * sizeof(uint64_t));
+  db_aligned_ = make_unique_aligned<uint64_t, 64>(num_pt_ * pir_params_.get_coeff_val_cnt());
   fill_inter_res();
 }
 
