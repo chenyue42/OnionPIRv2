@@ -32,7 +32,6 @@ void PirTest::run_tests() {
   // serialization_example();
   // test_external_product();
   // test_ext_prod_mux();
-  // test_single_mat_mult();
   // test_fst_dim_mult();
   // test_batch_decomp();
   // test_fast_expand_query();
@@ -89,32 +88,32 @@ void PirTest::test_pir() {
     // Client start generating query
     size_t query_pt_idx = rand() % pir_params.get_num_pt();
 
-    // ============= CLIENT ===============
-    TIME_START(CLIENT_TOT_TIME);
-    seal::Ciphertext query = client.generate_query(query_pt_idx);
-    // seal::Ciphertext query = client.fast_generate_query(query_pt_idx);
-    query_size = client.write_query_to_stream(query, query_stream);
-    TIME_END(CLIENT_TOT_TIME);
-    
-    // ============= SERVER ===============
-    TIME_START(SERVER_TOT_TIME);
-    seal::Ciphertext response = server.make_query(client_id, query_stream, client.decryptor_);
-    TIME_END(SERVER_TOT_TIME);
-
-
-    // // =============== PIR without compression ================
+    // // ============= CLIENT ===============
     // TIME_START(CLIENT_TOT_TIME);
-    // std::vector<seal::Ciphertext> bfv_vec;
-    // std::vector<GSWCiphertext> gsw_vec;
-    // client.generate_expanded_query(query_index, bfv_vec, gsw_vec);
-    // std::cout << "gsw_vec.size() = " << gsw_vec.size() << std::endl;
+    // seal::Ciphertext query = client.generate_query(query_pt_idx);
+    // // seal::Ciphertext query = client.fast_generate_query(query_pt_idx);
+    // query_size = client.write_query_to_stream(query, query_stream);
     // TIME_END(CLIENT_TOT_TIME);
-
+    
     // // ============= SERVER ===============
     // TIME_START(SERVER_TOT_TIME);
-    // seal::Ciphertext response = server.make_query_no_expand(bfv_vec, gsw_vec);
+    // seal::Ciphertext response = server.make_query(client_id, query_stream, client.decryptor_);
     // TIME_END(SERVER_TOT_TIME);
-    // // ============== end PIR without compression ==============
+
+
+    // =============== PIR without compression ================
+    TIME_START(CLIENT_TOT_TIME);
+    std::vector<seal::Ciphertext> bfv_vec;
+    std::vector<GSWCiphertext> gsw_vec;
+    client.generate_expanded_query(query_pt_idx, bfv_vec, gsw_vec);
+    std::cout << "gsw_vec.size() = " << gsw_vec.size() << std::endl;
+    TIME_END(CLIENT_TOT_TIME);
+
+    // ============= SERVER ===============
+    TIME_START(SERVER_TOT_TIME);
+    seal::Ciphertext response = server.make_query_no_expand(bfv_vec, gsw_vec);
+    TIME_END(SERVER_TOT_TIME);
+    // ============== end PIR without compression ==============
 
     // ---------- server send the response to the client -----------
     resp_size = server.save_resp_to_stream(response, resp_stream);
@@ -125,9 +124,6 @@ void PirTest::test_pir() {
     TIME_START(CLIENT_TOT_TIME);
     seal::Plaintext decrypted_result = client.decrypt_reply(reconstructed_result);
     TIME_END(CLIENT_TOT_TIME);
-
-    // test noise budget
-
 
     // ============= Directly get the plaintext from server. Not part of PIR.
     seal::Plaintext actual_plaintext = server.direct_get_original_plaintext(query_pt_idx);
@@ -559,132 +555,6 @@ void PirTest::test_decrypt_mod_q() {
   BENCH_PRINT("Decrypted result: " << result.to_string());
 }
 
-void PirTest::test_single_mat_mult() {
-  print_func_name(__FUNCTION__);
-  CLEAN_TIMER();
-  // This is testing mat mat multiplication: A x B = C 
-  // with a special condition that the width of B is 2 and width of A is 512.
-  // Ideally, this tells the limit of the first dimension throughput.
-  constexpr size_t rows = 1 << 20; 
-  constexpr size_t cols = 512; 
-  constexpr size_t b_cols = 2; // two polynomials 
-  constexpr size_t db_size = rows * cols * sizeof(uint64_t);  // we only care the big matrix
-  BENCH_PRINT("Matrix size: " << db_size / 1024 / 1024 << " MB");
-
-  //Allocate memory for A, B, out.
-  std::vector<uint64_t> A_data(rows * cols);
-  std::vector<uint64_t> B_data(cols * b_cols);
-  std::vector<uint64_t> C_data(rows * b_cols);
-  std::vector<uint128_t> C_data128(rows * b_cols);
-
-  // Fill A and B with random data
-  utils::fill_rand_arr(A_data.data(), rows * cols);
-  utils::fill_rand_arr(B_data.data(), cols * b_cols);
-  // Wrap them in our matrix_t structures
-  matrix_t A_mat { A_data.data(), rows, cols, 1 };
-  matrix_t B_mat { B_data.data(), cols, b_cols, 1 };
-  matrix_t C_mat { C_data.data(), rows, b_cols, 1 };
-  matrix128_t C_mat128 { C_data128.data(), rows, b_cols, 1 };
-  uint128_t sum128 = 0;
-  size_t sum = 0;
-
-  // ============= baseline: read once, write once ==============
-  // reading and writing using uint64_t
-  const std::string SIMPLE_READ = "Read once, write once";
-  TIME_START(SIMPLE_READ);
-  #pragma unroll
-  for (size_t i = 0; i < A_data.size(); i++) { 
-    A_data[i] ^= 42;
-  }
-  TIME_END(SIMPLE_READ);
-
-  // ============= naive mat-vec mult ==============
-  const std::string NAIVE_MAT_VEC_64 = "Naive mat-vec-64";
-  TIME_START(NAIVE_MAT_VEC_64);
-  naive_mat_vec(&A_mat, &B_mat, &C_mat);
-  TIME_END(NAIVE_MAT_VEC_64);
-
-  // ============= naive mat-vec mult 128 bits ==============
-  const std::string NAIVE_MAT_VEC_128 = "Naive mat-vec-128";
-  TIME_START(NAIVE_MAT_VEC_128);
-  naive_mat_vec_128(&A_mat, &B_mat, &C_mat128);
-  TIME_END(NAIVE_MAT_VEC_128);
-
-  // ============= naive level mat mult ==============
-  const std::string NAIVE_LEVEL_MAT_MAT_64 = "Naive level mat-mat-64";
-  TIME_START(NAIVE_LEVEL_MAT_MAT_64);
-  naive_level_mat_mat(&A_mat, &B_mat, &C_mat);
-  TIME_END(NAIVE_LEVEL_MAT_MAT_64);
-
-  // ============= naive level mat mult 128 bits ==============
-  const std::string NAIVE_LEVEL_MAT_MAT_128 = "Naive level mat-mat-128";
-  TIME_START(NAIVE_LEVEL_MAT_MAT_128);
-  naive_level_mat_mat_128(&A_mat, &B_mat, &C_mat128);
-  TIME_END(NAIVE_LEVEL_MAT_MAT_128);
-
-  // raw matrix multiplication
-  const std::string RAW_MAT_MAT_128 = "raw mat-mat-128";
-  TIME_START(RAW_MAT_MAT_128);
-  mat_mat_128(A_data.data(), B_data.data(), C_data128.data(), rows, cols);
-  TIME_END(RAW_MAT_MAT_128);
-
-  // ============= level mat mult ==============
-  const std::string LV_MAT_MAT_64 = "level mat-mat-64";
-  TIME_START(LV_MAT_MAT_64);
-  level_mat_mat(&A_mat, &B_mat, &C_mat);
-  TIME_END(LV_MAT_MAT_64);
-
-  // ============= level mat mult 128 bits ==============
-  const std::string LV_MAT_MAT_128 = "level mat-mat-128";
-  TIME_START(LV_MAT_MAT_128);
-  level_mat_mat_128(&A_mat, &B_mat, &C_mat128);
-  TIME_END(LV_MAT_MAT_128);
-
-  // ============= Eigen mat mult ==============
-#ifdef HAVE_EIGEN
-  const std::string EIGEN_MULT = "mat-mat-64 Eigen";
-  Eigen::setNbThreads(1);  // Force Eigen to use only 1 thread
-  TIME_START(EIGEN_MULT);
-  level_mat_mult_eigen(&A_mat, &B_mat, &C_mat);
-  TIME_END(EIGEN_MULT);
-#endif
-
-  // ============= avx mat mat mult 128 bits ==============
-#if defined(__AVX512F__)
-  const std::string AVX_MAT_MULT_128 = "AVX mat-mat-128";
-  TIME_START(AVX_MAT_MULT_128);
-  avx_mat_mat_mult_128(A_data.data(), B_data.data(), C_data128.data(), rows, cols);
-  TIME_END(AVX_MAT_MULT_128);
-#endif
-
-
-  // ============= Print the results to avoid over optimization ==============
-  for (size_t i = 0; i < rows * b_cols; i++) { sum += C_data[i]; }
-  BENCH_PRINT("Sum: " << sum);
-  for (size_t i = 0; i < rows * b_cols; i++) { sum128 += C_data128[i]; }
-  BENCH_PRINT("Sum: " << utils::uint128_to_string(sum128));
-
-  // ============= Profiling the matrix multiplication ==============
-  END_EXPERIMENT();
-  // PRINT_RESULTS(); // uncomment this line to see the actual time elapsed in each function.
-  PRINT_BAR;
-  print_throughput(SIMPLE_READ, db_size);
-  print_throughput(NAIVE_MAT_VEC_64, db_size);
-  print_throughput(NAIVE_MAT_VEC_128, db_size);
-  print_throughput(NAIVE_LEVEL_MAT_MAT_64, db_size);
-  print_throughput(NAIVE_LEVEL_MAT_MAT_128, db_size);
-  print_throughput(RAW_MAT_MAT_128, db_size);
-  print_throughput(LV_MAT_MAT_64, db_size);
-  print_throughput(LV_MAT_MAT_128, db_size);
-#ifdef HAVE_EIGEN
-  print_throughput(EIGEN_MULT, db_size);
-#endif
-#if defined(__AVX512F__)
-  print_throughput(AVX_MAT_MULT_128, db_size);
-#endif
-
-}
-
 
 void PirTest::test_fst_dim_mult() {
   print_func_name(__FUNCTION__);
@@ -721,72 +591,11 @@ void PirTest::test_fst_dim_mult() {
   uint128_t sum128 = 0;
 
 
-  // ============= Naive level mat mat ==============
-  const std::string NAIVE_MAT_MULT = "Naive level mat mat";
-  TIME_START(NAIVE_MAT_MULT);
-  naive_level_mat_mat(&A_mat, &B_mat, &C_mat);
-  TIME_END(NAIVE_MAT_MULT);
-
   // ============= Naive level mat mat 128bits ==============
   const std::string NAIVE_MAT_MULT_128 = "Naive level mat mat 128 bits";
   TIME_START(NAIVE_MAT_MULT_128);
-  naive_level_mat_mat_128(&A_mat, &B_mat, &C_mat_128);
+  level_mat_mat_64_128(&A_mat, &B_mat, &C_mat_128);
   TIME_END(NAIVE_MAT_MULT_128);
-
-
-  // ===================== Performing matrix multiplication by levels ===================== 
-  // So, the idea is that we can do k many matrix matrix
-  // multiplications. Instead of doing the component wise multiplication, which
-  // I think is not cache friendly, matrix multiplication can benefit from local caching. 
-  // Note that these two functions are processing the data in a very different order. 
-  const std::string LV_MAT_MULT = "Matrix multiplication";
-  TIME_START(LV_MAT_MULT);
-  level_mat_mat(&A_mat, &B_mat, &C_mat);
-  TIME_END(LV_MAT_MULT);
-
-  // ============= level mat mult 128 bits ==============
-  const std::string LV_MAT_MULT_128 = "Matrix multiplication 128 bits";
-  TIME_START(LV_MAT_MULT_128);
-  level_mat_mat_128(&A_mat, &B_mat, &C_mat_128);
-  TIME_END(LV_MAT_MULT_128);
-
-  // ============= Level mat mult direct mod ==============
-  const std::string LV_MAT_MULT_DIRECT_MOD = "Matrix multiplication direct mod";
-  seal::Modulus mod = pir_params.get_coeff_modulus()[0];
-  TIME_START(LV_MAT_MULT_DIRECT_MOD);
-  level_mat_mat_direct_mod(&A_mat, &B_mat, &C_mat, mod);
-  TIME_END(LV_MAT_MULT_DIRECT_MOD);
-
-  // ============= OnionPIR v1 elementwise multiplication ==============
-  const std::string ELEM_MULT = "elementwise multiplication";
-  TIME_START(ELEM_MULT);
-  component_wise_mult(&A_mat, &B_mat, &C_mat); 
-  TIME_END(ELEM_MULT);
-
-  // ============= component wise mult 128 bits ==============
-  const std::string ELEM_MULT_128 = "Old elementwise multiplication 128 bits";
-  TIME_START(ELEM_MULT_128);
-  component_wise_mult_128(&A_mat, &B_mat, &C_mat_128);
-  TIME_END(ELEM_MULT_128);
-
-#if defined(__AVX512F__) && defined(ONIONPIR_USE_HEXL)
-  // ============= component wise mult direct mod using hexl ==============
-  const std::string ELEM_MULT_DIRECT_MOD = "elementwise multiplication direct mod";
-  uint64_t mod_val = pir_params.get_coeff_modulus()[0].value();
-  TIME_START(ELEM_MULT_DIRECT_MOD);
-  component_wise_mult_direct_mod(&A_mat, &B_mat, C_data.data(), mod_val);
-  TIME_END(ELEM_MULT_DIRECT_MOD);
-#endif
-
-
-  // ============= level mat mult using Eigen ==============
-  #ifdef HAVE_EIGEN
-  const std::string EIGEN_MULT = "Matrix multiplication Eigen";
-  Eigen::setNbThreads(1);  // Force Eigen to use only 1 thread
-  TIME_START(EIGEN_MULT);
-  level_mat_mult_eigen(&A_mat, &B_mat, &C_mat);
-  TIME_END(EIGEN_MULT);
-  #endif
 
   // some simple code to make sure it is not optimized out
   sum = 0; 
@@ -803,41 +612,13 @@ void PirTest::test_fst_dim_mult() {
   PRINT_BAR;
 
   // Let's calculate the throughput of the matrix multiplication, express in MB/s
-  double naive_mat_mult_time = GET_AVG_TIME(NAIVE_MAT_MULT);
   double naive_mat_mult_128_time = GET_AVG_TIME(NAIVE_MAT_MULT_128);
-  double level_mat_mult_time = GET_AVG_TIME(LV_MAT_MULT);
-  double level_mat_mult_128_time = GET_AVG_TIME(LV_MAT_MULT_128);
-  double level_mat_mult_direct_mod_time = GET_AVG_TIME(LV_MAT_MULT_DIRECT_MOD);
-  double old_elementwise_mult_time = GET_AVG_TIME(ELEM_MULT);
-  double elementwise_mult_128_time = GET_AVG_TIME(ELEM_MULT_128);
 
-  double naive_throughput = db_size / (naive_mat_mult_time * 1000);
   double naive_throughput_128 = db_size / (naive_mat_mult_128_time * 1000);
-  double level_mat_mult_throughput = db_size / (level_mat_mult_time * 1000);
-  double level_mat_mult_128_throughput = db_size / (level_mat_mult_128_time * 1000);
-  double level_mat_mult_direct_mod_throughput = db_size / (level_mat_mult_direct_mod_time * 1000);
-  double old_elementwise_mult_throughput = db_size / (old_elementwise_mult_time * 1000); 
-  double elementwise_mult_128_throughput = db_size / (elementwise_mult_128_time * 1000);
-
 
   BENCH_PRINT("Matrix size: " << db_size / 1024 / 1024 << " MB");
-  BENCH_PRINT("Naive level mat mat throughput: \t" << (size_t)naive_throughput << " MB/s");
   BENCH_PRINT("Naive level mat mat 128 throughput: \t" << (size_t)naive_throughput_128 << " MB/s");
-  BENCH_PRINT("Level mat mat throughput: \t\t" << (size_t) level_mat_mult_throughput << " MB/s");
-  BENCH_PRINT("Level mat mat 128 throughput: \t\t" << (size_t)level_mat_mult_128_throughput << " MB/s");
-  BENCH_PRINT("Level mat mat direct mod throughput: \t" << (size_t)level_mat_mult_direct_mod_throughput << " MB/s");
-  BENCH_PRINT("Elementwise mat throughput: \t\t" << (size_t)old_elementwise_mult_throughput << " MB/s");
-  BENCH_PRINT("Elementwise mat 128 throughput: \t" << (size_t)elementwise_mult_128_throughput << " MB/s");
-#if defined(__AVX512F__)
-  double elementwise_mult_direct_mod_time = GET_AVG_TIME(ELEM_MULT_DIRECT_MOD);
-  double elementwise_mult_direct_mod_throughput = db_size / (elementwise_mult_direct_mod_time * 1000);
-  BENCH_PRINT("Elementwise mat direct mod throughput: \t" << (size_t)elementwise_mult_direct_mod_throughput << " MB/s");
-#endif
-#ifdef HAVE_EIGEN
-  double level_mat_mult_eigen_time = GET_AVG_TIME(EIGEN_MULT);
-  double level_mat_mult_eigen_throughput = db_size / (level_mat_mult_eigen_time * 1000);
-  BENCH_PRINT("Level mat mat Eigen throughput: \t" << (size_t)level_mat_mult_eigen_throughput << " MB/s");
-#endif
+
 }
 
 

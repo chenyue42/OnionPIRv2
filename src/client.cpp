@@ -119,7 +119,7 @@ seal::Ciphertext PirClient::generate_query(const size_t pt_idx) {
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
 
   // The following two for-loops calculates the powers for GSW gadgets.
-  std::vector<uint128_t> inv(rns_mod_cnt);
+  std::vector<uint64_t> inv(rns_mod_cnt);
   for (size_t k = 0; k < rns_mod_cnt; k++) {
     uint64_t result;
     seal::util::try_invert_uint_mod(bits_per_ciphertext, coeff_modulus[k], result);
@@ -140,9 +140,9 @@ seal::Ciphertext PirClient::generate_query(const size_t pt_idx) {
         for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
           const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
           const size_t coef_pos = dims_[0] + (i-1) * l + k + pad;  // the position of the coefficient in the query
-          uint128_t mod = coeff_modulus[mod_id].value();
+          uint64_t mod = coeff_modulus[mod_id].value();
           // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
-          uint128_t coef = gadget[mod_id][k] * inv[mod_id] % mod;
+          uint64_t coef = gadget[mod_id][k] * inv[mod_id] % mod;
           q_head[coef_pos] = (q_head[coef_pos] + coef) % mod;
         }
       }
@@ -229,7 +229,7 @@ void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size
   const size_t fst_dim_sz = dims_[0];
 
   // The following two for-loops calculates the powers for GSW gadgets.
-  std::vector<uint128_t> inv(rns_mod_cnt);
+  std::vector<uint64_t> inv(rns_mod_cnt);
   for (size_t k = 0; k < rns_mod_cnt; k++) {
     uint64_t result;
     seal::util::try_invert_uint_mod(bits_per_ciphertext, coeff_modulus[k], result);
@@ -251,9 +251,9 @@ void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size
         const size_t reversed_idx = utils::bit_reverse(coef_pos, expan_height);  // the position of the coefficient in the query
         for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
           const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
-          uint128_t mod = coeff_modulus[mod_id].value();
+          uint64_t mod = coeff_modulus[mod_id].value();
           // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
-          uint128_t coef = gadget[mod_id][k] * inv[mod_id] % mod;
+          uint64_t coef = gadget[mod_id][k] * inv[mod_id] % mod;
           q_head[reversed_idx + pad] = (q_head[reversed_idx + pad] + coef) % mod;
         }
       }

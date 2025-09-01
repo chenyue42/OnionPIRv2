@@ -19,8 +19,6 @@ class PirTest {
     void serialization_example();
 
     // ======================== Matrix tests ========================
-    // test the matrix multiplication performance when using only one level/degree
-    void test_single_mat_mult();
     // simulation of the first dimension multiplication
     void test_fst_dim_mult();
 

@@ -68,8 +68,8 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
   decomp_to_ntt(decomposed_bfv, context);
 
   // ============================ Polynomial Matrix Multiplication ============================
-  std::vector<std::vector<uint128_t>> result(
-      2, std::vector<uint128_t>(coeff_val_cnt, 0));
+  std::vector<std::vector<uint64_t>> result(
+      2, std::vector<uint64_t>(coeff_val_cnt, 0));
 
   TIME_START(extern_prod_mat_mult_log_key);
   // matrix multiplication: decomp(bfv) * gsw = (1 x 2l) * (2l x 2) = (1 x 2)
@@ -79,7 +79,7 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
       seal::util::ConstCoeffIter encrypted_rlwe_ptr(decomposed_bfv[j]);
       #pragma GCC unroll 32
       for (size_t i = 0; i < coeff_val_cnt; i++) {
-        result[k][i] += static_cast<uint128_t>(encrypted_rlwe_ptr[i]) * encrypted_gsw_ptr[i];
+        result[k][i] += (encrypted_rlwe_ptr[i]) * encrypted_gsw_ptr[i];
       }
     }
   }
@@ -96,8 +96,7 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
       auto mod_idx = (mod_id * coeff_count);
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         auto x = pt_ptr[coeff_id + mod_idx];
-        uint64_t raw[2] = {static_cast<uint64_t>(x), static_cast<uint64_t>(x >> 64)};
-        ct_ptr[coeff_id + mod_idx] = util::barrett_reduce_128(raw, coeff_modulus[mod_id]);
+        ct_ptr[coeff_id + mod_idx] = x % coeff_modulus[mod_id].value();
       }
     }
   }
@@ -129,8 +128,8 @@ void GSWEval::decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<ui
   assert(output.size() == 0);
   output.reserve(2 * l_);
   // Setup parameters
-  const uint128_t base = uint128_t(1) << base_log2_;
-  const uint128_t mask = base - 1;
+  const uint64_t base = uint64_t(1) << base_log2_;
+  const uint64_t mask = base - 1;
   const auto &coeff_modulus = pir_params_.get_coeff_modulus();
   constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
@@ -324,7 +323,7 @@ void GSWEval::plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
   // plaintext is multiplied by the gadget and added to the ciphertext
   for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
     const size_t pad = (mod_id * coeff_count);
-    const uint128_t mod = coeff_modulus[mod_id].value();
+    const uint64_t mod = coeff_modulus[mod_id].value();
     const uint64_t gadget_coef = gadget[mod_id][level];
     auto pt = plaintext.data();
     if (plaintext.size() == coeff_count * rns_mod_cnt) {
@@ -332,7 +331,7 @@ void GSWEval::plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
     }
     // Loop through plaintext coefficients
     for (size_t j = 0; j < coeff_count; j++) {
-      uint128_t val = (uint128_t)pt[j] * gadget_coef % mod;
+      uint64_t val = (uint64_t)pt[j] * gadget_coef % mod;
       ct[j + pad] =
           static_cast<uint64_t>((ct[j + pad] + val) % mod);
     }
@@ -391,7 +390,7 @@ void GSWEval::plain_to_half_gsw_one_row(std::vector<uint64_t> const &plaintext,
   // Many(2) moduli are used
   for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
     size_t pad = (mod_id * coeff_count);
-    uint128_t mod = coeff_modulus[mod_id].value();
+    uint64_t mod = coeff_modulus[mod_id].value();
     uint64_t gadget_coef = gadget[mod_id][level];
     auto pt = plaintext.data();
     if (plaintext.size() == coeff_count * rns_mod_cnt) {
@@ -400,7 +399,7 @@ void GSWEval::plain_to_half_gsw_one_row(std::vector<uint64_t> const &plaintext,
     // Loop through plaintext coefficients
     for (size_t j = 0; j < coeff_count; j++) {
       // TODO: We can use barret reduction here.
-      uint128_t val = (uint128_t)pt[j] * gadget_coef % mod;
+      uint64_t val = (uint64_t)pt[j] * gadget_coef % mod;
       ct[j + pad] =
           static_cast<uint64_t>((ct[j + pad] + val) % mod);
     }

@@ -168,11 +168,11 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
   // prepare the matrices
   matrix_t db_mat { db_aligned_.get(), other_dim_sz, fst_dim_sz, coeff_val_cnt };
   matrix_t query_mat { query_data.data(), fst_dim_sz, 2, coeff_val_cnt };
-  matrix128_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
-  // TODO: should run delay_modulus more often if N_0 is large. Say N_0 = 1000, then we might need mod to avoid overflow.
+  matrix_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
+  // matrix128_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
   TIME_START(CORE_TIME);
-  // TODO: optimize the mat_mat_128 inside this function.
-  naive_level_mat_mat_128(&db_mat, &query_mat, &inter_res_mat);
+  level_mat_mat_64(&db_mat, &query_mat, &inter_res_mat);
+  // level_mat_mat_64_128(&db_mat, &query_mat, &inter_res_mat);
   TIME_END(CORE_TIME);
 
   // ========== transform the intermediate to coefficient form. Delay the modulus operation ==========
@@ -186,7 +186,7 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
 }
 
 
-void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint128_t *__restrict inter_res) {
+void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint64_t *__restrict inter_res) {
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   constexpr size_t coeff_count = DBConsts::PolyDegree;
@@ -231,14 +231,12 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint1
         #pragma unroll
         for (size_t idx = 0; idx < unroll_factor; idx++) {
           // Process polynomial 0 for ciphertext idx.
-          uint128_t x0 = inter_res[ base0[idx] + inter_idx0[idx] * inter_padding ];
-          uint64_t raw0[2] = { static_cast<uint64_t>(x0), static_cast<uint64_t>(x0 >> 64) };
-          cts[idx].data(0)[ ct_idx0[idx]++ ] = util::barrett_reduce_128(raw0, modulus);
+          uint64_t x0 = inter_res[ base0[idx] + inter_idx0[idx] * inter_padding ];
+          cts[idx].data(0)[ ct_idx0[idx]++ ] = x0 % modulus.value();
 
           // Process polynomial 1 for ciphertext idx.
-          uint128_t x1 = inter_res[ base1[idx] + inter_idx1[idx] * inter_padding ];
-          uint64_t raw1[2] = { static_cast<uint64_t>(x1), static_cast<uint64_t>(x1 >> 64) };
-          cts[idx].data(1)[ ct_idx1[idx]++ ] = util::barrett_reduce_128(raw1, modulus);
+          uint64_t x1 = inter_res[ base1[idx] + inter_idx1[idx] * inter_padding ];
+          cts[idx].data(1)[ ct_idx1[idx]++ ] = x1 % modulus.value();
           // Advance intermediate indices.
           inter_idx0[idx]++;
           inter_idx1[idx]++;
@@ -277,14 +275,12 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint1
       const seal::Modulus &modulus = coeff_modulus[mod_id];
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         // Process polynomial 0
-        uint128_t x0 = inter_res[base0 + inter_idx0 * inter_padding];
-        uint64_t raw0[2] = { static_cast<uint64_t>(x0), static_cast<uint64_t>(x0 >> 64) };
-        ct.data(0)[ct_idx0++] = util::barrett_reduce_128(raw0, modulus);
+        uint64_t x0 = inter_res[base0 + inter_idx0 * inter_padding];
+        ct.data(0)[ct_idx0++] = x0 % modulus.value();
 
         // Process polynomial 1
-        uint128_t x1 = inter_res[base1 + inter_idx1 * inter_padding];
-        uint64_t raw1[2] = { static_cast<uint64_t>(x1), static_cast<uint64_t>(x1 >> 64) };
-        ct.data(1)[ct_idx1++] = util::barrett_reduce_128(raw1, modulus);
+        uint64_t x1 = inter_res[base1 + inter_idx1 * inter_padding];
+        ct.data(1)[ct_idx1++] = x1 % modulus.value();
         
         // Advance intermediate indices
         inter_idx0++;
@@ -623,12 +619,12 @@ seal::Ciphertext PirServer::make_query_no_expand(std::vector<seal::Ciphertext> &
   // ========================== Evaluations ==========================
   // Evaluate the first dimension
   TIME_START(FST_DIM_TIME);
-  std::vector<seal::Ciphertext> result = evaluate_first_dim(bfv_vec);
+  std::vector<seal::Ciphertext> mid_db = evaluate_first_dim(bfv_vec);
   TIME_END(FST_DIM_TIME);
 
   // Evaluate the other dimensions
   TIME_START(OTHER_DIM_TIME);
-  // evaluate_other_dim(result, gsw_vec);
+  seal::Ciphertext result = evaluate_other_dim(mid_db, gsw_vec);
   TIME_END(OTHER_DIM_TIME);
 
   // ========================== Post-processing ==========================
@@ -636,16 +632,18 @@ seal::Ciphertext PirServer::make_query_no_expand(std::vector<seal::Ciphertext> &
   // modulus switching so to reduce the response size by half
   if(pir_params_.get_rns_mod_cnt() > 1) {
     DEBUG_PRINT("Modulus switching to the next modulus...");
-    evaluator_.mod_switch_to_next_inplace(result[0]); // result.size() == 1.
+    evaluator_.mod_switch_to_next_inplace(result);
   }
   // we can always switch to the small modulus it correctness is guaranteed.
-  DEBUG_PRINT("Modulus switching for a single modulus...");
-  const uint64_t small_q = pir_params_.get_small_q();
-  mod_switch_inplace(result[0], small_q);
+  if (DBConsts::SmallQWidth < DBConsts::CoeffMods[0]) {
+    DEBUG_PRINT("Modulus switching for a single modulus...");
+    const uint64_t small_q = pir_params_.get_small_q();
+    mod_switch_inplace(result, small_q);
+  }
 
   TIME_END(MOD_SWITCH);
   DEBUG_PRINT("Modulus switching done.");
-  return result[0];
+  return result;
 }
 
 
