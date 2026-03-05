@@ -12,10 +12,6 @@
 #include <iostream>
 #include <bitset>
 
-#ifdef HAVE_EIGEN
-#include <Eigen/Dense>
-#include <Eigen/Core>
-#endif
 
 constexpr size_t EXPERIMENT_ITERATIONS = 10 + WARMUP_ITERATIONS;
 

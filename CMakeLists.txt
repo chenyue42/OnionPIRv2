@@ -39,6 +39,17 @@ if (USE_HEXL)
     else()
         message(FATAL_ERROR "HEXL not found. Please install HEXL or disable USE_HEXL option.")
     endif()
+    
+    # Set HEXL installation path
+    set(HEXL_DIR "/u/yuec12/OnionPIRv2/hexl_install/lib64/cmake/hexl-1.2.6")
+    
+    # Find HEXL package
+    find_package(HEXL REQUIRED)
+    if(HEXL_FOUND)
+        message(STATUS "HEXL found at: ${HEXL_DIR}")
+    else()
+        message(FATAL_ERROR "HEXL not found. Please install HEXL or disable USE_HEXL option.")
+    endif()
 else()
     message(STATUS "HEXL support disabled.")
 endif()
@@ -69,24 +80,13 @@ add_executable(Onion-PIR ${SRC_FILES})
 
 # Find and link SEAL library
 set(SEAL_DIR "/u/yuec12/OnionPIRv2/seal_install/lib64/cmake/SEAL-4.1")
+set(SEAL_DIR "/u/yuec12/OnionPIRv2/seal_install/lib64/cmake/SEAL-4.1")
 find_package(SEAL 4.1 REQUIRED)
 target_link_libraries(Onion-PIR PUBLIC SEAL::seal)
 
 # Link HEXL if enabled
 if (USE_HEXL AND HEXL_FOUND)
     target_link_libraries(Onion-PIR PUBLIC HEXL::hexl)
-endif()
-
-# Attempt to find Eigen3 quietly
-find_package(Eigen3 3.3 QUIET)
-
-if(Eigen3_FOUND)
-    message(STATUS "Eigen3 found. Enabling Eigen-specific functionality.")
-    target_link_libraries(Onion-PIR PUBLIC Eigen3::Eigen)
-    target_compile_definitions(Onion-PIR PUBLIC HAVE_EIGEN)
-else()
-    message(WARNING "Eigen3 not found. Skipping Eigen-specific code.")
-    target_compile_definitions(Onion-PIR PUBLIC SKIP_EIGEN)
 endif()
 
 # Include directories

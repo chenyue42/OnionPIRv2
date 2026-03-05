@@ -4,9 +4,6 @@
 #ifdef ONIONPIR_USE_HEXL
 #include "hexl/hexl.hpp"
 #endif
-#ifdef HAVE_EIGEN
-#include <Eigen/Dense>
-#endif
 
 void mat_mat_64(const uint64_t *__restrict A, const uint64_t *__restrict B,
   uint64_t *__restrict out, const size_t rows, const size_t cols) {
