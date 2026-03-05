@@ -17,8 +17,7 @@ mkdir build && cmake ..
 sudo make install
 ```
 
-2. Optionally, you can install Eigen3 since we did some test on matrix-matrix multiplication using this third party. You can install is by `sudo apt install libeigen3-dev`.
-3. You can use -DUSE_HEXL=OFF to turn off HEXL related tests.
+2. You can use -DUSE_HEXL=OFF to turn off HEXL related tests.
 4. After installation, set `CMAKE_PREFIX_PATH` to the library's location. Separate versions of the library can be used for debugging and benchmarking. To run as a debug build, set -DCMAKE_BUILD_TYPE=Debug as a cmake option. To run benchmarks, set -DCMAKE_BUILD_TYPE=Benchmark. The benchmark build type is used by default. (It is fine to keep this CMAKE_PREFIX_PATH unchanged. ) Now, you can build and run OnionPIRv2 using: 
 
 ```

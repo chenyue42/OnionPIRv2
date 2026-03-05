@@ -83,9 +83,6 @@ void component_wise_mult_direct_mod(matrix_t *A, matrix_t *B, uint64_t *out, con
 // wrapper, then pass the function pointer to the actual implementation.
 // I am being lazy here...
 
-#ifdef HAVE_EIGEN
-void level_mat_mult_eigen(matrix_t *A, matrix_t *B, matrix_t *out);
-#endif
 
 // ======================== HELPER FUNCTIONS ========================
 // calculates c = c + a * b mod m using Barrett reduction

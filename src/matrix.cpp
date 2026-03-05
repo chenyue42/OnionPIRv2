@@ -4,9 +4,6 @@
 #ifdef ONIONPIR_USE_HEXL
 #include "hexl/hexl.hpp"
 #endif
-#ifdef HAVE_EIGEN
-#include <Eigen/Dense>
-#endif
 
 
 
@@ -391,37 +388,6 @@ void component_wise_mult_direct_mod(matrix_t *A, matrix_t *B, uint64_t *out, con
 
 
 // ======================== THIRD PARTIES ========================
-
-void level_mat_mult_eigen(matrix_t *A, matrix_t *B, matrix_t *out) {
-    const size_t rows = A->rows;   
-    const size_t cols = A->cols;   
-    const size_t p = B->cols;      // p=2 (assumed)
-    const size_t levels = A->levels;
-    const uint64_t* A_data = A->data;
-    const uint64_t* B_data = B->data;
-    uint64_t* out_data = out->data;
-
-    // We always assume p=2. Because the BFV ciphertext has two polynomials.
-    // This assumption keeps the code simple.
-    if (p != 2 || out->cols != 2) {
-        return;
-    }
-
-    // For each "level," perform one standard matrix-matrix multiplication.
-    // A(level) is rows-by-cols, B(level) is cols-by-2, out(level) is rows-by-2
-    for (size_t level = 0; level < levels; ++level) {
-        // Map raw data to Eigen matrices
-        Eigen::Map<const Eigen::Matrix<uint64_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> matA(
-            A_data + level * (rows * cols), rows, cols);
-        Eigen::Map<const Eigen::Matrix<uint64_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> matB(
-            B_data + level * (cols * p), cols, p);
-        Eigen::Map<Eigen::Matrix<uint64_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> matC(
-            out_data + level * (rows * p), rows, p);
-
-        // Perform matrix multiplication
-        matC.noalias() = matA * matB;
-    }
-}
 
 
 // ======================== CRAZY AVX STUFF ========================

@@ -12,10 +12,6 @@
 #include <iostream>
 #include <bitset>
 
-#ifdef HAVE_EIGEN
-#include <Eigen/Dense>
-#include <Eigen/Core>
-#endif
 
 constexpr size_t EXPERIMENT_ITERATIONS = 10 + WARMUP_ITERATIONS;
 
@@ -588,12 +584,6 @@ void PirTest::test_single_mat_mult() {
   level_mat_mat_128(&A_mat, &B_mat, &C_mat128);
   TIME_END(LV_MAT_MAT_128);
 
-  // ============= Eigen mat mult ==============
-  const std::string EIGEN_MULT = "mat-mat-64 Eigen";
-  Eigen::setNbThreads(1);  // Force Eigen to use only 1 thread
-  TIME_START(EIGEN_MULT);
-  level_mat_mult_eigen(&A_mat, &B_mat, &C_mat);
-  TIME_END(EIGEN_MULT);
 
   // ============= avx mat mat mult 128 bits ==============
 #if defined(__AVX512F__)
@@ -622,7 +612,6 @@ void PirTest::test_single_mat_mult() {
   print_throughput(RAW_MAT_MAT_128, db_size);
   print_throughput(LV_MAT_MAT_64, db_size);
   print_throughput(LV_MAT_MAT_128, db_size);
-  print_throughput(EIGEN_MULT, db_size);
 #if defined(__AVX512F__)
   print_throughput(AVX_MAT_MULT_128, db_size);
 #endif
@@ -723,15 +712,6 @@ void PirTest::test_fst_dim_mult() {
 #endif
 
 
-  // ============= level mat mult using Eigen ==============
-  #ifdef HAVE_EIGEN
-  const std::string EIGEN_MULT = "Matrix multiplication Eigen";
-  Eigen::setNbThreads(1);  // Force Eigen to use only 1 thread
-  TIME_START(EIGEN_MULT);
-  level_mat_mult_eigen(&A_mat, &B_mat, &C_mat);
-  TIME_END(EIGEN_MULT);
-  #endif
-
   // some simple code to make sure it is not optimized out
   sum = 0; 
   for (size_t i = 0; i < m * p * k; i++) { sum += C_data[i]; }
@@ -776,11 +756,6 @@ void PirTest::test_fst_dim_mult() {
   double elementwise_mult_direct_mod_time = GET_AVG_TIME(ELEM_MULT_DIRECT_MOD);
   double elementwise_mult_direct_mod_throughput = db_size / (elementwise_mult_direct_mod_time * 1000);
   BENCH_PRINT("Elementwise mat direct mod throughput: \t" << (size_t)elementwise_mult_direct_mod_throughput << " MB/s");
-#endif
-#ifdef HAVE_EIGEN
-  double level_mat_mult_eigen_time = GET_AVG_TIME(EIGEN_MULT);
-  double level_mat_mult_eigen_throughput = db_size / (level_mat_mult_eigen_time * 1000);
-  BENCH_PRINT("Level mat mat Eigen throughput: \t" << (size_t)level_mat_mult_eigen_throughput << " MB/s");
 #endif
 }
 
