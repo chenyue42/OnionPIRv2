@@ -39,17 +39,6 @@ if (USE_HEXL)
     else()
         message(FATAL_ERROR "HEXL not found. Please install HEXL or disable USE_HEXL option.")
     endif()
-    
-    # Set HEXL installation path
-    set(HEXL_DIR "/u/yuec12/OnionPIRv2/hexl_install/lib64/cmake/hexl-1.2.6")
-    
-    # Find HEXL package
-    find_package(HEXL REQUIRED)
-    if(HEXL_FOUND)
-        message(STATUS "HEXL found at: ${HEXL_DIR}")
-    else()
-        message(FATAL_ERROR "HEXL not found. Please install HEXL or disable USE_HEXL option.")
-    endif()
 else()
     message(STATUS "HEXL support disabled.")
 endif()
