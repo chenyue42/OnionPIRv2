@@ -19,7 +19,7 @@ namespace DBConsts {
   constexpr std::array<size_t, 3> CoeffMods = {28, 28, 60}; // log q = 60.
   
 
-  // // ! ========================== 256MB, single log q = 60 ==========================
+  // ! ========================== 256MB, single log q = 60 ==========================
   // constexpr size_t DB_SIZE_MB = 256;               // target database size in MB
   // constexpr size_t PolyDegree = 2048;
   // constexpr size_t GSW_L = 5;                       // parameter for GSW scheme

@@ -71,7 +71,7 @@ void PirTest::test_raw_pt_ct_mult() {
   // ============= Profiling the multiplication ==============
   END_EXPERIMENT();
   PRINT_RESULTS();
-  double tot = GET_AVG_TIME("ntt ct * pt");
+  double tot = GET_LAST_TIME("ntt ct * pt");
   double amortized = tot / iter_num;
   BENCH_PRINT("ntt ct * pt: " << amortized << " ms");
 }

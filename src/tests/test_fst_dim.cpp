@@ -9,7 +9,7 @@ void PirTest::test_fst_dim_mult() {
 
   // Let's write the best code we can to compute (m x n) x (n x p) matrix
   // multiplication for k times.
-  constexpr size_t m = 1 << 9; // the other_dim_sz
+  constexpr size_t m = 1 << 5; // the other_dim_sz
   constexpr size_t n = 512;
   constexpr size_t p = 2; // coz we have only 2 polynomials in the ciphertext.
   constexpr size_t k = DBConsts::PolyDegree;
@@ -39,6 +39,7 @@ void PirTest::test_fst_dim_mult() {
   const std::string NAIVE_MAT_MULT_128 = "Naive level mat mat 128 bits";
   TIME_START(NAIVE_MAT_MULT_128);
   level_mat_mat_64_128(&A_mat, &B_mat, &C_mat_128);
+  // level_mat_mat_64(&A_mat, &B_mat, &C_mat);
   TIME_END(NAIVE_MAT_MULT_128);
 
   // some simple code to make sure it is not optimized out
@@ -56,7 +57,8 @@ void PirTest::test_fst_dim_mult() {
   PRINT_BAR;
 
   // Let's calculate the throughput of the matrix multiplication, express in MB/s
-  double naive_mat_mult_128_time = GET_AVG_TIME(NAIVE_MAT_MULT_128);
+  double naive_mat_mult_128_time = GET_LAST_TIME(NAIVE_MAT_MULT_128);
+  std::cout << "Naive level mat mat 128 bits time: " << naive_mat_mult_128_time << " ms" << std::endl;
 
   double naive_throughput_128 = db_size / (naive_mat_mult_128_time * 1000);
 

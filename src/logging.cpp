@@ -108,6 +108,14 @@ double TimerLogger::getAvgTime(const std::string &sectionName) {
   return validRuns ? sum / validRuns : 0.0;
 }
 
+double TimerLogger::getLastTime(const std::string &sectionName) {
+  if (experimentRecords.empty())
+    return 0.0;
+  auto &last = experimentRecords.back();
+  auto it = last.find(sectionName);
+  return (it != last.end()) ? it->second : 0.0;
+}
+
 void TimerLogger::prettyPrintHelper(
     const std::string &section, const std::string &prefix, bool isLast,
     const std::unordered_map<std::string, double> &avgTimes) const {

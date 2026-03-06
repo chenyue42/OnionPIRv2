@@ -135,6 +135,9 @@ public:
 
   double getAvgTime(const std::string &sectionName);
 
+  // Get timing from the last recorded experiment (ignores warmup logic)
+  double getLastTime(const std::string &sectionName);
+
   // Pretty print hierarchical results
   void prettyPrint();
 
@@ -154,6 +157,7 @@ public:
 #define PRINT_RESULTS(expId) TimerLogger::getInstance().printResults(expId)
 #define PRINT_AVERAGE_RESULTS() TimerLogger::getInstance().printAverageResults()
 #define GET_AVG_TIME(sec) TimerLogger::getInstance().getAvgTime(sec)
+#define GET_LAST_TIME(sec) TimerLogger::getInstance().getLastTime(sec)
 #define PRETTY_PRINT() TimerLogger::getInstance().prettyPrint()
 #define CLEAN_TIMER() TimerLogger::getInstance().cleanup()
 

@@ -40,7 +40,8 @@ void PirTest::test_external_product() {
 
   // ================== Test external product ==================
   // external product: BFV(a) * RGSW(1) = BFV(a * 1) = BFV(a)
-  seal::Ciphertext ext_prod_result;
+  seal::Ciphertext ext_prod_result(context_);
+  ext_prod_result.resize(2);
   data_gsw.external_product(one_gsw, a_encrypted, ext_prod_result, LogContext::GENERIC);
   evaluator_.transform_from_ntt_inplace(ext_prod_result); // the output is in NTT form. Transform it back.
   decryptor_.decrypt(ext_prod_result, result);
