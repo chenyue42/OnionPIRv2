@@ -5,7 +5,13 @@
 #include <chrono>
 #include <string>
 #include <unordered_map>
+#include <unistd.h>
 #include <vector>
+
+// Color helpers: only emit ANSI codes when stdout is a terminal
+inline const char* color_green() { return isatty(fileno(stdout)) ? "\033[1;32m" : ""; }
+inline const char* color_red()   { return isatty(fileno(stdout)) ? "\033[1;31m" : ""; }
+inline const char* color_reset() { return isatty(fileno(stdout)) ? "\033[0m"    : ""; }
 
 // print for debug. Easily turn on/off by defining _DEBUG
 #ifdef _DEBUG

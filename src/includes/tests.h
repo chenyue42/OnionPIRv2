@@ -1,13 +1,13 @@
 #pragma once
 
-
+#include <string>
 
 class PirTest {
   public:
-    void run_tests();
+    void run_test(const std::string &test_name, bool use_compression);
 
     // ! the main test for PIR
-    void test_pir();
+    void test_pir(bool use_compression);
 
     // ======================== BFV & GSW tests ========================
     void bfv_example();

@@ -18,20 +18,59 @@ sudo make install
 ```
 
 2. You can use -DUSE_HEXL=OFF to turn off HEXL related tests.
-4. After installation, set `CMAKE_PREFIX_PATH` to the library's location. Separate versions of the library can be used for debugging and benchmarking. To run as a debug build, set -DCMAKE_BUILD_TYPE=Debug as a cmake option. To run benchmarks, set -DCMAKE_BUILD_TYPE=Benchmark. The benchmark build type is used by default. (It is fine to keep this CMAKE_PREFIX_PATH unchanged. ) Now, you can build and run OnionPIRv2 using: 
+4. After installation, set `CMAKE_PREFIX_PATH` to the library's location. (It is fine to keep this `CMAKE_PREFIX_PATH` unchanged.) Now, you can build and run OnionPIRv2 using `run.py`:
 
 ```
+mkdir build
+python run.py
+```
+
+### Usage
+
+`run.py` handles building with the correct compile flags and running the binary.
+
+```
+python run.py [options]
+```
+
+| Option | Description |
+|---|---|
+| `-v`, `--verbose` | Build in Debug mode (enables `DEBUG_PRINT` at compile time) |
+| `--no-compress` | Run PIR without query compression/decompression |
+| `-t NAME`, `--test NAME` | Test to run (default: `pir`). See available tests below |
+| `-o FILE`, `--output FILE` | Write results to file (bare name goes to `outputs/`) |
+| `-j N`, `--jobs N` | Parallel make jobs (default: all cores) |
+| `--build-only` | Build without running |
+| `-h`, `--help` | Show help message |
+
+**Examples:**
+
+```bash
+# Benchmark mode (default) — DEBUG_PRINT compiled out for max performance
+python run.py
+
+# Verbose/debug mode — recompiles with DEBUG_PRINT enabled
+python run.py -v
+
+# Without compression, save results to outputs/results.txt
+python run.py --no-compress -o no-compress.txt
+
+# Just build, don't run
+python run.py --build-only
+
+# Run a specific test
+python run.py -t bfv
+python run.py -t fst_dim -v
+```
+
+**Available tests:** `pir` (default), `bfv`, `serial`, `ext_prod`, `ext_prod_mux`, `fst_dim`, `batch_decomp`, `fast_expand`, `raw_pt_ct`, `decrypt_mod_q`, `mod_switch`, `sk_mod_switch`, `db_shape`, `cpu_info`
+
+You can also build and run manually with CMake:
+
+```bash
 mkdir build && cd build
-cmake ..
-make && ./Onion-PIR
-```
-
-If you want to turn on the debug mode and read detailed output or use the profiling tools, you can run:
-
-```
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Debug 
-make && ./Onion-PIR
+cmake .. -DCMAKE_BUILD_TYPE=Debug   # or Benchmark (default)
+make && ./Onion-PIR [--no-compress]
 ```
 
 

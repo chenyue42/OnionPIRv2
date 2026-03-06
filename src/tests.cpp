@@ -21,26 +21,33 @@ void print_throughput(const std::string &name, const size_t db_size) {
   BENCH_PRINT(name << ": " << throughput << " MB/s");
 }
 
-void PirTest::run_tests() {
-  std::cout << "Running tests..." << std::endl;
-  test_pir();
-  // bfv_example();
-  // serialization_example();
-  // test_external_product();
-  // test_ext_prod_mux();
-  // test_fst_dim_mult();
-  // test_batch_decomp();
-  // test_fast_expand_query();
-  // test_raw_pt_ct_mult();
-  // test_decrypt_mod_q();
-  // test_mod_switch();
-  // test_sk_mod_switch();
-  // test_db_shape();
-  // print_cpu_info();
+void PirTest::run_test(const std::string &test_name, bool use_compression) {
+  std::cout << "Running test: " << test_name << std::endl;
+
+  if (test_name == "pir")                    test_pir(use_compression);
+  else if (test_name == "bfv")               bfv_example();
+  else if (test_name == "serial")            serialization_example();
+  else if (test_name == "ext_prod")          test_external_product();
+  else if (test_name == "ext_prod_mux")      test_ext_prod_mux();
+  else if (test_name == "fst_dim")           test_fst_dim_mult();
+  else if (test_name == "batch_decomp")      test_batch_decomp();
+  else if (test_name == "fast_expand")       test_fast_expand_query();
+  else if (test_name == "raw_pt_ct")         test_raw_pt_ct_mult();
+  else if (test_name == "decrypt_mod_q")     test_decrypt_mod_q();
+  else if (test_name == "mod_switch")        test_mod_switch();
+  else if (test_name == "sk_mod_switch")     test_sk_mod_switch();
+  else if (test_name == "db_shape")          test_db_shape();
+  else if (test_name == "cpu_info")          print_cpu_info();
+  else {
+    std::cerr << "Unknown test: " << test_name << std::endl;
+    std::cerr << "Available tests: pir, bfv, serial, ext_prod, ext_prod_mux, "
+              << "fst_dim, batch_decomp, fast_expand, raw_pt_ct, decrypt_mod_q, "
+              << "mod_switch, sk_mod_switch, db_shape, cpu_info" << std::endl;
+  }
 }
 
 
-void PirTest::test_pir() {
+void PirTest::test_pir(bool use_compression) {
   print_func_name(__FUNCTION__);
   auto success_count = 0;
   
@@ -84,33 +91,31 @@ void PirTest::test_pir() {
     // Client start generating query
     size_t query_pt_idx = rand() % pir_params.get_num_pt();
 
-    // // ============= CLIENT ===============
-    // TIME_START(CLIENT_TOT_TIME);
-    // seal::Ciphertext query = client.generate_query(query_pt_idx);
-    // // seal::Ciphertext query = client.fast_generate_query(query_pt_idx);
-    // query_size = client.write_query_to_stream(query, query_stream);
-    // TIME_END(CLIENT_TOT_TIME);
+    seal::Ciphertext response;
+    if (use_compression) {
+      // =============== PIR with compression ================
+      TIME_START(CLIENT_TOT_TIME);
+      seal::Ciphertext query = client.generate_query(query_pt_idx);
+      query_size = client.write_query_to_stream(query, query_stream);
+      TIME_END(CLIENT_TOT_TIME);
+
+      TIME_START(SERVER_TOT_TIME);
+      response = server.make_query(client_id, query_stream, client.decryptor_);
+      TIME_END(SERVER_TOT_TIME);
+    } else {
+      // =============== PIR without compression ================
+      TIME_START(CLIENT_TOT_TIME);
+      std::vector<seal::Ciphertext> bfv_vec;
+      std::vector<GSWCiphertext> gsw_vec;
+      client.generate_expanded_query(query_pt_idx, bfv_vec, gsw_vec);
+      TIME_END(CLIENT_TOT_TIME);
+
+      TIME_START(SERVER_TOT_TIME);
+      response = server.make_query_no_expand(bfv_vec, gsw_vec);
+      TIME_END(SERVER_TOT_TIME);
+    }
+
     
-    // // ============= SERVER ===============
-    // TIME_START(SERVER_TOT_TIME);
-    // seal::Ciphertext response = server.make_query(client_id, query_stream, client.decryptor_);
-    // TIME_END(SERVER_TOT_TIME);
-
-
-    // =============== PIR without compression ================
-    TIME_START(CLIENT_TOT_TIME);
-    std::vector<seal::Ciphertext> bfv_vec;
-    std::vector<GSWCiphertext> gsw_vec;
-    client.generate_expanded_query(query_pt_idx, bfv_vec, gsw_vec);
-    std::cout << "gsw_vec.size() = " << gsw_vec.size() << std::endl;
-    TIME_END(CLIENT_TOT_TIME);
-
-    // ============= SERVER ===============
-    TIME_START(SERVER_TOT_TIME);
-    seal::Ciphertext response = server.make_query_no_expand(bfv_vec, gsw_vec);
-    TIME_END(SERVER_TOT_TIME);
-    // ============== end PIR without compression ==============
-
     // ---------- server send the response to the client -----------
     resp_size = server.save_resp_to_stream(response, resp_stream);
 
@@ -133,11 +138,11 @@ void PirTest::test_pir() {
 
     if (utils::plaintext_is_equal(decrypted_result, actual_plaintext)) {
       // print a green success message
-      std::cout << "\033[1;32mSuccess!\033[0m" << std::endl;
+      std::cout << color_green() << "Success!" << color_reset() << std::endl;
       success_count++;
     } else {
       // print a red failure message
-      std::cout << "\033[1;31mFailure!\033[0m" << std::endl;
+      std::cout << color_red() << "Failure!" << color_reset() << std::endl;
       std::cout << "PIR Result:\t";
       utils::print_plaintext(decrypted_result, 20);
       std::cout << "Actual Plaintext:\t";
