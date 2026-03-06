@@ -19,11 +19,18 @@ typedef struct {
 } matrix_t; 
 
 typedef struct {
+    db_coeff_t *data;
+    size_t rows;
+    size_t cols;
+    size_t levels;
+} matrix32_t;
+
+typedef struct {
     uint128_t *data;
     size_t rows;
     size_t cols;
     size_t levels;
-} matrix128_t; 
+} matrix128_t;
 
 
 // ! mat_vec functions means matrix-vector multiplication. 
@@ -37,6 +44,13 @@ void mat_mat_64(const uint64_t *__restrict A, const uint64_t *__restrict B,
     const size_t cols);
     
 void level_mat_mat_64(matrix_t *A, matrix_t *B, matrix_t *out);
+
+// db_coeff_t x db_coeff_t -> uint64_t multiplication
+void mat_mat_32_64(const db_coeff_t *__restrict A, const db_coeff_t *__restrict B,
+    uint64_t *__restrict out, const size_t rows,
+    const size_t cols);
+
+void level_mat_mat_32_64(matrix32_t *A, matrix32_t *B, matrix_t *out);
 
 
 // A single matrix * matrix multiplication, assuming second matrix has only two

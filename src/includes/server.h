@@ -66,7 +66,7 @@ private:
   std::map<size_t, seal::GaloisKeys> client_galois_keys_;
   std::map<size_t, GSWCiphertext> client_gsw_keys_;
   Database db_; // pointer to the entire database vector
-  std::unique_ptr<uint64_t[], AlignedDeleter<uint64_t>> db_aligned_; // aligned database for fast first dim
+  std::unique_ptr<db_coeff_t[], AlignedDeleter<db_coeff_t>> db_aligned_; // aligned database for fast first dim
   std::vector<uint64_t> inter_res_; // pointer to the intermediate result vector for fst dim
   // std::vector<uint128_t> inter_res_; // pointer to the intermediate result vector for fst dim
   PirParams pir_params_;
@@ -101,7 +101,7 @@ private:
   // Fill the intermediate_db_ with some ciphertext. We just need to allocate the memory.
   void fill_inter_res();
 
-  void prep_query(const std::vector<seal::Ciphertext> &fst_dim_query, std::vector<uint64_t>& query_data);
+  void prep_query(const std::vector<seal::Ciphertext> &fst_dim_query, std::vector<db_coeff_t>& query_data);
 
   // customized modulus switch for single mod seal::Ciphertext. (Not RNS modulus)
   // The goal is to halve the size of the ciphertext.

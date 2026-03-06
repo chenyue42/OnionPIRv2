@@ -33,7 +33,7 @@ PirServer::PirServer(const PirParams &pir_params)
   db_ = std::make_unique<std::optional<seal::Plaintext>[]>(num_pt_);
   // after NTT, each database polynomial coefficient will be in mod q. Hence,
   // each pt coefficient will be represented by rns_mod_cnt many uint64_t, same as the ciphertext. 
-  db_aligned_ = make_unique_aligned<uint64_t, 64>(num_pt_ * pir_params_.get_coeff_val_cnt());
+  db_aligned_ = make_unique_aligned<db_coeff_t, 64>(num_pt_ * pir_params_.get_coeff_val_cnt());
   fill_inter_res();
 }
 
@@ -94,7 +94,7 @@ void PirServer::gen_data() {
 }
 
 void PirServer::prep_query(const std::vector<seal::Ciphertext> &fst_dim_query,
-                           std::vector<uint64_t> &query_data) {
+                           std::vector<db_coeff_t> &query_data) {
   const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();       // 256
   const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt(); // 4096
   const size_t slice_sz = fst_dim_sz * 2;
@@ -126,8 +126,8 @@ void PirServer::prep_query(const std::vector<seal::Ciphertext> &fst_dim_query,
       for (size_t slice_id = slice_block; slice_id < slice_block_end;
            ++slice_id) {
         const size_t idx = slice_id * slice_sz + i * 2;
-        query_data[idx] = p0[slice_id];
-        query_data[idx + 1] = p1[slice_id];
+        query_data[idx] = static_cast<db_coeff_t>(p0[slice_id]);
+        query_data[idx + 1] = static_cast<db_coeff_t>(p1[slice_id]);
       }
     }
   }
@@ -154,25 +154,23 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
     evaluator_.transform_to_ntt_inplace(fst_dim_query[i]);
   }
   
-  // reallocate the query data to a continuous memory 
+  // reallocate the query data to a continuous memory
   TIME_START(FST_DIM_PREP);
-  std::vector<uint64_t> query_data(fst_dim_sz * one_ct_sz);
+  std::vector<db_coeff_t> query_data(fst_dim_sz * one_ct_sz);
   prep_query(fst_dim_query, query_data);
   TIME_END(FST_DIM_PREP);
 
   /*
   Imagine DB as a (other_dim_sz * fst_dim_sz) matrix, where each element is a
-  vector of size coeff_val_cnt. In OnionPIRv1, the first dimension is doing the 
+  vector of size coeff_val_cnt. In OnionPIRv1, the first dimension is doing the
   component wise matrix multiplication. Further details can be found in the "matrix.h" file.
   */
   // prepare the matrices
-  matrix_t db_mat { db_aligned_.get(), other_dim_sz, fst_dim_sz, coeff_val_cnt };
-  matrix_t query_mat { query_data.data(), fst_dim_sz, 2, coeff_val_cnt };
+  matrix32_t db_mat { db_aligned_.get(), other_dim_sz, fst_dim_sz, coeff_val_cnt };
+  matrix32_t query_mat { query_data.data(), fst_dim_sz, 2, coeff_val_cnt };
   matrix_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
-  // matrix128_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
   TIME_START(CORE_TIME);
-  level_mat_mat_64(&db_mat, &query_mat, &inter_res_mat);
-  // level_mat_mat_64_128(&db_mat, &query_mat, &inter_res_mat);
+  level_mat_mat_32_64(&db_mat, &query_mat, &inter_res_mat);
   TIME_END(CORE_TIME);
 
   // ========== transform the intermediate to coefficient form. Delay the modulus operation ==========
@@ -740,11 +738,12 @@ void PirServer::realign_db() {
         uint64_t *db_ptr = db_[row * fst_dim_sz + col].value().data();  // getting the pointer to the current plaintext
         for (size_t level = 0; level < tile_sz; level++) {
           size_t idx = (level_base + level) * num_pt + row * fst_dim_sz + col;
-          db_aligned_[idx] = db_ptr[level_base + level];
+          db_aligned_[idx] = static_cast<uint32_t>(db_ptr[level_base + level]);
         }
       }
     }
   }
+  std::cout << db_aligned_[0] << " " << db_aligned_[1] << " " << db_aligned_[2] << " " << db_aligned_[3] << std::endl;
   // destroy the db_ to save memory
   db_.reset();
 }

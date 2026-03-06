@@ -43,6 +43,39 @@ void level_mat_mat_64(matrix_t *A, matrix_t *B, matrix_t *out) {
 }
 
 
+void mat_mat_32_64(const db_coeff_t *__restrict A, const db_coeff_t *__restrict B,
+  uint64_t *__restrict out, const size_t rows, const size_t cols) {
+
+  uint64_t t0, t1;
+  for (size_t i = 0; i < rows; i++) {
+    t0 = 0; t1 = 0;
+    const size_t offset = i * cols;
+    #pragma GCC unroll 32
+    for (size_t k = 0; k < cols; k++) {
+      t0 += (uint64_t)A[offset + k] * B[2 * k];
+      t1 += (uint64_t)A[offset + k] * B[2 * k + 1];
+    }
+    out[2 * i] = t0;
+    out[2 * i + 1] = t1;
+  }
+}
+
+void level_mat_mat_32_64(matrix32_t *A, matrix32_t *B, matrix_t *out) {
+  const size_t m = A->rows;
+  const size_t n = A->cols;
+  const size_t levels = A->levels;
+  const db_coeff_t *A_data = A->data;
+  const db_coeff_t *B_data = B->data;
+  uint64_t *out_data = out->data;
+
+  for (size_t level = 0; level < levels; ++level) {
+    const db_coeff_t *A_ptr = A_data + level * (m * n);
+    const db_coeff_t *B_ptr = B_data + level * (n * 2);
+    uint64_t *C_ptr = out_data + level * (m * 2);
+    mat_mat_32_64(A_ptr, B_ptr, C_ptr, m, n);
+  }
+}
+
 void mat_mat_128(const uint64_t *__restrict A, const uint64_t *__restrict B,
   uint128_t *__restrict out, const size_t rows,
   const size_t cols) {

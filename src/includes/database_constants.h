@@ -1,6 +1,12 @@
 #pragma once
 #include <cstddef>
+#include <cstdint>
 #include <array>
+
+// The type used to store each NTT coefficient in the aligned database.
+// Each coefficient is at most 28 bits after NTT, so uint32_t suffices.
+// Change this to uint64_t if wider moduli are needed.
+using db_coeff_t = uint32_t;
 
 namespace DBConsts {
   // ============================================================================================
@@ -25,9 +31,9 @@ namespace DBConsts {
   // constexpr size_t GSW_L = 5;                       // parameter for GSW scheme
   // constexpr size_t GSW_L_KEY = 12;                  // GSW for query expansion
   // constexpr size_t TREE_HEIGHT = 9;                 // expansion tree height.
-  // constexpr size_t PlainMod = 16;                   // log t. Raw entry size = PolyDegree * (PlainMod - 1) bits.
-  // constexpr size_t SmallQWidth = 28;                // modulus switching width
-  // constexpr std::array<size_t, 2> CoeffMods = {60, 61}; // log q = 60.
+  // constexpr size_t PlainMod = 14;                   // log t. Raw entry size = PolyDegree * (PlainMod - 1) bits.
+  // constexpr size_t SmallQWidth = 27;                // modulus switching width
+  // constexpr std::array<size_t, 2> CoeffMods = {60, 60}; // log q = 60.
 
 
   // ! ========================== 256MB, single log q = 56 ==========================

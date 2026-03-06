@@ -38,8 +38,8 @@ void PirTest::test_fst_dim_mult() {
   // ============= Naive level mat mat 128bits ==============
   const std::string NAIVE_MAT_MULT_128 = "Naive level mat mat 128 bits";
   TIME_START(NAIVE_MAT_MULT_128);
-  level_mat_mat_64_128(&A_mat, &B_mat, &C_mat_128);
-  // level_mat_mat_64(&A_mat, &B_mat, &C_mat);
+  // level_mat_mat_64_128(&A_mat, &B_mat, &C_mat_128);
+  level_mat_mat_64(&A_mat, &B_mat, &C_mat);
   TIME_END(NAIVE_MAT_MULT_128);
 
   // some simple code to make sure it is not optimized out
