@@ -51,6 +51,14 @@ def main():
         help="Parallel make jobs (default: all cores)",
     )
     parser.add_argument(
+        "-n", "--experiments", type=int, default=10,
+        help="Number of experiment iterations (default: 10)",
+    )
+    parser.add_argument(
+        "-w", "--warmup", type=int, default=3,
+        help="Number of warmup iterations (default: 3)",
+    )
+    parser.add_argument(
         "--build-only", action="store_true",
         help="Build without running",
     )
@@ -64,7 +72,9 @@ def main():
         return
 
     # --- Prepare runtime args ---
-    run_cmd = [BINARY, "--test", args.test]
+    run_cmd = [BINARY, "--test", args.test,
+               "--experiments", str(args.experiments),
+               "--warmup", str(args.warmup)]
     if args.no_compress:
         run_cmd.append("--no-compress")
 

@@ -27,7 +27,8 @@ inline const char* color_reset() { return isatty(fileno(stdout)) ? "\033[0m"    
   BENCH_PRINT("==============================================================" \
               "================");
 
-constexpr std::size_t WARMUP_ITERATIONS = 0;
+// Default warmup iterations; can be changed at runtime via TimerLogger::setWarmup()
+inline std::size_t WARMUP_ITERATIONS = 3;
 
 // predefine some name for logging
 #define CORE_TIME "Core"
@@ -138,6 +139,8 @@ public:
   void prettyPrint();
 
   void cleanup();
+
+  static void setWarmup(std::size_t n) { WARMUP_ITERATIONS = n; }
 
   // Prevent copying
   TimerLogger(const TimerLogger &) = delete;
