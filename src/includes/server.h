@@ -63,7 +63,6 @@ private:
   size_t num_pt_;
   seal::SEALContext context_;
   seal::Evaluator evaluator_;
-  std::vector<size_t> dims_;
   std::map<size_t, seal::GaloisKeys> client_galois_keys_;
   std::map<size_t, GSWCiphertext> client_gsw_keys_;
   Database db_; // pointer to the entire database vector

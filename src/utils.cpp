@@ -164,16 +164,12 @@ void utils::fill_rand_arr(uint64_t *arr, size_t size) {
   rand_file.close();
 }
 
-void utils::calculate_db_shape(size_t target_num_pt, size_t l, size_t h, std::vector<size_t> &dims) {
-  dims.clear();
-  size_t max_dim = 1 + ((1 << h) - 1) / l;
-  for (size_t d = 1; d <= max_dim + 1; d++) {
-    size_t N0 = (1 << h) - l * (d - 1);
-    if (N0 * (1 << (d - 1)) >= target_num_pt) {
-      dims.push_back(N0); // maximized N0
-      for (size_t _ = 0; _ < d - 1; _++)
-        dims.push_back(2);
-      return;
+std::pair<size_t, size_t> utils::calculate_db_shape(size_t target_num_pt, size_t l, size_t h) {
+  size_t max_num_dims = 1 + ((1 << h) - 1) / l;
+  for (size_t num_dims = 1; num_dims <= max_num_dims + 1; num_dims++) {
+    size_t fst_dim_sz = (1 << h) - l * (num_dims - 1);
+    if (fst_dim_sz * (1 << (num_dims - 1)) >= target_num_pt) {
+      return {fst_dim_sz, num_dims};
     }
   }
   throw std::runtime_error("Failed to calculate database shape");

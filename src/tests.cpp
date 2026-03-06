@@ -270,12 +270,12 @@ void PirTest::bfv_example() {
   // Now instead of using multiply_plain, I want to demonstrate what happens in the first dimension evaluation. 
   // This is demonstrating what you can do in ntt form, but the actual order of computation in OnionPIRv2 fst dim can be different.
   size_t rns_mod_cnt = coeff_modulus.size() - 1;
-  std::vector<uint128_t> res(coeff_count * rns_mod_cnt);
+  std::vector<uint128_t> res(coeff_count * rns_mod_cnt * 2);
   std::fill(res.begin(), res.end(), 0);
   uint64_t *ct0_ptr = a_encrypted.data(0);
   uint64_t *ct1_ptr = a_encrypted.data(1);
   uint128_t *res0_ptr = res.data();
-  uint128_t *res1_ptr = res.data() +  coeff_count * rns_mod_cnt * 2;
+  uint128_t *res1_ptr = res.data() + coeff_count * rns_mod_cnt;
   uint64_t *pt_ptr = scalar.data();
   // element wise vector multiplication.
   for (size_t i = 0; i < coeff_count * rns_mod_cnt; i++) {
@@ -741,7 +741,7 @@ void PirTest::test_fast_expand_query() {
   const size_t coeff_count = DBConsts::PolyDegree;
   std::stringstream query_stream;
   const size_t fst_dim_sz = 512;
-  const size_t useful_cnt = pir_params.get_fst_dim_sz() + pir_params.get_l() * (pir_params.get_dims().size() - 1);
+  const size_t useful_cnt = pir_params.get_fst_dim_sz() + pir_params.get_l() * (pir_params.get_num_dims() - 1);
 
   PirClient client(pir_params);
   PirServer server(pir_params);
@@ -1054,9 +1054,8 @@ void PirTest::print_cpu_info() {
 
 void PirTest::test_db_shape() {
   print_func_name(__FUNCTION__);
-  std::vector<size_t> dims;
-  utils::calculate_db_shape(1000000, 5, 9, dims);
-  PRINT_INT_ARRAY("dims", dims.data(), dims.size());
-  utils::calculate_db_shape(1000000, 6, 8, dims);
-  PRINT_INT_ARRAY("dims", dims.data(), dims.size());
+  auto [fst1, nd1] = utils::calculate_db_shape(1000000, 5, 9);
+  BENCH_PRINT("fst_dim_sz: " << fst1 << ", num_dims: " << nd1);
+  auto [fst2, nd2] = utils::calculate_db_shape(1000000, 6, 8);
+  BENCH_PRINT("fst_dim_sz: " << fst2 << ", num_dims: " << nd2);
 }

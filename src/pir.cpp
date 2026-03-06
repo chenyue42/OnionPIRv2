@@ -46,14 +46,12 @@ PirParams::PirParams()
   // calculate the target number of plaintexts
   size_t target_num_pt = DBConsts::DB_SIZE_MB * 1024 * 1024 / get_pt_size();
   DEBUG_PRINT("target_num_pt: " << target_num_pt);
-  utils::calculate_db_shape(target_num_pt, l_, DBConsts::TREE_HEIGHT, dims_);
-  DEBUG_PRINT("dims: ");
-  for (const auto &dim : dims_) {
-    DEBUG_PRINT(dim);
-  }
-  total_dims_ = dims_.size();
-  size_t other_dim_sz = utils::roundup_div(target_num_pt, dims_[0]);
-  num_pt_ = dims_[0] * other_dim_sz;
+  auto [fst_dim_sz, num_dims] = utils::calculate_db_shape(target_num_pt, l_, DBConsts::TREE_HEIGHT);
+  fst_dim_sz_ = fst_dim_sz;
+  num_dims_ = num_dims;
+  DEBUG_PRINT("fst_dim_sz: " << fst_dim_sz_ << ", num_dims: " << num_dims_);
+  size_t other_dim_sz = utils::roundup_div(target_num_pt, fst_dim_sz_);
+  num_pt_ = fst_dim_sz_ * other_dim_sz;
 }
 
 const size_t PirParams::get_ct_mod_width() const {
@@ -89,13 +87,8 @@ void PirParams::print_params() const {
   print_field_num("l_key_", l_key_);
   print_field_num("base_log2_", base_log2_);
   
-  // Handle dimensions array
-  std::string dims_str = "[ ";
-  for (const auto &dim : dims_) {
-    dims_str += std::to_string(dim) + " ";
-  }
-  dims_str += "]";
-  print_field("dimensions_", dims_str);
+  print_field_num("fst_dim_sz", fst_dim_sz_);
+  print_field_num("num_dims", num_dims_);
   
   print_field_num("seal_params_.poly_modulus_degree()", seal_params_.poly_modulus_degree());
 

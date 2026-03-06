@@ -24,7 +24,7 @@
 // client_galois_keys_, client_gsw_keys_, and db_ are not set yet.
 PirServer::PirServer(const PirParams &pir_params)
     : pir_params_(pir_params), context_(pir_params.get_seal_params()),
-      num_pt_(pir_params.get_num_pt()), evaluator_(context_), dims_(pir_params.get_dims()),
+      num_pt_(pir_params.get_num_pt()), evaluator_(context_),
       key_gsw_(pir_params, pir_params.get_l_key(), pir_params.get_base_log2_key()),
       data_gsw_(pir_params, pir_params.get_l(), pir_params.get_base_log2()) {
   // delete the raw_db_file if it exists
@@ -297,12 +297,12 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint6
 
 seal::Ciphertext PirServer::evaluate_other_dim(std::vector<seal::Ciphertext> &mid_db, std::vector<GSWCiphertext> &selectors) {
   // Handle single dimension case
-  if (dims_.size() == 1) {
+  if (pir_params_.get_num_dims() == 1) {
     // For single dimension, we just return the first (and only) ciphertext
     return mid_db[0];
   }
   
-  size_t h = dims_.size() - 1;
+  size_t h = pir_params_.get_num_dims() - 1;
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   // For multiple dimensions, calculate the results vector size properly
   const size_t perfect_size = (1 << (h - 1)); // second to last level size
@@ -419,7 +419,7 @@ std::vector<seal::Ciphertext>
 PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) const {
   // ============== parameters
   const size_t useful_cnt = pir_params_.get_fst_dim_sz() +
-                            pir_params_.get_l() * (dims_.size() - 1); // u
+                            pir_params_.get_l() * (pir_params_.get_num_dims() - 1); // u
   const size_t expan_height = pir_params_.get_expan_height(); // h
   const size_t w = size_t{1} << expan_height;                 // 2^h
   const auto &galois_key = client_galois_keys_.at(client_id);
@@ -468,7 +468,7 @@ PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) c
 //                            seal::Ciphertext &ciphertext) const {
 //   seal::EncryptionParameters params = pir_params_.get_seal_params();
 //   // we want fst_dim_sz many bfv for first dimension, and l many bfv for each other dimension mux. 
-//   const size_t useful_cnt = pir_params_.get_fst_dim_sz() + pir_params_.get_l() * (dims_.size() - 1);
+//   const size_t useful_cnt = pir_params_.get_fst_dim_sz() + pir_params_.get_l() * (pir_params_.get_num_dims() - 1);
 //   const size_t expan_height = pir_params_.get_expan_height();
 //   const auto& client_galois_key = client_galois_keys_.at(client_id); // used for substitution
 //   std::vector<seal::Ciphertext> cts(useful_cnt + useful_cnt % 2); // just in case we have odd number of useful ciphertexts.
@@ -569,12 +569,12 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
 
   // Reconstruct RGSW queries
   TIME_START(CONVERT_TIME);
-  std::vector<GSWCiphertext> gsw_vec(dims_.size() - 1); // GSW ciphertexts
-  if (dims_.size() != 1) {  // if we do need futher dimensions
-    for (size_t i = 1; i < dims_.size(); i++) {
+  std::vector<GSWCiphertext> gsw_vec(pir_params_.get_num_dims() - 1); // GSW ciphertexts
+  if (pir_params_.get_num_dims() != 1) {  // if we do need futher dimensions
+    for (size_t i = 1; i < pir_params_.get_num_dims(); i++) {
       std::vector<seal::Ciphertext> lwe_vector; // BFV ciphertext, size l * 2. This vector will be reconstructed as a single RGSW ciphertext.
       for (size_t k = 0; k < DBConsts::GSW_L; k++) {
-        auto ptr = dims_[0] + (i - 1) * DBConsts::GSW_L + k;
+        auto ptr = pir_params_.get_fst_dim_sz() + (i - 1) * DBConsts::GSW_L + k;
         lwe_vector.push_back(query_vector[ptr]);
       }
       // Converting the BFV ciphertexts to GSW ciphertext by doing external product
@@ -586,7 +586,7 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   // ========================== Evaluations ==========================
   // Evaluate the first dimension
   TIME_START(FST_DIM_TIME);
-  query_vector.resize(dims_[0]);
+  query_vector.resize(pir_params_.get_fst_dim_sz());
   std::vector<seal::Ciphertext> mid_db = evaluate_first_dim(query_vector);
   TIME_END(FST_DIM_TIME);
 

@@ -12,7 +12,7 @@ PirClient::PirClient(const PirParams &pir_params)
       context_(pir_params.get_seal_params()), keygen_(context_),
       secret_key_(keygen_.secret_key()), decryptor_(context_, secret_key_),
       encryptor_(context_, secret_key_), evaluator_(context_),
-      context_mod_q_prime_(init_mod_q_prime()), dims_(pir_params.get_dims()) {}
+      context_mod_q_prime_(init_mod_q_prime()) {}
 
 std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
   std::vector<seal::Ciphertext> gsw_enc; // temporary GSW ciphertext using seal::Ciphertext
@@ -32,10 +32,10 @@ std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
 
 
 std::vector<size_t> PirClient::get_query_indices(size_t pt_idx) {
-  const size_t col_idx = pt_idx % dims_[0];  // the first dimension
-  const size_t row_idx = pt_idx / dims_[0];  // the rest of the dimensions
+  const size_t col_idx = pt_idx % pir_params_.get_fst_dim_sz();  // the first dimension
+  const size_t row_idx = pt_idx / pir_params_.get_fst_dim_sz();  // the rest of the dimensions
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
-  const size_t d = dims_.size();
+  const size_t d = pir_params_.get_num_dims();
   const size_t h = d - 1; // the height of the further dimension complete binary tree.
   
   std::vector<size_t> query_indices = {col_idx};
@@ -139,7 +139,7 @@ seal::Ciphertext PirClient::generate_query(const size_t pt_idx) {
       for (size_t k = 0; k < l; k++) {
         for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
           const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
-          const size_t coef_pos = dims_[0] + (i-1) * l + k + pad;  // the position of the coefficient in the query
+          const size_t coef_pos = pir_params_.get_fst_dim_sz() + (i-1) * l + k + pad;  // the position of the coefficient in the query
           uint64_t mod = coeff_modulus[mod_id].value();
           // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
           uint64_t coef = gadget[mod_id][k] * inv[mod_id] % mod;
@@ -197,7 +197,7 @@ void PirClient::generate_expanded_query(const size_t pt_idx, std::vector<seal::C
   assert(gsw_vec.size() == 0);
 
   // encrypt the first dimension
-  for (size_t i = 0; i < dims_[0]; i++)  {
+  for (size_t i = 0; i < pir_params_.get_fst_dim_sz(); i++)  {
     seal::Ciphertext temp_bfv;
     seal::Plaintext plain_query(DBConsts::PolyDegree);
     plain_query[0] = (i == query_indices[0]) ? 1 : 0;
@@ -207,7 +207,7 @@ void PirClient::generate_expanded_query(const size_t pt_idx, std::vector<seal::C
 
   // handle the rest dimensions
   GSWEval data_gsw(pir_params_, pir_params_.get_l(), pir_params_.get_base_log2());
-  for (size_t i = 1; i < dims_.size(); i++) {
+  for (size_t i = 1; i < pir_params_.get_num_dims(); i++) {
     std::vector<uint64_t> plain_query(DBConsts::PolyDegree);
     plain_query[0] = (query_indices[i] == 1) ? 1 : 0;
     // transform plain_query to NTT form
@@ -226,7 +226,7 @@ void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size
   const size_t base_log2 = pir_params_.get_base_log2();
   const auto coeff_modulus = pir_params_.get_coeff_modulus();
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  const size_t fst_dim_sz = dims_[0];
+  const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
 
   // The following two for-loops calculates the powers for GSW gadgets.
   std::vector<uint64_t> inv(rns_mod_cnt);

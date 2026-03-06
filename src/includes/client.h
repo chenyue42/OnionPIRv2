@@ -71,7 +71,6 @@ private:
   seal::Evaluator evaluator_;
   std::unique_ptr<seal::Decryptor> decryptor_mod_q_prime_;
   seal::SEALContext context_mod_q_prime_;
-  std::vector<size_t> dims_;
   
 
   // Gets the query indices for a given plaintext

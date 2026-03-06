@@ -32,17 +32,17 @@ public:
     return static_cast<double>(get_coeff_val_cnt()) * num_pt_ * 8 / 1024 / 1024;
   }
   inline size_t get_num_pt() const { return num_pt_; }
-  inline std::vector<size_t> get_dims() const { return dims_; }
+  inline size_t get_num_dims() const { return num_dims_; }
   inline size_t get_l() const { return l_; }
   inline size_t get_l_key() const { return l_key_; }
   inline size_t get_small_q() const { return small_q_; }
   inline size_t get_base_log2() const { return base_log2_; }
   inline size_t get_base_log2_key() const { return base_log2_key_; }
   // In terms of number of plaintexts
-  inline size_t get_fst_dim_sz() const { return dims_[0]; }
+  inline size_t get_fst_dim_sz() const { return fst_dim_sz_; }
   // In terms of number of plaintexts
   // when other_dim_sz == 1, it means we only use the first dimension.
-  inline size_t get_other_dim_sz() const { return num_pt_ / dims_[0]; }
+  inline size_t get_other_dim_sz() const { return num_pt_ / fst_dim_sz_; }
   inline size_t get_rns_mod_cnt() const { return seal_params_.coeff_modulus().size() - 1; }
   inline size_t get_coeff_val_cnt() const { return DBConsts::PolyDegree * get_rns_mod_cnt(); }
   inline uint64_t get_plain_mod() const { return seal_params_.plain_modulus().value(); }
@@ -67,8 +67,8 @@ private:
   size_t base_log2_;         // log of base for data RGSW
   size_t base_log2_key_;     // log of base for key RGSW
   size_t num_pt_;            // number of plaintexts in the database
-  size_t total_dims_;
-  std::vector<size_t> dims_; // Number of dimensions
+  size_t fst_dim_sz_;        // first dimension size (number of plaintexts)
+  size_t num_dims_;          // total number of dimensions
   seal::EncryptionParameters seal_params_;
   seal::SEALContext context_;
 };

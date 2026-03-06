@@ -88,11 +88,12 @@ size_t roundup_div(const size_t numerator, const size_t denominator);
 
 void fill_rand_arr(uint64_t *arr, size_t size);
 
-// Given the target number of plaintexts, GSW ell for further dims, and the expansion tree height, 
-// calculate the database shape that maximizes the first dimension size under the constraints: 
-// (1) N0 + l(d-1) = 2^h
-// (2) N0 * 2^{d-1} >= target_num_pt
-void calculate_db_shape(size_t target_num_pt, size_t l, size_t h, std::vector<size_t> &dims);
+// Given the target number of plaintexts, GSW ell for further dims, and the expansion tree height,
+// calculate the database shape that maximizes the first dimension size under the constraints:
+// (1) fst_dim_sz + l*(num_dims-1) = 2^h
+// (2) fst_dim_sz * 2^{num_dims-1} >= target_num_pt
+// Returns {fst_dim_sz, num_dims}.
+std::pair<size_t, size_t> calculate_db_shape(size_t target_num_pt, size_t l, size_t h);
 
 // given a number x and a logn, return the bit-reversed number of x
 inline size_t bit_reverse(size_t x, size_t logn) {
