@@ -16,14 +16,21 @@ typedef struct {
     size_t rows;
     size_t cols;
     size_t levels;
-} matrix_t; 
+} matrix_t;
 
 typedef struct {
     db_coeff_t *data;
     size_t rows;
     size_t cols;
     size_t levels;
-} matrix32_t;
+} db_matrix_t;
+
+typedef struct {
+    inter_coeff_t *data;
+    size_t rows;
+    size_t cols;
+    size_t levels;
+} inter_matrix_t;
 
 typedef struct {
     uint128_t *data;
@@ -37,27 +44,19 @@ typedef struct {
 // It is used for testing the performance of each method. Otherwise,
 // we are doing out = A * B, where A = m * n, B = n * 2, n = DBConsts::MaxFstDimSz
 
-void level_mat_mat_64_128(matrix_t *A, matrix_t *B, matrix128_t *out);
-
 void mat_mat_64(const uint64_t *__restrict A, const uint64_t *__restrict B,
     uint64_t *__restrict out, const size_t rows,
     const size_t cols);
     
 void level_mat_mat_64(matrix_t *A, matrix_t *B, matrix_t *out);
 
-// db_coeff_t x db_coeff_t -> uint64_t multiplication
-void mat_mat_32_64(const db_coeff_t *__restrict A, const db_coeff_t *__restrict B,
-    uint64_t *__restrict out, const size_t rows,
+// db_coeff_t x db_coeff_t -> inter_coeff_t multiplication
+void mat_mat(const db_coeff_t *__restrict A, const db_coeff_t *__restrict B,
+    inter_coeff_t *__restrict out, const size_t rows,
     const size_t cols);
 
-void level_mat_mat_32_64(matrix32_t *A, matrix32_t *B, matrix_t *out);
-
-
-// A single matrix * matrix multiplication, assuming second matrix has only two
-// columns. This is a helper for level_mat_mult_128.
-void mat_mat_128(const uint64_t *__restrict A, const uint64_t *__restrict B,
-                 uint128_t *__restrict out, const size_t rows,
-                 const size_t cols);
+// Doing levels of mat_mat, where each level is doing db_coeff_t x db_coeff_t -> inter_coeff_t multiplication.
+void level_mat_mat(db_matrix_t *A, db_matrix_t *B, inter_matrix_t *out);
 
 // calculate mod after each multiplication. Hence, output will be in uint64_t.
 void level_mat_mat_direct_mod(matrix_t *A, matrix_t *B, matrix_t *out, const seal::Modulus mod);

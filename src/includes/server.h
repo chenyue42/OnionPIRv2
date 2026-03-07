@@ -67,8 +67,7 @@ private:
   std::map<size_t, GSWCiphertext> client_gsw_keys_;
   Database db_; // pointer to the entire database vector
   std::unique_ptr<db_coeff_t[], AlignedDeleter<db_coeff_t>> db_aligned_; // aligned database for fast first dim
-  std::vector<uint64_t> inter_res_; // pointer to the intermediate result vector for fst dim
-  // std::vector<uint128_t> inter_res_; // pointer to the intermediate result vector for fst dim
+  std::vector<inter_coeff_t> inter_res_; // intermediate result vector for fst dim
   PirParams pir_params_;
   GSWEval key_gsw_;
   GSWEval data_gsw_;
@@ -90,7 +89,7 @@ private:
   // This is a helper for evaluate the first dimension. 
   // Instead of doing a mod operation after every addition and multiplication during the matrix multiplication,
   // we delay the mod operation until the end. We also use barret reduction for the mod operation.
-  void delay_modulus(std::vector<seal::Ciphertext> &result, const uint64_t *__restrict inter_res);
+  void delay_modulus(std::vector<seal::Ciphertext> &result, const inter_coeff_t *__restrict inter_res);
   
   // Transforms the plaintexts in the database into their NTT representation.
   // This speeds up computation but takes up more memory.  

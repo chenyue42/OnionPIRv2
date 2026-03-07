@@ -140,9 +140,9 @@ seal::Ciphertext PirClient::generate_query(const size_t pt_idx) {
         for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
           const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
           const size_t coef_pos = pir_params_.get_fst_dim_sz() + (i-1) * l + k + pad;  // the position of the coefficient in the query
-          uint64_t mod = coeff_modulus[mod_id].value();
+          inter_coeff_t mod = coeff_modulus[mod_id].value();
           // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
-          uint64_t coef = gadget[mod_id][k] * inv[mod_id] % mod;
+          uint64_t coef = (inter_coeff_t)gadget[mod_id][k] * inv[mod_id] % mod;
           q_head[coef_pos] = (q_head[coef_pos] + coef) % mod;
         }
       }
@@ -251,9 +251,9 @@ void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size
         const size_t reversed_idx = utils::bit_reverse(coef_pos, expan_height);  // the position of the coefficient in the query
         for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
           const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
-          uint64_t mod = coeff_modulus[mod_id].value();
+          inter_coeff_t mod = coeff_modulus[mod_id].value();
           // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
-          uint64_t coef = gadget[mod_id][k] * inv[mod_id] % mod;
+          uint64_t coef = (inter_coeff_t)gadget[mod_id][k] * inv[mod_id] % mod;
           q_head[reversed_idx + pad] = (q_head[reversed_idx + pad] + coef) % mod;
         }
       }

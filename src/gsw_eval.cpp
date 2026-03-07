@@ -68,8 +68,8 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
   decomp_to_ntt(decomposed_bfv, context);
 
   // ============================ Polynomial Matrix Multiplication ============================
-  std::vector<std::vector<uint64_t>> result(
-      2, std::vector<uint64_t>(coeff_val_cnt, 0));
+  std::vector<std::vector<inter_coeff_t>> result(
+      2, std::vector<inter_coeff_t>(coeff_val_cnt, 0));
 
   TIME_START(extern_prod_mat_mult_log_key);
   // matrix multiplication: decomp(bfv) * gsw = (1 x 2l) * (2l x 2) = (1 x 2)
@@ -79,7 +79,7 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
       seal::util::ConstCoeffIter encrypted_rlwe_ptr(decomposed_bfv[j]);
       #pragma GCC unroll 32
       for (size_t i = 0; i < coeff_val_cnt; i++) {
-        result[k][i] += (encrypted_rlwe_ptr[i]) * encrypted_gsw_ptr[i];
+        result[k][i] += (inter_coeff_t)(encrypted_rlwe_ptr[i]) * encrypted_gsw_ptr[i];
       }
     }
   }
@@ -90,7 +90,7 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
   const auto coeff_modulus = pir_params_.get_coeff_modulus();
   for (size_t poly_id = 0; poly_id < 2; poly_id++) {
     auto ct_ptr = res_ct.data(poly_id);
-    auto pt_ptr = result[poly_id];
+    auto &pt_ptr = result[poly_id];
 
     for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
       auto mod_idx = (mod_id * coeff_count);
@@ -323,7 +323,7 @@ void GSWEval::plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
   // plaintext is multiplied by the gadget and added to the ciphertext
   for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
     const size_t pad = (mod_id * coeff_count);
-    const uint64_t mod = coeff_modulus[mod_id].value();
+    const inter_coeff_t mod = coeff_modulus[mod_id].value();
     const uint64_t gadget_coef = gadget[mod_id][level];
     auto pt = plaintext.data();
     if (plaintext.size() == coeff_count * rns_mod_cnt) {
@@ -331,7 +331,7 @@ void GSWEval::plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
     }
     // Loop through plaintext coefficients
     for (size_t j = 0; j < coeff_count; j++) {
-      uint64_t val = (uint64_t)pt[j] * gadget_coef % mod;
+      uint64_t val = (inter_coeff_t)pt[j] * gadget_coef % mod;
       ct[j + pad] =
           static_cast<uint64_t>((ct[j + pad] + val) % mod);
     }
@@ -390,7 +390,7 @@ void GSWEval::plain_to_half_gsw_one_row(std::vector<uint64_t> const &plaintext,
   // Many(2) moduli are used
   for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
     size_t pad = (mod_id * coeff_count);
-    uint64_t mod = coeff_modulus[mod_id].value();
+    inter_coeff_t mod = coeff_modulus[mod_id].value();
     uint64_t gadget_coef = gadget[mod_id][level];
     auto pt = plaintext.data();
     if (plaintext.size() == coeff_count * rns_mod_cnt) {
@@ -399,7 +399,7 @@ void GSWEval::plain_to_half_gsw_one_row(std::vector<uint64_t> const &plaintext,
     // Loop through plaintext coefficients
     for (size_t j = 0; j < coeff_count; j++) {
       // TODO: We can use barret reduction here.
-      uint64_t val = (uint64_t)pt[j] * gadget_coef % mod;
+      uint64_t val = (inter_coeff_t)pt[j] * gadget_coef % mod;
       ct[j + pad] =
           static_cast<uint64_t>((ct[j + pad] + val) % mod);
     }

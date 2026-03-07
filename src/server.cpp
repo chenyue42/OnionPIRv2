@@ -166,11 +166,12 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
   component wise matrix multiplication. Further details can be found in the "matrix.h" file.
   */
   // prepare the matrices
-  matrix32_t db_mat { db_aligned_.get(), other_dim_sz, fst_dim_sz, coeff_val_cnt };
-  matrix32_t query_mat { query_data.data(), fst_dim_sz, 2, coeff_val_cnt };
-  matrix_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
+  db_matrix_t db_mat { db_aligned_.get(), other_dim_sz, fst_dim_sz, coeff_val_cnt };
+  db_matrix_t query_mat { query_data.data(), fst_dim_sz, 2, coeff_val_cnt };
+  inter_matrix_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
   TIME_START(CORE_TIME);
-  level_mat_mat_32_64(&db_mat, &query_mat, &inter_res_mat);
+  level_mat_mat(&db_mat, &query_mat, &inter_res_mat);
+  // level_mat_mat_64_128(&db_mat, &query_mat, &inter_res_mat);
   TIME_END(CORE_TIME);
 
   // ========== transform the intermediate to coefficient form. Delay the modulus operation ==========
@@ -184,7 +185,7 @@ PirServer::evaluate_first_dim(std::vector<seal::Ciphertext> &fst_dim_query) {
 }
 
 
-void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint64_t *__restrict inter_res) {
+void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const inter_coeff_t *__restrict inter_res) {
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   constexpr size_t coeff_count = DBConsts::PolyDegree;
@@ -229,11 +230,11 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint6
         #pragma unroll
         for (size_t idx = 0; idx < unroll_factor; idx++) {
           // Process polynomial 0 for ciphertext idx.
-          uint64_t x0 = inter_res[ base0[idx] + inter_idx0[idx] * inter_padding ];
+          inter_coeff_t x0 = inter_res[ base0[idx] + inter_idx0[idx] * inter_padding ];
           cts[idx].data(0)[ ct_idx0[idx]++ ] = x0 % modulus.value();
 
           // Process polynomial 1 for ciphertext idx.
-          uint64_t x1 = inter_res[ base1[idx] + inter_idx1[idx] * inter_padding ];
+          inter_coeff_t x1 = inter_res[ base1[idx] + inter_idx1[idx] * inter_padding ];
           cts[idx].data(1)[ ct_idx1[idx]++ ] = x1 % modulus.value();
           // Advance intermediate indices.
           inter_idx0[idx]++;
@@ -273,11 +274,11 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const uint6
       const seal::Modulus &modulus = coeff_modulus[mod_id];
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         // Process polynomial 0
-        uint64_t x0 = inter_res[base0 + inter_idx0 * inter_padding];
+        inter_coeff_t x0 = inter_res[base0 + inter_idx0 * inter_padding];
         ct.data(0)[ct_idx0++] = x0 % modulus.value();
 
         // Process polynomial 1
-        uint64_t x1 = inter_res[base1 + inter_idx1 * inter_padding];
+        inter_coeff_t x1 = inter_res[base1 + inter_idx1 * inter_padding];
         ct.data(1)[ct_idx1++] = x1 % modulus.value();
         
         // Advance intermediate indices
@@ -738,7 +739,7 @@ void PirServer::realign_db() {
         uint64_t *db_ptr = db_[row * fst_dim_sz + col].value().data();  // getting the pointer to the current plaintext
         for (size_t level = 0; level < tile_sz; level++) {
           size_t idx = (level_base + level) * num_pt + row * fst_dim_sz + col;
-          db_aligned_[idx] = static_cast<uint32_t>(db_ptr[level_base + level]);
+          db_aligned_[idx] = static_cast<db_coeff_t>(db_ptr[level_base + level]);
         }
       }
     }

@@ -2,111 +2,85 @@
 #include <cstddef>
 #include <cstdint>
 #include <array>
+#include <type_traits>
 
-// The type used to store each NTT coefficient in the aligned database.
-// Each coefficient is at most 28 bits after NTT, so uint32_t suffices.
-// Change this to uint64_t if wider moduli are needed.
-using db_coeff_t = uint32_t;
+typedef unsigned __int128 uint128_t;
+
+// ============================================================================
+// Configuration selector — change ACTIVE_CONFIG to switch parameters.
+// ============================================================================
+#define CONFIG_SINGLE_MOD_56  0   // 256 MB, log q = 56, single ct mod
+#define CONFIG_TWO_MOD_56     1   // 256 MB, log q = 56, two ct mods
+#define CONFIG_SINGLE_MOD_60  2   // 256 MB, log q = 60, single ct mod
+#define CONFIG_POLY4096       3   // 256 MB, poly degree 4096
+
+#define ACTIVE_CONFIG  CONFIG_TWO_MOD_56
 
 namespace DBConsts {
-  // ============================================================================================
-  // ! POLY DEGREE = 2048
-  // ============================================================================================
-
-
-  // ! ========================== 256MB, two mods log q = 60 ==========================
-  constexpr size_t DB_SIZE_MB = 256;               // target database size in MB
-  constexpr size_t PolyDegree = 2048;
-  constexpr size_t GSW_L = 5;                       // parameter for GSW scheme
-  constexpr size_t GSW_L_KEY = 12;                  // GSW for query expansion
-  constexpr size_t TREE_HEIGHT = 9;                 // expansion tree height.
-  constexpr size_t PlainMod = 14;                   // log t. Raw entry size = PolyDegree * (PlainMod - 1) bits.
-  constexpr size_t SmallQWidth = 27;                // modulus switching width
-  constexpr std::array<size_t, 3> CoeffMods = {28, 28, 60}; // log q = 60.
   
+  constexpr size_t DB_SIZE_MB = 256;
 
-  // ! ========================== 256MB, single log q = 60 ==========================
-  // constexpr size_t DB_SIZE_MB = 256;               // target database size in MB
-  // constexpr size_t PolyDegree = 2048;
-  // constexpr size_t GSW_L = 5;                       // parameter for GSW scheme
-  // constexpr size_t GSW_L_KEY = 12;                  // GSW for query expansion
-  // constexpr size_t TREE_HEIGHT = 9;                 // expansion tree height.
-  // constexpr size_t PlainMod = 14;                   // log t. Raw entry size = PolyDegree * (PlainMod - 1) bits.
-  // constexpr size_t SmallQWidth = 27;                // modulus switching width
-  // constexpr std::array<size_t, 2> CoeffMods = {60, 60}; // log q = 60.
+#if ACTIVE_CONFIG == CONFIG_SINGLE_MOD_56
+  // 256 MB, single ct mod, log q = 56
+  constexpr size_t PolyDegree = 2048;
+  constexpr size_t GSW_L = 5;
+  constexpr size_t GSW_L_KEY = 12;
+  constexpr size_t TREE_HEIGHT = 9;
+  constexpr size_t PlainMod = 15;
+  constexpr size_t SmallQWidth = 28;
+  constexpr std::array<size_t, 2> CoeffMods = {56, 60};
 
+#elif ACTIVE_CONFIG == CONFIG_TWO_MOD_56
+  // 256 MB, two ct mods, log q = 56
+  constexpr size_t PolyDegree = 2048;
+  constexpr size_t GSW_L = 5;
+  constexpr size_t GSW_L_KEY = 12;
+  constexpr size_t TREE_HEIGHT = 9;
+  constexpr size_t PlainMod = 14;
+  constexpr size_t SmallQWidth = 27;
+  constexpr std::array<size_t, 3> CoeffMods = {28, 28, 60};
 
-  // ! ========================== 256MB, single log q = 56 ==========================
-  // constexpr size_t DB_SIZE_MB = 256;               // target database size in MB
-  // constexpr size_t PolyDegree = 2048;
-  // constexpr size_t GSW_L = 5;                       // parameter for GSW scheme
-  // constexpr size_t GSW_L_KEY = 12;                  // GSW for query expansion
-  // constexpr size_t TREE_HEIGHT = 9;                 // expansion tree height.
-  // constexpr size_t PlainMod = 14;                   // log t. Raw entry size = PolyDegree * (PlainMod - 1) bits.
-  // constexpr size_t SmallQWidth = 28;                // modulus switching width
-  // constexpr std::array<size_t, 2> CoeffMods = {56, 61}; // log q = 60.
+#elif ACTIVE_CONFIG == CONFIG_SINGLE_MOD_60
+  // 256 MB, single ct mod, log q = 60
+  constexpr size_t PolyDegree = 2048;
+  constexpr size_t GSW_L = 5;
+  constexpr size_t GSW_L_KEY = 12;
+  constexpr size_t TREE_HEIGHT = 9;
+  constexpr size_t PlainMod = 16;
+  constexpr size_t SmallQWidth = 28;
+  constexpr std::array<size_t, 2> CoeffMods = {60, 61};
 
-  // ============================================================================================
-  // ! ==========================  POLY DEGREE = 4096 ==========================
-  // ============================================================================================
+#elif ACTIVE_CONFIG == CONFIG_POLY4096
+  // 256 MB, poly degree 4096
+  constexpr size_t PolyDegree = 4096;
+  constexpr size_t GSW_L = 4;
+  constexpr size_t GSW_L_KEY = 10;
+  constexpr size_t TREE_HEIGHT = 9;
+  constexpr size_t PlainMod = 46;
+  constexpr size_t SmallQWidth = 57;
+  constexpr std::array<size_t, 3> CoeffMods = {60, 60, 60};
 
+#else
+  #error "Unknown ACTIVE_CONFIG value"
+#endif
 
-  // constexpr size_t DB_SIZE_MB = 256;               // target database size in MB
-  // constexpr size_t PolyDegree = 4096;
-  // constexpr size_t GSW_L = 4;                       // parameter for GSW scheme
-  // constexpr size_t GSW_L_KEY = 10;                  // GSW for query expansion
-  // constexpr size_t TREE_HEIGHT = 9;                 // expansion tree height.
-  // constexpr size_t PlainMod = 46;                   // log t. Raw entry size = PolyDegree * (PlainMod - 1) bits.
-  // constexpr size_t SmallQWidth = 57;                // modulus switching width
-  // constexpr std::array<size_t, 3> CoeffMods = {60, 60, 60}; 
+  // Max bit-width among non-special (ciphertext) moduli.
+  // The last entry in CoeffMods is the special modulus used by SEAL.
+  constexpr size_t max_ct_mod_width() {
+    size_t w = 0;
+    for (size_t i = 0; i + 1 < CoeffMods.size(); i++)
+      if (CoeffMods[i] > w) w = CoeffMods[i];
+    return w;
+  }
+} // namespace DBConsts
 
+// db_coeff_t: type for each NTT coefficient stored in the aligned database.
+//   ≤32-bit moduli → uint32_t,  >32-bit → uint64_t.
+using db_coeff_t = std::conditional_t<DBConsts::max_ct_mod_width() <= 32,
+                                      uint32_t, uint64_t>;
 
-  // ============================================================================================
-  // ! ==========================  special cases ==========================
-  // ============================================================================================
-
-  // ! ==========================  small entry(n=1024)==========================
-  // constexpr size_t PolyDegree = 1024;
-  // constexpr size_t TotalDims = 9;                  
-  // constexpr size_t GSW_L = 10;            // RGSW parameter for external product in further dimension
-  // constexpr size_t GSW_L_KEY = 20;        // used for RGSW(sk) in query expansion
-  // constexpr size_t FstDimSz = 256 - GSW_L * (TotalDims - 1);        // 2^{tree_height} - l*(d-1)
-  // constexpr size_t PlainMod = 4;
-  // constexpr size_t SmallQWidth = 34;      // modulus switching width
-  // constexpr std::array<size_t, 2> CoeffMods = { 34, 61 }; // 101-bit security
-
-
-  // ! ==========================  small entry(n=1024)==========================
-  // constexpr size_t PolyDegree = 1024;
-  // constexpr size_t TotalDims = 10;                  
-  // constexpr size_t GSW_L = 16;            // RGSW parameter for external product in further dimension
-  // constexpr size_t GSW_L_KEY = 16;        // used for RGSW(sk) in query expansion
-  // constexpr size_t PlainMod = 2;          // number of bits for plaintext modulus
-  // constexpr size_t FstDimSz = 512 - GSW_L * (TotalDims - 1);        // 512 - l*(d-1)
-  // constexpr size_t SmallQWidth = 32;     // modulus switching width
-  // constexpr std::array<size_t, 2> CoeffMods = { 32, 61 }; // 107-bit security
-
-
-
-
-  // ! ==========================  small entry 34-bit ct mods (n=1024)==========================
-  // constexpr size_t MaxFstDimSz = 256;               // Maximum size of the first dimension. Actual size can only be smaller.
-  // constexpr size_t PolyDegree = 1024;
-  // constexpr size_t NumEntries = 1 << 15;            // number of entries in the database
-  // constexpr size_t GSW_L = 20;                      // parameter for GSW scheme
-  // constexpr size_t GSW_L_KEY = 20;                  // GSW for query expansion
-  // constexpr size_t PlainMod = 5;
-  // constexpr size_t SmallQWidth = 34;                // modulus switching width.
-  // constexpr std::array<size_t, 2> CoeffMods = { 34, 61 };
-
-  // ! ==========================  small entry 32-bit ct mods (n=1024)==========================
-  // constexpr size_t MaxFstDimSz = 128;               // Maximum size of the first dimension. Actual size can only be smaller.
-  // constexpr size_t PolyDegree = 1024;
-  // constexpr size_t NumEntries = 1 << 15;            // number of entries in the database
-  // constexpr size_t GSW_L = 28;                      // parameter for GSW scheme
-  // constexpr size_t GSW_L_KEY = 28;                  // GSW for query expansion
-  // constexpr size_t PlainMod = 3;
-  // constexpr size_t SmallQWidth = 32;                // modulus switching width.
-  // constexpr std::array<size_t, 2> CoeffMods = { 32, 61 };
-
-} // namespace DatabaseConstants
+// inter_coeff_t: accumulator for first-dimension matrix multiply & gadget arithmetic.
+//   Must be wide enough for  fst_dim_sz × (db_coeff_t × db_coeff_t)  sums.
+//   ≤32-bit moduli → uint64_t,  >32-bit → uint128_t.
+using inter_coeff_t = std::conditional_t<DBConsts::max_ct_mod_width() <= 32,
+                                         uint64_t, uint128_t>;
