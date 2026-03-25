@@ -64,7 +64,6 @@ private:
   seal::Evaluator evaluator_;
   std::map<size_t, seal::GaloisKeys> client_galois_keys_;
   std::map<size_t, GSWCiphertext> client_gsw_keys_;
-  Database db_; // pointer to the entire database vector
   std::unordered_map<size_t, seal::Plaintext> recorded_pts_; // pre-NTT plaintexts for test verification
   std::unique_ptr<db_coeff_t[], AlignedDeleter<db_coeff_t>> db_aligned_; // aligned database for fast first dim
   std::vector<inter_coeff_t> inter_res_; // intermediate result vector for fst dim
@@ -91,11 +90,6 @@ private:
   // we delay the mod operation until the end. We also use barret reduction for the mod operation.
   void delay_modulus(std::vector<seal::Ciphertext> &result, const inter_coeff_t *__restrict inter_res);
   
-  // Transforms the plaintexts in the database into their NTT representation.
-  // This speeds up computation but takes up more memory.  
-  void preprocess_ntt();
-  // Realign the database so that the first dimension calculation is in a contiguous memory.
-  void realign_db();
 
   // Fill the intermediate_db_ with some ciphertext. We just need to allocate the memory.
   void fill_inter_res();

@@ -98,7 +98,11 @@ const std::unordered_map<std::string, std::vector<std::string>> LOG_HIERARCHY = 
 class TimerLogger {
 private:
   // Stores start times of active sections
-    std::unordered_map<std::string, std::chrono::high_resolution_clock::time_point> startTimes;
+  std::unordered_map<std::string, std::chrono::high_resolution_clock::time_point> startTimes;
+
+  // One-time timers: start/result stored here, printed on demand
+  std::unordered_map<std::string, std::chrono::high_resolution_clock::time_point> onceStartTimes_;
+  std::unordered_map<std::string, double> onceTimes_;
 
   // Stores all timing results for multiple experiments
   std::vector<std::unordered_map<std::string, double>> experimentRecords;
@@ -123,6 +127,12 @@ public:
 
   // Stop logging time for a section
   void end(const std::string &sectionName);
+
+  // One-time timers: measure a block once and print immediately on end.
+  // Safe to call repeatedly inside a loop — durations are summed.
+  void startOnce(const std::string &sectionName);
+  void endOnce(const std::string &sectionName);
+  void printOnce(const std::string &sectionName) const;
 
   // End the current experiment and start a new one
   void endExperiment();
@@ -160,5 +170,10 @@ public:
 #define GET_LAST_TIME(sec) TimerLogger::getInstance().getLastTime(sec)
 #define PRETTY_PRINT() TimerLogger::getInstance().prettyPrint()
 #define CLEAN_TIMER() TimerLogger::getInstance().cleanup()
+
+// One-time timing macros: accumulate across loop iterations, print on TIME_ONCE_END.
+#define TIME_ONCE_START(sec)       TimerLogger::getInstance().startOnce(sec)
+#define TIME_ONCE_END(sec)         TimerLogger::getInstance().endOnce(sec)
+#define PRINT_ONCE(sec)            TimerLogger::getInstance().printOnce(sec)
 
 #endif // LOGGER_H

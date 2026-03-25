@@ -161,15 +161,46 @@ void TimerLogger::prettyPrint() {
     averages[section] = total / counts[section];
   }
 
-  // ------------------ pretty print the hierarchy ------------------
-  std::cout << "========== Average Results (after first " << WARMUP_ITERATIONS
+  // ------------------ offline section ------------------
+  std::cout << "========== Offline Setup ==========\n";
+  auto ntt_it = onceTimes_.find("DB NTT + realign");
+  if (ntt_it != onceTimes_.end()) {
+    std::cout << "  DB NTT + realign: " << static_cast<std::size_t>(ntt_it->second) << " ms" << std::endl;
+  }
+
+  // ------------------ online section ------------------
+  std::cout << "========== Online Average Results (after first " << WARMUP_ITERATIONS
             << " warm-up runs) ==========\n";
   prettyPrintHelper(SERVER_TOT_TIME, "", false, averages);
   prettyPrintHelper(CLIENT_TOT_TIME, "", true, averages);
 }
 
+void TimerLogger::startOnce(const std::string &sectionName) {
+  onceStartTimes_[sectionName] = std::chrono::high_resolution_clock::now();
+}
+
+void TimerLogger::endOnce(const std::string &sectionName) {
+  auto it = onceStartTimes_.find(sectionName);
+  if (it != onceStartTimes_.end()) {
+    onceTimes_[sectionName] = std::chrono::duration<double, std::milli>(
+                                  std::chrono::high_resolution_clock::now() - it->second)
+                                  .count();
+    onceStartTimes_.erase(it);
+  }
+}
+
+void TimerLogger::printOnce(const std::string &sectionName) const {
+  auto it = onceTimes_.find(sectionName);
+  if (it != onceTimes_.end()) {
+    std::cout << sectionName << ": " << static_cast<std::size_t>(it->second) << " ms\n";
+  }
+}
+
+
 void TimerLogger::cleanup() {
     startTimes.clear();
     experimentRecords.clear();
     currentExperiment.clear();
+    onceStartTimes_.clear();
+    onceTimes_.clear();
 }

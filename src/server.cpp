@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <memory>
 #include <stdexcept>
-#include <fstream>
+#include <random>
 #include <bit>
 #include <cstdint>
 
@@ -27,8 +27,6 @@ PirServer::PirServer(const PirParams &pir_params)
       num_pt_(pir_params.get_num_pt()), evaluator_(context_),
       key_gsw_(pir_params, pir_params.get_l_key(), pir_params.get_base_log2_key()),
       data_gsw_(pir_params, pir_params.get_l(), pir_params.get_base_log2()) {
-  // allocate enough space for the database, init with std::nullopt
-  db_ = std::make_unique<std::optional<seal::Plaintext>[]>(num_pt_);
   // after NTT, each database polynomial coefficient will be in mod q. Hence,
   // each pt coefficient will be represented by rns_mod_cnt many uint64_t, same as the ciphertext. 
   db_aligned_ = make_unique_aligned<db_coeff_t, 64>(num_pt_ * pir_params_.get_coeff_val_cnt());
@@ -39,52 +37,51 @@ PirServer::~PirServer() {
 }
 
 // Fills the database with random data.
+// Generates, NTT-transforms, and scatters each plaintext directly into db_aligned_
+// in a single pass, avoiding the 2x RAM overhead of a separate intermediate db_.
 // record_indices: indices of plaintexts to save (pre-NTT) for test verification.
 void PirServer::gen_data(const std::vector<size_t>& record_indices) {
   BENCH_PRINT("Generating random data for the server database...");
-  std::ifstream random_file("/dev/urandom", std::ios::binary);
-  if (!random_file.is_open()) {
-    throw std::invalid_argument("Unable to open /dev/urandom");
-  }
+
+  // Seed a fast PRNG with OS entropy (avoids per-coefficient syscall overhead of /dev/urandom)
+  std::mt19937_64 rng(std::random_device{}());
 
   recorded_pts_.clear();
   recorded_pts_.reserve(record_indices.size());
 
-  // init the database with std::nullopt
-  db_.reset(new std::optional<seal::Plaintext>[num_pt_]);
   const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   const size_t coeff_count = DBConsts::PolyDegree;
+  const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt();
   const uint64_t plain_mod = pir_params_.get_plain_mod();
 
-  for (size_t row = 0; row < other_dim_sz; ++row) {
-    for (size_t col = 0; col < fst_dim_sz; ++col) {
-      const size_t poly_id = row * fst_dim_sz + col;
-
-      // Generate a random plaintext polynomial
-      seal::Plaintext plaintext(coeff_count);
-      uint64_t* coeffs = plaintext.data();
-
-      // Fill with random coefficients (mod plain_mod)
-      for (size_t i = 0; i < coeff_count; ++i) {
-        uint64_t rand_val;
-        random_file.read(reinterpret_cast<char*>(&rand_val), sizeof(uint64_t));
-        coeffs[i] = rand_val % plain_mod;
-      }
-
-      // Record this plaintext before NTT if it's in the requested set
-      if (std::find(record_indices.begin(), record_indices.end(), poly_id) != record_indices.end()) {
-        recorded_pts_[poly_id] = plaintext;  // copy before move
-      }
-
-      db_[poly_id] = std::move(plaintext);
+  // Pass 1: fill random coefficients and record requested entries
+  TIME_ONCE_START("DB random fill");
+  std::vector<seal::Plaintext> plaintexts(num_pt_);
+  for (size_t poly_id = 0; poly_id < num_pt_; ++poly_id) {
+    plaintexts[poly_id].resize(coeff_count);
+    uint64_t* coeffs = plaintexts[poly_id].data();
+    for (size_t i = 0; i < coeff_count; ++i) {
+      coeffs[i] = rng() % plain_mod;
+    }
+    if (std::find(record_indices.begin(), record_indices.end(), poly_id) != record_indices.end()) {
+      recorded_pts_[poly_id] = plaintexts[poly_id];
     }
   }
-  random_file.close();
+  TIME_ONCE_END("DB random fill");
 
-  // transform the ntt_db_ from coefficient form to ntt form. db_ is not transformed.
-  preprocess_ntt();
-  realign_db();
+  // Pass 2: NTT-transform and scatter into db_aligned_
+  TIME_ONCE_START("DB NTT + realign");
+  for (size_t poly_id = 0; poly_id < num_pt_; ++poly_id) {
+    evaluator_.transform_to_ntt_inplace(plaintexts[poly_id], context_.first_parms_id());
+    const uint64_t* ntt_coeffs = plaintexts[poly_id].data();
+    for (size_t coeff_idx = 0; coeff_idx < coeff_val_cnt; ++coeff_idx) {
+      db_aligned_[coeff_idx * num_pt_ + poly_id] = static_cast<db_coeff_t>(ntt_coeffs[coeff_idx]);
+    }
+  }
+  TIME_ONCE_END("DB NTT + realign");
+  PRINT_ONCE("DB random fill");
+  PRINT_ONCE("DB NTT + realign");
 }
 
 void PirServer::prep_query(const std::vector<seal::Ciphertext> &fst_dim_query,
@@ -686,53 +683,6 @@ size_t PirServer::save_resp_to_stream(const seal::Ciphertext &response,
   return total_bytes;
 }
 
-void PirServer::preprocess_ntt() {
-  BENCH_PRINT("\nTransforming the database to NTT form...");
-  // tutorial on Number Theoretic Transform (NTT): https://youtu.be/Pct3rS4Y0IA?si=25VrCwBJuBjtHqoN
-  for (size_t i = 0; i < num_pt_; ++i) {
-    if (db_[i].has_value()) {
-      seal::Plaintext &pt = db_[i].value();
-      evaluator_.transform_to_ntt_inplace(pt, context_.first_parms_id());
-    }
-  }
-
-  // print the the first 5 coefficients of the first plaintext in uint64_t
-  DEBUG_PRINT("After NTT, the coefficients look like:")
-  auto temp_pt = db_[1].value();
-  for (size_t i = 0; i < 5; i++) {
-    DEBUG_PRINT(std::bitset<64>(temp_pt.data()[i]));
-  }
-}
-
-
-void PirServer::realign_db() {
-  BENCH_PRINT("Realigning the database...");
-  // Since we are breaking each coefficient of the same plaintext into different
-  // levels, I believe this realignment is unavoidable since the ntt
-  // preprocessing requires the coefficients to be in continuous memory.
-
-  // realign the database to the first dimension
-  const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
-  const size_t other_dim_sz = pir_params_.get_other_dim_sz();
-  const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt();
-  const size_t num_pt = pir_params_.get_num_pt();
-  constexpr size_t tile_sz = 16;
-
-  for (size_t level_base = 0; level_base < coeff_val_cnt; level_base += tile_sz) {
-    for (size_t row = 0; row < other_dim_sz; ++row) {
-      for (size_t col = 0; col < fst_dim_sz; ++col) {
-        uint64_t *db_ptr = db_[row * fst_dim_sz + col].value().data();  // getting the pointer to the current plaintext
-        for (size_t level = 0; level < tile_sz; level++) {
-          size_t idx = (level_base + level) * num_pt + row * fst_dim_sz + col;
-          db_aligned_[idx] = static_cast<db_coeff_t>(db_ptr[level_base + level]);
-        }
-      }
-    }
-  }
-  std::cout << db_aligned_[0] << " " << db_aligned_[1] << " " << db_aligned_[2] << " " << db_aligned_[3] << std::endl;
-  // destroy the db_ to save memory
-  db_.reset();
-}
 
 
 void PirServer::fill_inter_res() {
