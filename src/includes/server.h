@@ -4,8 +4,7 @@
 #include "pir.h"
 #include "aligned_allocator.h"
 #include <optional>
-
-#define RAW_DB_FILE "./rawDB.bin"
+#include <unordered_map>
 
 // typedef std::vector<std::optional<seal::Plaintext>> DatabaseChunk;  // 256 plaintexts
 typedef std::unique_ptr<std::optional<seal::Plaintext>[]> DatabaseChunk;  // Heap allocation for N_1 plaintexts
@@ -20,7 +19,7 @@ public:
    * Generate random data for the server database and directly set the database.
    * It pushes the data to the database in chunks.
    */
-  void gen_data();
+  void gen_data(const std::vector<size_t>& record_indices = {});
 
   // Given the client id and a packed client query, this function first unpacks the query, then returns the retrieved encrypted result.
   seal::Ciphertext make_query(const size_t client_id, std::stringstream &query_stream, seal::Decryptor &decryptor);
@@ -66,6 +65,7 @@ private:
   std::map<size_t, seal::GaloisKeys> client_galois_keys_;
   std::map<size_t, GSWCiphertext> client_gsw_keys_;
   Database db_; // pointer to the entire database vector
+  std::unordered_map<size_t, seal::Plaintext> recorded_pts_; // pre-NTT plaintexts for test verification
   std::unique_ptr<db_coeff_t[], AlignedDeleter<db_coeff_t>> db_aligned_; // aligned database for fast first dim
   std::vector<inter_coeff_t> inter_res_; // intermediate result vector for fst dim
   PirParams pir_params_;

@@ -9,9 +9,16 @@ void PirTest::test_pir(bool use_compression) {
   pir_params.print_params();
   PirServer server(pir_params); // Initialize the server with the parameters
 
+  // Pre-generate all query indices so gen_data() only records what we need
+  srand(time(0));
+  const size_t num_pt = pir_params.get_num_pt();
+  std::vector<size_t> query_indices(num_experiments);
+  for (size_t i = 0; i < num_experiments; i++) {
+    query_indices[i] = rand() % num_pt;
+  }
+
   BENCH_PRINT("Initializing server...");
-  // Data to be stored in the database.
-  server.gen_data();
+  server.gen_data(query_indices);
   BENCH_PRINT("Server initialized");
 
   // some global results
@@ -21,7 +28,6 @@ void PirTest::test_pir(bool use_compression) {
   size_t resp_size = 0;
 
   // Run the query process many times.
-  srand(time(0)); // reset the seed for the random number generator
   for (size_t i = 0; i < num_experiments; i++) {
     BENCH_PRINT("======================== Experiment " << i + 1 << " ========================");
 
@@ -41,8 +47,7 @@ void PirTest::test_pir(bool use_compression) {
     server.set_client_gsw_key(client_id, gsw_stream);
 
     // ===================== ONLINE PHASE =====================
-    // Client start generating query
-    size_t query_pt_idx = rand() % pir_params.get_num_pt();
+    size_t query_pt_idx = query_indices[i];
 
     seal::Ciphertext response;
     if (use_compression) {

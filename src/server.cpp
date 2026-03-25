@@ -27,8 +27,6 @@ PirServer::PirServer(const PirParams &pir_params)
       num_pt_(pir_params.get_num_pt()), evaluator_(context_),
       key_gsw_(pir_params, pir_params.get_l_key(), pir_params.get_base_log2_key()),
       data_gsw_(pir_params, pir_params.get_l(), pir_params.get_base_log2()) {
-  // delete the raw_db_file if it exists
-  std::remove(RAW_DB_FILE);
   // allocate enough space for the database, init with std::nullopt
   db_ = std::make_unique<std::optional<seal::Plaintext>[]>(num_pt_);
   // after NTT, each database polynomial coefficient will be in mod q. Hence,
@@ -38,17 +36,19 @@ PirServer::PirServer(const PirParams &pir_params)
 }
 
 PirServer::~PirServer() {
-  // delete the raw_db_file
-  std::remove(RAW_DB_FILE);
 }
 
-// Fills the database with random data
-void PirServer::gen_data() {
+// Fills the database with random data.
+// record_indices: indices of plaintexts to save (pre-NTT) for test verification.
+void PirServer::gen_data(const std::vector<size_t>& record_indices) {
   BENCH_PRINT("Generating random data for the server database...");
   std::ifstream random_file("/dev/urandom", std::ios::binary);
   if (!random_file.is_open()) {
     throw std::invalid_argument("Unable to open /dev/urandom");
   }
+
+  recorded_pts_.clear();
+  recorded_pts_.reserve(record_indices.size());
 
   // init the database with std::nullopt
   db_.reset(new std::optional<seal::Plaintext>[num_pt_]);
@@ -57,37 +57,31 @@ void PirServer::gen_data() {
   const size_t coeff_count = DBConsts::PolyDegree;
   const uint64_t plain_mod = pir_params_.get_plain_mod();
 
-  // Open file to store original plaintexts for verification
-  std::ofstream original_pt_file(RAW_DB_FILE, std::ios::binary);
-  if (!original_pt_file.is_open()) {
-    throw std::invalid_argument("Unable to open " RAW_DB_FILE " for writing");
-  }
-
   for (size_t row = 0; row < other_dim_sz; ++row) {
     for (size_t col = 0; col < fst_dim_sz; ++col) {
       const size_t poly_id = row * fst_dim_sz + col;
-      
+
       // Generate a random plaintext polynomial
       seal::Plaintext plaintext(coeff_count);
       uint64_t* coeffs = plaintext.data();
-      
+
       // Fill with random coefficients (mod plain_mod)
       for (size_t i = 0; i < coeff_count; ++i) {
         uint64_t rand_val;
         random_file.read(reinterpret_cast<char*>(&rand_val), sizeof(uint64_t));
         coeffs[i] = rand_val % plain_mod;
-        // coeffs[i] = poly_id % plain_mod;
       }
-      
-      // Save original plaintext to file before NTT transformation
-      original_pt_file.write(reinterpret_cast<const char*>(coeffs), coeff_count * sizeof(uint64_t));
-      
+
+      // Record this plaintext before NTT if it's in the requested set
+      if (std::find(record_indices.begin(), record_indices.end(), poly_id) != record_indices.end()) {
+        recorded_pts_[poly_id] = plaintext;  // copy before move
+      }
+
       db_[poly_id] = std::move(plaintext);
     }
   }
   random_file.close();
-  original_pt_file.close();
-  
+
   // transform the ntt_db_ from coefficient form to ntt form. db_ is not transformed.
   preprocess_ntt();
   realign_db();
@@ -535,22 +529,13 @@ void PirServer::set_client_gsw_key(const size_t client_id, std::stringstream &gs
 }
 
 
-// Get original plaintext from file (before NTT transformation)
+// Get original plaintext (before NTT transformation) from recorded entries
 seal::Plaintext PirServer::direct_get_original_plaintext(const size_t plaintext_idx) const {
-  std::ifstream original_pt_file(RAW_DB_FILE, std::ios::binary);
-  if (!original_pt_file.is_open()) {
-    throw std::invalid_argument("Unable to open " RAW_DB_FILE " for reading");
+  auto it = recorded_pts_.find(plaintext_idx);
+  if (it == recorded_pts_.end()) {
+    throw std::invalid_argument("Plaintext index " + std::to_string(plaintext_idx) + " was not recorded during gen_data()");
   }
-  
-  const size_t coeff_count = DBConsts::PolyDegree;
-  const size_t offset = plaintext_idx * coeff_count * sizeof(uint64_t);
-  
-  original_pt_file.seekg(offset);
-  seal::Plaintext plaintext(coeff_count);
-  original_pt_file.read(reinterpret_cast<char*>(plaintext.data()), coeff_count * sizeof(uint64_t));
-  original_pt_file.close();
-  
-  return plaintext;
+  return it->second;
 }
 
 
