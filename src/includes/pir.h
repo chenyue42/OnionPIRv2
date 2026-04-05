@@ -21,6 +21,9 @@ public:
 
   const size_t get_ct_mod_width() const;
 
+  inline const size_t get_uint_size() const {
+    return sizeof(db_coeff_t);
+  }
   inline const size_t get_num_bits_per_coeff() const { return DBConsts::PlainMod - 1; }
   inline seal::EncryptionParameters get_seal_params() const { return seal_params_; }
   inline seal::SEALContext get_context() const { return context_; }

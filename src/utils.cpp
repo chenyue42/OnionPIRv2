@@ -159,9 +159,10 @@ size_t utils::roundup_div(const size_t numerator, const size_t denominator) {
 }
 
 void utils::fill_rand_arr(uint64_t *arr, size_t size) {
-  std::ifstream rand_file("/dev/urandom", std::ios::binary);
-  rand_file.read(reinterpret_cast<char *>(arr), size * sizeof(uint64_t));
-  rand_file.close();
+  std::mt19937_64 rng(std::random_device{}());
+    for (size_t i = 0; i < size; i++) {
+      arr[i] = rng();
+    }
 }
 
 std::pair<size_t, size_t> utils::calculate_db_shape(size_t target_num_pt, size_t l, size_t h) {

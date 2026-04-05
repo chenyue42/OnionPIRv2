@@ -13,12 +13,13 @@ typedef unsigned __int128 uint128_t;
 #define CONFIG_TWO_MOD_56     1   // 256 MB, log q = 56, two ct mods
 #define CONFIG_SINGLE_MOD_60  2   // 256 MB, log q = 60, single ct mod
 #define CONFIG_POLY4096       3   // 256 MB, poly degree 4096
+#define CONFIG_SECURE         4   // 128-bit security
 
-#define ACTIVE_CONFIG  CONFIG_TWO_MOD_56
+#define ACTIVE_CONFIG  CONFIG_SECURE
 
 namespace DBConsts {
   
-  constexpr size_t DB_SIZE_MB = 256;
+  constexpr size_t DB_SIZE_MB = 2048;
 
 #if ACTIVE_CONFIG == CONFIG_SINGLE_MOD_56
   // 256 MB, single ct mod, log q = 56
@@ -44,7 +45,7 @@ namespace DBConsts {
   // 256 MB, single ct mod, log q = 60
   constexpr size_t PolyDegree = 2048;
   constexpr size_t GSW_L = 5;
-  constexpr size_t GSW_L_KEY = 12;
+  constexpr size_t GSW_L_KEY = 9;
   constexpr size_t TREE_HEIGHT = 9;
   constexpr size_t PlainMod = 16;
   constexpr size_t SmallQWidth = 28;
@@ -59,6 +60,16 @@ namespace DBConsts {
   constexpr size_t PlainMod = 46;
   constexpr size_t SmallQWidth = 57;
   constexpr std::array<size_t, 3> CoeffMods = {60, 60, 60};
+
+#elif ACTIVE_CONFIG == CONFIG_SECURE
+  // 256 MB, single ct mod, log q = 56
+  constexpr size_t PolyDegree = 4096;
+  constexpr size_t GSW_L = 5;
+  constexpr size_t GSW_L_KEY = 15;
+  constexpr size_t TREE_HEIGHT = 9;
+  constexpr size_t PlainMod = 14;
+  constexpr size_t SmallQWidth = 28;
+  constexpr std::array<size_t, 2> CoeffMods = {56, 60};
 
 #else
   #error "Unknown ACTIVE_CONFIG value"

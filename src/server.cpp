@@ -75,6 +75,7 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
   for (size_t poly_id = 0; poly_id < num_pt_; ++poly_id) {
     evaluator_.transform_to_ntt_inplace(plaintexts[poly_id], context_.first_parms_id());
     const uint64_t* ntt_coeffs = plaintexts[poly_id].data();
+    // ! Upon update, we just need to change these coeff_val_cnt many coefficients.
     for (size_t coeff_idx = 0; coeff_idx < coeff_val_cnt; ++coeff_idx) {
       db_aligned_[coeff_idx * num_pt_ + poly_id] = static_cast<db_coeff_t>(ntt_coeffs[coeff_idx]);
     }

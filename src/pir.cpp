@@ -77,7 +77,8 @@ void PirParams::print_params() const {
   auto print_field_num = [&print_field](const std::string& label, auto value) {
     print_field(label, std::to_string(value));
   };
-  
+
+  print_field_num("db_coeff_t size (bytes)", get_uint_size());
   print_field_num("Database size (MB)", get_DBSize_MB());
   print_field_num("Physical storage (MB)", get_physical_storage_MB());
   print_field_num("Plaintext size (KB)", get_pt_size() / 1024);

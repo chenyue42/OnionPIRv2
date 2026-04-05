@@ -101,6 +101,7 @@ void PirTest::test_pir(bool use_compression) {
     } else {
       // print a red failure message
       std::cout << color_red() << "Failure!" << color_reset() << std::endl;
+      std::cout << "Query index:\t" << query_pt_idx << std::endl;
       std::cout << "PIR Result:\t";
       utils::print_plaintext(decrypted_result, 20);
       std::cout << "Actual Plaintext:\t";
