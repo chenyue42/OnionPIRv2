@@ -34,7 +34,8 @@ void PirTest::test_external_product() {
 
   // ================== Create BFV(a) ==================
   seal::Plaintext a(coeff_count), result;
-  a[0] = 508; a[1] = 509; a[2] = 510;
+  const uint64_t t = pir_params.get_plain_mod();
+  a[0] = t / 2 + 1; a[1] = t / 2 + 2; a[2] = t / 2 + 3;
   seal::Ciphertext a_encrypted;
   encryptor_.encrypt_symmetric(a, a_encrypted);
 

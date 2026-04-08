@@ -1,9 +1,9 @@
 #include "tests.h"
 
-void PirTest::run_test(const std::string &test_name, bool use_compression) {
+void PirTest::run_test(const std::string &test_name, bool use_bv) {
   std::cout << "Running test: " << test_name << std::endl;
 
-  if (test_name == "pir")                    test_pir(use_compression);
+  if (test_name == "pir")                    test_pir(use_bv);
   else if (test_name == "bfv")               bfv_example();
   else if (test_name == "serial")            serialization_example();
   else if (test_name == "ext_prod")          test_external_product();
@@ -16,6 +16,7 @@ void PirTest::run_test(const std::string &test_name, bool use_compression) {
   else if (test_name == "mod_switch")        test_mod_switch();
   else if (test_name == "sk_mod_switch")     test_sk_mod_switch();
   else if (test_name == "db_shape")          test_db_shape();
+  else if (test_name == "bv_ks")             test_bv_keyswitch();
   else if (test_name == "cpu_info")          print_cpu_info();
   else {
     std::cerr << "Unknown test: " << test_name << std::endl;

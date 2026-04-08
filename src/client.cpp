@@ -81,77 +81,6 @@ std::vector<size_t> PirClient::get_query_indices(size_t pt_idx) {
 
 
 
-seal::Ciphertext PirClient::generate_query(const size_t pt_idx) {
-
-  // ================== Setup parameters ==================
-  // Get the corresponding index of the plaintext in the database
-  std::vector<size_t> query_indices = get_query_indices(pt_idx);
-  PRINT_INT_ARRAY("\t\tquery_indices", query_indices.data(), query_indices.size());
-  const size_t bits_per_ciphertext = 1 << pir_params_.get_expan_height(); // padding msg_size to the next power of 2
-
-  // Algorithm 1 from the OnionPIR Paper
-
-  // empty plaintext
-  seal::Plaintext plain_query(DBConsts::PolyDegree); 
-  // We set the corresponding coefficient to the inverse so the value of the
-  // expanded ciphertext will be 1
-  uint64_t inverse = 0;
-  const uint64_t plain_modulus = pir_params_.get_plain_mod();
-  seal::util::try_invert_uint_mod(bits_per_ciphertext, plain_modulus, inverse);
-
-  // Add the first dimension query vector to the query
-  plain_query[ query_indices[0] ] = inverse;
-  
-  // Encrypt plain_query first. Later we will insert the rest. $\tilde c$ in paper
-  seal::Ciphertext query;
-  encryptor_.encrypt_symmetric_seeded(plain_query, query);
-
-  // no further dimensions
-  if (query_indices.size() == 1) {
-    DEBUG_PRINT("No further dimensions");
-    return query;
-  }
-
-  // ================== Add GSW values to the query ==================
-  const size_t l = pir_params_.get_l();
-  const size_t base_log2 = pir_params_.get_base_log2();
-  const auto coeff_modulus = pir_params_.get_coeff_modulus();
-  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-
-  // The following two for-loops calculates the powers for GSW gadgets.
-  std::vector<uint64_t> inv(rns_mod_cnt);
-  for (size_t k = 0; k < rns_mod_cnt; k++) {
-    uint64_t result;
-    seal::util::try_invert_uint_mod(bits_per_ciphertext, coeff_modulus[k], result);
-    inv[k] = result;
-  }
-
-  // rns_mod_cnt many rows, each row is B^{l-1},, ..., B^0 under different moduli
-  std::vector<std::vector<uint64_t>> gadget = utils::gsw_gadget(l, base_log2, rns_mod_cnt, coeff_modulus);
-
-  // This for-loop corresponds to the for-loop in Algorithm 1 from the OnionPIR paper
-  auto q_head = query.data(0); // points to the first coefficient of the first ciphertext(c0) 
-  for (size_t i = 1; i < query_indices.size(); i++) {  // dimensions
-    // we use this if statement to replce the j for loop in Algorithm 1. This is because N_i = 2 for all i > 0
-    // When 0 is requested, we use initial encrypted value of seal::Ciphertext query, where the coefficients decrypts to 0. 
-    // When 1 is requested, we add special values to the coefficients of the query so that they decrypts to correct GSW(1) values.
-    if (query_indices[i] == 1) {
-      for (size_t k = 0; k < l; k++) {
-        for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-          const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
-          const size_t coef_pos = pir_params_.get_fst_dim_sz() + (i-1) * l + k + pad;  // the position of the coefficient in the query
-          inter_coeff_t mod = coeff_modulus[mod_id].value();
-          // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
-          uint64_t coef = (inter_coeff_t)gadget[mod_id][k] * inv[mod_id] % mod;
-          q_head[coef_pos] = (q_head[coef_pos] + coef) % mod;
-        }
-      }
-    }
-  }
-
-  return query;
-}
-
 
 seal::Ciphertext PirClient::fast_generate_query(const size_t pt_idx) {
   // ================== Setup parameters ==================
@@ -188,33 +117,6 @@ seal::Ciphertext PirClient::fast_generate_query(const size_t pt_idx) {
   return query;
 }
 
-
-void PirClient::generate_expanded_query(const size_t pt_idx, std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> &gsw_vec) {
-  // compute the query indices
-  std::vector<size_t> query_indices = get_query_indices(pt_idx);
-  PRINT_INT_ARRAY("\t\tquery_indices", query_indices.data(), query_indices.size());
-  assert(bfv_vec.size() == 0);
-  assert(gsw_vec.size() == 0);
-
-  // encrypt the first dimension
-  for (size_t i = 0; i < pir_params_.get_fst_dim_sz(); i++)  {
-    seal::Ciphertext temp_bfv;
-    seal::Plaintext plain_query(DBConsts::PolyDegree);
-    plain_query[0] = (i == query_indices[0]) ? 1 : 0;
-    encryptor_.encrypt_symmetric(plain_query, temp_bfv);
-    bfv_vec.push_back(temp_bfv); // store the first dimension in the bfv vector
-  }
-
-  // handle the rest dimensions
-  GSWEval data_gsw(pir_params_, pir_params_.get_l(), pir_params_.get_base_log2());
-  for (size_t i = 1; i < pir_params_.get_num_dims(); i++) {
-    std::vector<uint64_t> plain_query(DBConsts::PolyDegree);
-    plain_query[0] = (query_indices[i] == 1) ? 1 : 0;
-    // transform plain_query to NTT form
-    GSWCiphertext query_gsw = data_gsw.plain_to_gsw(plain_query, encryptor_, secret_key_); // In OnionPIR, client use a similar function to encrypt the secret key. 
-    gsw_vec.push_back(query_gsw);
-  }
-}
 
 
 void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size_t> query_indices) {
@@ -288,6 +190,10 @@ size_t PirClient::create_galois_keys(std::stringstream &galois_key_stream) {
   // PRINT_INT_ARRAY("galois_elts: ", galois_elts, galois_elts.size());
   auto written_size = keygen_.create_galois_keys(galois_elts).save(galois_key_stream);
   return written_size;
+}
+
+bvks::BvGaloisKeys PirClient::create_bv_galois_keys() {
+  return bvks::gen_bv_galois_keys(pir_params_, secret_key_);
 }
 
 seal::Plaintext PirClient::decrypt_reply(const seal::Ciphertext& reply) {

@@ -36,7 +36,7 @@ public:
   }
   inline size_t get_num_pt() const { return num_pt_; }
   inline size_t get_num_dims() const { return num_dims_; }
-  inline size_t get_l() const { return l_; }
+  inline size_t get_l() const { return l_ep_; }
   inline size_t get_l_key() const { return l_key_; }
   inline size_t get_small_q() const { return small_q_; }
   inline size_t get_base_log2() const { return base_log2_; }
@@ -64,8 +64,8 @@ public:
   void print_params() const;
 
 private:
-  static constexpr size_t l_ = DBConsts::GSW_L;                  // l for GSW
-  static constexpr size_t l_key_ = DBConsts::GSW_L_KEY;          // l for GSW key
+  static constexpr size_t l_ep_ = DBConsts::L_EP;                  // l for GSW
+  static constexpr size_t l_key_ = DBConsts::L_KEY;          // l for GSW key
   uint64_t small_q_ = 0; // small modulus used for modulus switching. Use only when rns_mod_cnt == 1
   size_t base_log2_;         // log of base for data RGSW
   size_t base_log2_key_;     // log of base for key RGSW

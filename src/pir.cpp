@@ -39,14 +39,14 @@ PirParams::PirParams()
   // given context. See analysis folder. This line rounds bits/l up to the
   // nearest integer.
   size_t ct_mod_width = get_ct_mod_width();
-  base_log2_ = (ct_mod_width + l_ - 1) / l_;
+  base_log2_ = (ct_mod_width + l_ep_ - 1) / l_ep_;
   base_log2_key_ = (ct_mod_width + l_key_ - 1) / l_key_;
 
   // =============== Database shape calculation ===============
   // calculate the target number of plaintexts
   size_t target_num_pt = DBConsts::DB_SIZE_MB * 1024 * 1024 / get_pt_size();
   DEBUG_PRINT("target_num_pt: " << target_num_pt);
-  auto [fst_dim_sz, num_dims] = utils::calculate_db_shape(target_num_pt, l_, DBConsts::TREE_HEIGHT);
+  auto [fst_dim_sz, num_dims] = utils::calculate_db_shape(target_num_pt, l_ep_, DBConsts::TREE_HEIGHT);
   fst_dim_sz_ = fst_dim_sz;
   num_dims_ = num_dims;
   DEBUG_PRINT("fst_dim_sz: " << fst_dim_sz_ << ", num_dims: " << num_dims_);
@@ -84,7 +84,7 @@ void PirParams::print_params() const {
   print_field_num("Plaintext size (KB)", get_pt_size() / 1024);
   print_field_num("num_pt_", num_pt_);
   print_field_num("expansion tree height", get_expan_height());
-  print_field_num("l_", l_);
+  print_field_num("l_ep_", l_ep_);
   print_field_num("l_key_", l_key_);
   print_field_num("base_log2_", base_log2_);
   

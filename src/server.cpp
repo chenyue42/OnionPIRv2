@@ -413,9 +413,9 @@ PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) c
                             pir_params_.get_l() * (pir_params_.get_num_dims() - 1); // u
   const size_t expan_height = pir_params_.get_expan_height(); // h
   const size_t w = size_t{1} << expan_height;                 // 2^h
-  const auto &galois_key = client_galois_keys_.at(client_id);
+  const auto &bv_galois_key = client_bv_galois_keys_.at(client_id);
   seal::EncryptionParameters params = pir_params_.get_seal_params();
-  
+
   // ============== storage   – index 0 is *unused*, root is slot 1
   std::vector<seal::Ciphertext> cts(2 * w); // slots 0 … 2w-1
   cts[1] = ciphertext;                      // c1  ←  input
@@ -428,14 +428,15 @@ PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) c
     const size_t left_leaf = i * w / k - w; // exact integer
     if (left_leaf >= useful_cnt)
       continue; // skip whole sub-tree
-    
+
     // ============== split   c[i] ->  c[2i] , c[2i+1]
     // c' = Subs(c_i, w/k+1)
     seal::Ciphertext c_prime = cts[i];
+    const uint32_t galois_k = DBConsts::PolyDegree / k + 1;
     TIME_START(APPLY_GALOIS);
-    evaluator_.apply_galois_inplace(c_prime,
-                                    DBConsts::PolyDegree / k + 1, 
-                                    galois_key); 
+    bvks::bv_apply_galois_inplace(c_prime, galois_k,
+                                  bv_galois_key.get(galois_k),
+                                  pir_params_);
     TIME_END(APPLY_GALOIS);
     TIME_START("add_sub");
     // c_{2i}   =  c_i + c'
@@ -454,60 +455,14 @@ PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) c
   return std::vector<seal::Ciphertext>(cts.begin() + w,cts.begin() + w + useful_cnt);
 }
 
-// std::vector<seal::Ciphertext>
-// PirServer::fast_expand_qry(size_t client_id,
-//                            seal::Ciphertext &ciphertext) const {
-//   seal::EncryptionParameters params = pir_params_.get_seal_params();
-//   // we want fst_dim_sz many bfv for first dimension, and l many bfv for each other dimension mux. 
-//   const size_t useful_cnt = pir_params_.get_fst_dim_sz() + pir_params_.get_l() * (pir_params_.get_num_dims() - 1);
-//   const size_t expan_height = pir_params_.get_expan_height();
-//   const auto& client_galois_key = client_galois_keys_.at(client_id); // used for substitution
-//   std::vector<seal::Ciphertext> cts(useful_cnt + useful_cnt % 2); // just in case we have odd number of useful ciphertexts.
-//   DEBUG_PRINT("expansion height: " << expan_height << ", useful count: " << useful_cnt);
-
-//   /*  Pseudu code:
-//   nonzero_cnt = fst_dim_sz + l * (dims.size() - 1)
-//   for a = 0 .. logN - 1 do
-//     k = 2^a // tree width at level a
-//     t = nonzero_cnt / recursive_ceil_half(nonzero_cnt, expan_height - a)
-//     for b = t-1 .. 0 do
-//       c' = Subs(c_b, n/k + 1)
-//       c_{2b + 1} = (c_b - c') * x^{-k}
-//       c_{2b} = c_b + c'
-//     end
-//   end
-//   */
-
-//   cts[0] = ciphertext;   // c_0 = c in paper
-//   for (size_t a = 0; a < expan_height; a++) {
-//     // the number of ciphertexts in the current level of the expansion tree
-//     const size_t level_size = pow(2, a);
-//     const size_t trimed_level_sz = utils::repeated_ceil_half(useful_cnt, expan_height - a);
-//     // DEBUG_PRINT("Level size: " << level_size << ", Trimed level size: " << trimed_level_sz);
-    
-//     for (int b = trimed_level_sz - 1; b > -1; b--) { // ! we have to reverse the order otherwise we will overwrite the cts[b] before using it.
-//       seal::Ciphertext c_prime = cts[b]; 
-//       TIME_START(APPLY_GALOIS);
-//       evaluator_.apply_galois_inplace(c_prime, DBConsts::PolyDegree / level_size + 1,
-//                                       client_galois_key); // Subs(c_b, n/k + 1)
-//       TIME_END(APPLY_GALOIS);
-//       // ! order matters! 
-//       TIME_START("expand extra");
-//       seal::Ciphertext temp;
-//       evaluator_.sub(cts[b], c_prime, temp);  // temp = c_b - c'
-//       utils::shift_polynomial(params, temp, cts[2 * b + 1], -level_size); // temp * x^{-k}, store in c_{2b + 1}
-//       evaluator_.add(cts[b], c_prime, cts[2 * b]);
-//       TIME_END("expand extra");
-//     }
-//   }
-
-//   return cts;
-// }
-
 void PirServer::set_client_galois_key(const size_t client_id, std::stringstream &galois_stream) {
   seal::GaloisKeys client_key;
   client_key.load(context_, galois_stream);
   client_galois_keys_[client_id] = client_key;
+}
+
+void PirServer::set_client_bv_galois_key(const size_t client_id, bvks::BvGaloisKeys bv_keys) {
+  client_bv_galois_keys_[client_id] = std::move(bv_keys);
 }
 
 void PirServer::set_client_gsw_key(const size_t client_id, std::stringstream &gsw_stream) {
@@ -537,16 +492,17 @@ seal::Plaintext PirServer::direct_get_original_plaintext(const size_t plaintext_
 }
 
 
-seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream &query_stream, seal::Decryptor &decryptor) {
+seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream &query_stream, seal::Decryptor &decryptor, bool use_bv) {
   // receive the query from the client
-  seal::Ciphertext query; 
+  seal::Ciphertext query;
   query.load(context_, query_stream);
 
   // ========================== Expansion & conversion ==========================
-  // Query expansion
+  // Query expansion: BV key-switching (default) or GHS key-switching
   TIME_START(EXPAND_TIME);
-  std::vector<seal::Ciphertext> query_vector = expand_query(client_id, query);
-  // std::vector<seal::Ciphertext> query_vector = fast_expand_qry(client_id, query);
+  std::vector<seal::Ciphertext> query_vector = use_bv
+      ? fast_expand_qry(client_id, query)
+      : expand_query(client_id, query);
   TIME_END(EXPAND_TIME);
 
   // Reconstruct RGSW queries
@@ -555,8 +511,8 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   if (pir_params_.get_num_dims() != 1) {  // if we do need futher dimensions
     for (size_t i = 1; i < pir_params_.get_num_dims(); i++) {
       std::vector<seal::Ciphertext> lwe_vector; // BFV ciphertext, size l * 2. This vector will be reconstructed as a single RGSW ciphertext.
-      for (size_t k = 0; k < DBConsts::GSW_L; k++) {
-        auto ptr = pir_params_.get_fst_dim_sz() + (i - 1) * DBConsts::GSW_L + k;
+      for (size_t k = 0; k < DBConsts::L_EP; k++) {
+        auto ptr = pir_params_.get_fst_dim_sz() + (i - 1) * DBConsts::L_EP + k;
         lwe_vector.push_back(query_vector[ptr]);
       }
       // Converting the BFV ciphertexts to GSW ciphertext by doing external product
@@ -595,39 +551,6 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream
   DEBUG_PRINT("Modulus switching done.");
   return result;
 }
-
-
-seal::Ciphertext PirServer::make_query_no_expand(std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> gsw_vec) {
-  // ========================== Evaluations ==========================
-  // Evaluate the first dimension
-  TIME_START(FST_DIM_TIME);
-  std::vector<seal::Ciphertext> mid_db = evaluate_first_dim(bfv_vec);
-  TIME_END(FST_DIM_TIME);
-
-  // Evaluate the other dimensions
-  TIME_START(OTHER_DIM_TIME);
-  seal::Ciphertext result = evaluate_other_dim(mid_db, gsw_vec);
-  TIME_END(OTHER_DIM_TIME);
-
-  // ========================== Post-processing ==========================
-  TIME_START(MOD_SWITCH);
-  // modulus switching so to reduce the response size by half
-  if(pir_params_.get_rns_mod_cnt() > 1) {
-    DEBUG_PRINT("Modulus switching to the next modulus...");
-    evaluator_.mod_switch_to_next_inplace(result);
-  }
-  // we can always switch to the small modulus it correctness is guaranteed.
-  if (DBConsts::SmallQWidth < DBConsts::CoeffMods[0]) {
-    DEBUG_PRINT("Modulus switching for a single modulus...");
-    const uint64_t small_q = pir_params_.get_small_q();
-    mod_switch_inplace(result, small_q);
-  }
-
-  TIME_END(MOD_SWITCH);
-  DEBUG_PRINT("Modulus switching done.");
-  return result;
-}
-
 
 
 size_t PirServer::save_resp_to_stream(const seal::Ciphertext &response,

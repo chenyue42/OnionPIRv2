@@ -2,6 +2,7 @@
 
 #include "pir.h"
 #include "gsw_eval.h"
+#include "bv_keyswitch.h"
 
 class PirClient {
 public:
@@ -9,23 +10,12 @@ public:
   ~PirClient() = default;
 
   /**
-  This is the core function for the client.
-  High level steps:
-  1. Compute the query indices.
-  2. Creates a plain_query (pt in paper), add the first dimension, then encrypts it.
-  3. For the rest dimensions, calculate required RGSW coefficients and insert
-  them into the ciphertext. Result is $\tilde c$ in paper.
+  Generate a packed query ciphertext for fast_expand_qry.
   @param pt_idx The input to the PIR blackbox.
-  @return returns a seal::Ciphertext with a a seed stored in
-  c_1, which should not be touched before doing serialization.
+  @return returns a seal::Ciphertext with a seed stored in c_1
+  (must be serialized before any further operations).
   */
-  seal::Ciphertext generate_query(const size_t pt_idx);
-
-  // similar to generate_query, but preparing query for fast_expand_qry.
   seal::Ciphertext fast_generate_query(const size_t pt_idx);
-
-  // Generate a query without compression techniques to test the noise growth.
-  void generate_expanded_query(const size_t pt_idx, std::vector<seal::Ciphertext> &bfv_vec, std::vector<GSWCiphertext> &gsw_vec);
 
 
   // helper function for fast_generate_query
@@ -34,6 +24,8 @@ public:
   static size_t write_query_to_stream(const seal::Ciphertext &query, std::stringstream &data_stream);
   static size_t write_gsw_to_stream(const std::vector<Ciphertext> &gsw, std::stringstream &gsw_stream);
   size_t create_galois_keys(std::stringstream &galois_key_stream);
+  // Create custom BV-style Galois keys (no special prime).
+  bvks::BvGaloisKeys create_bv_galois_keys();
   // decrypt the result returned from PIR. Assume modulus switching is applied.
   seal::Plaintext decrypt_reply(const seal::Ciphertext& reply);
   seal::Plaintext decrypt_ct(const seal::Ciphertext& ct);
@@ -42,9 +34,9 @@ public:
   
   inline size_t get_client_id() const { return client_id_; }
 
-  inline void test_budget(seal::Ciphertext &ct) {
-    // calculate the noise budget of the ciphertext
-    BENCH_PRINT("Noise budget: " << decryptor_.invariant_noise_budget(ct) << " bits");
+  inline int noise_budget(seal::Ciphertext &ct) {
+    // return the noise budget of the ciphertext
+    return decryptor_.invariant_noise_budget(ct);
   }
 
   // load the response from the stream and recover the ciphertext

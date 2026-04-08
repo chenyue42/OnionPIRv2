@@ -19,13 +19,13 @@ typedef unsigned __int128 uint128_t;
 
 namespace DBConsts {
   
-  constexpr size_t DB_SIZE_MB = 2048;
+  constexpr size_t DB_SIZE_MB = 256;
 
 #if ACTIVE_CONFIG == CONFIG_SINGLE_MOD_56
   // 256 MB, single ct mod, log q = 56
   constexpr size_t PolyDegree = 2048;
-  constexpr size_t GSW_L = 5;
-  constexpr size_t GSW_L_KEY = 12;
+  constexpr size_t L_EP = 5;
+  constexpr size_t L_KEY = 12;
   constexpr size_t TREE_HEIGHT = 9;
   constexpr size_t PlainMod = 15;
   constexpr size_t SmallQWidth = 28;
@@ -34,8 +34,8 @@ namespace DBConsts {
 #elif ACTIVE_CONFIG == CONFIG_TWO_MOD_56
   // 256 MB, two ct mods, log q = 56
   constexpr size_t PolyDegree = 2048;
-  constexpr size_t GSW_L = 5;
-  constexpr size_t GSW_L_KEY = 12;
+  constexpr size_t L_EP = 5;
+  constexpr size_t L_KEY = 12;
   constexpr size_t TREE_HEIGHT = 9;
   constexpr size_t PlainMod = 14;
   constexpr size_t SmallQWidth = 27;
@@ -44,8 +44,8 @@ namespace DBConsts {
 #elif ACTIVE_CONFIG == CONFIG_SINGLE_MOD_60
   // 256 MB, single ct mod, log q = 60
   constexpr size_t PolyDegree = 2048;
-  constexpr size_t GSW_L = 5;
-  constexpr size_t GSW_L_KEY = 9;
+  constexpr size_t L_EP = 5;
+  constexpr size_t L_KEY = 9;
   constexpr size_t TREE_HEIGHT = 9;
   constexpr size_t PlainMod = 16;
   constexpr size_t SmallQWidth = 28;
@@ -54,8 +54,8 @@ namespace DBConsts {
 #elif ACTIVE_CONFIG == CONFIG_POLY4096
   // 256 MB, poly degree 4096
   constexpr size_t PolyDegree = 4096;
-  constexpr size_t GSW_L = 4;
-  constexpr size_t GSW_L_KEY = 10;
+  constexpr size_t L_EP = 4;
+  constexpr size_t L_KEY = 10;
   constexpr size_t TREE_HEIGHT = 9;
   constexpr size_t PlainMod = 46;
   constexpr size_t SmallQWidth = 57;
@@ -63,13 +63,13 @@ namespace DBConsts {
 
 #elif ACTIVE_CONFIG == CONFIG_SECURE
   // 256 MB, single ct mod, log q = 56
-  constexpr size_t PolyDegree = 4096;
-  constexpr size_t GSW_L = 5;
-  constexpr size_t GSW_L_KEY = 15;
-  constexpr size_t TREE_HEIGHT = 9;
-  constexpr size_t PlainMod = 14;
-  constexpr size_t SmallQWidth = 28;
-  constexpr std::array<size_t, 2> CoeffMods = {56, 60};
+  constexpr size_t PolyDegree = 2048;
+  constexpr size_t L_EP = 4;
+  constexpr size_t L_KEY = 8;
+  constexpr size_t TREE_HEIGHT = 7;
+  constexpr size_t PlainMod = 9;
+  constexpr size_t SmallQWidth = 55;
+  constexpr std::array<size_t, 2> CoeffMods = {58, 60};
 
 #else
   #error "Unknown ACTIVE_CONFIG value"

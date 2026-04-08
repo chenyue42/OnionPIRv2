@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "seal/util/rlwe.h"
 #include "logging.h"
+#include "bv_keyswitch.h"
 #include <cassert>
 
 // Here we compute a cross product between the transpose of the decomposed BFV
@@ -195,29 +196,31 @@ void GSWEval::decomp_rlwe_single_mod(seal::Ciphertext const &ct, std::vector<std
   // ============================ Parameters ============================
   assert(output.size() == 0);
   output.reserve(2 * l_);
-  // Get parameters
-  const uint64_t base = uint64_t(1) << base_log2_;
-  const uint64_t mask = base - 1;
   constexpr size_t coeff_count = DBConsts::PolyDegree;
+  const uint64_t q = pir_params_.get_coeff_modulus()[0].value();
 
-  // ============================ Right Shift ============================
-  // we do right shift on both polynomials
+  // ============================ Signed Decomposition ============================
+  // Coefficient-first loop: carry propagates across digits within each coefficient.
+  // Output order: most-significant digit first (p = l_-1..0) to match GSW gadget.
   for (size_t poly_id = 0; poly_id < 2; poly_id++) {
     const uint64_t *poly_ptr = ct.data(poly_id);
-    // right shift different amount to match the GSW ciphertext
-    for (size_t p = l_; p-- > 0;) { // loop from l_ - 1 to 0.
-      std::vector<uint64_t> rshift_res(poly_ptr, poly_ptr + coeff_count);
-      const size_t shift_amount = p * base_log2_;
-      
-      TIME_START(right_shift_log_key);
-      #pragma GCC unroll 32
-      for (size_t k = 0; k < coeff_count; k++) {
-        // right shift every coefficient. This is why we need coefficient form.
-        rshift_res[k] = (rshift_res[k] >> shift_amount) & mask;
-      }
-      TIME_END(right_shift_log_key);
 
-      output.emplace_back(std::move(rshift_res)); // this is also fast
+    // digit_matrix[p][k]: digit p of coefficient k (out[0]=least significant)
+    std::vector<std::vector<uint64_t>> digit_matrix(l_, std::vector<uint64_t>(coeff_count));
+
+    // signed gadget decomposition
+    for (size_t k = 0; k < coeff_count; k++) {
+      // Use a stack buffer; l_ is small (≤12).
+      uint64_t digit_vals[16];  // ! for now we assume l_ <= 16. Reasonable for practical params. 
+      bvks::signed_gadget_decompose(poly_ptr[k], base_log2_, q, digit_vals, l_);
+      for (size_t p = 0; p < l_; p++) {
+        digit_matrix[p][k] = digit_vals[p];
+      }
+    }
+
+    // Push most-significant digit first (matches current GSW gadget ordering).
+    for (size_t p = l_; p-- > 0;) {
+      output.emplace_back(std::move(digit_matrix[p]));
     }
   }
 }

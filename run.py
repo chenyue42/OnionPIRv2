@@ -40,7 +40,7 @@ def main():
         "-t", "--test", default="pir",
         help="Test to run (default: pir). Options: pir, bfv, serial, ext_prod, "
              "ext_prod_mux, fst_dim, batch_decomp, fast_expand, raw_pt_ct, "
-             "decrypt_mod_q, mod_switch, sk_mod_switch, db_shape, cpu_info",
+             "decrypt_mod_q, mod_switch, sk_mod_switch, db_shape, bv_ks, cpu_info",
     )
     parser.add_argument(
         "-o", "--output", metavar="FILE",
