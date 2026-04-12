@@ -54,9 +54,17 @@ public:
   }
   // The height of the expansion tree during packing unpacking stages
   inline const size_t get_expan_height() const { return DBConsts::TREE_HEIGHT; }
-  // the theoretical size of RGSW(sk) without pseudorandom seed
-  inline const size_t get_gsw_key_size() const {
-    return get_ct_mod_width() * get_coeff_val_cnt() * 2 * l_key_ / 8;
+
+  inline const size_t get_BFV_size(bool use_seed = true) const {
+    if (use_seed) {
+      return (get_ct_mod_width() * get_coeff_val_cnt() + 32) / 8;
+    } else {
+      return (get_ct_mod_width() * get_coeff_val_cnt() * 2) / 8;
+    }
+  }
+
+  inline const size_t get_gsw_key_size(bool use_seed = true) const {
+    return 2 * l_key_ * get_BFV_size(use_seed); 
   }
 
   // ================== helper functions ==================

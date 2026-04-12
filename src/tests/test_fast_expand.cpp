@@ -32,11 +32,10 @@ void PirTest::test_fast_expand_query() {
   pir_params.print_params();
 
   // ============= setup the server ==============
-  std::stringstream gsw_stream, data_stream;
-  client.write_gsw_to_stream(client.generate_gsw_from_key(), gsw_stream);
+  std::stringstream gsw_stream;
   //--------------------------------------------------------------------------------
   server.set_client_bv_galois_key(client_id, client.create_bv_galois_keys());
-  server.set_client_gsw_key(client_id, gsw_stream);
+  server.set_client_gsw_key(client_id, client.generate_gsw_from_key());
 
   // ============= Generate the query ==============
   const size_t query_idx = 253;

@@ -465,20 +465,11 @@ void PirServer::set_client_bv_galois_key(const size_t client_id, bvks::BvGaloisK
   client_bv_galois_keys_[client_id] = std::move(bv_keys);
 }
 
-void PirServer::set_client_gsw_key(const size_t client_id, std::stringstream &gsw_stream) {
-  std::vector<seal::Ciphertext> temp_gsw;
-  // load 2l ciphertexts from the stream
-  for (size_t i = 0; i < 2 * pir_params_.get_l_key(); i++) {
-    seal::Ciphertext row;
-    row.load(context_, gsw_stream);
-    temp_gsw.push_back(row);
-  }
+void PirServer::set_client_gsw_key(const size_t client_id, const std::vector<Ciphertext> &gsw_cts) {
   GSWCiphertext gsw_key;
-
-  key_gsw_.seal_GSW_vec_to_GSW(gsw_key, temp_gsw);
-  key_gsw_.gsw_ntt_negacyclic_harvey(gsw_key); // transform the GSW ciphertext to NTT form
-
-  client_gsw_keys_[client_id] = gsw_key;
+  key_gsw_.seal_GSW_vec_to_GSW(gsw_key, gsw_cts);
+  key_gsw_.gsw_ntt_negacyclic_harvey(gsw_key);
+  client_gsw_keys_[client_id] = std::move(gsw_key);
 }
 
 
@@ -492,10 +483,8 @@ seal::Plaintext PirServer::direct_get_original_plaintext(const size_t plaintext_
 }
 
 
-seal::Ciphertext PirServer::make_query(const size_t client_id, std::stringstream &query_stream, seal::Decryptor &decryptor, bool use_bv) {
+seal::Ciphertext PirServer::make_query(const size_t client_id, seal::Ciphertext &query, seal::Decryptor &decryptor, bool use_bv) {
   // receive the query from the client
-  seal::Ciphertext query;
-  query.load(context_, query_stream);
 
   // ========================== Expansion & conversion ==========================
   // Query expansion: BV key-switching (default) or GHS key-switching

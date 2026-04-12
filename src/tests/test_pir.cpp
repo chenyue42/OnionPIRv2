@@ -36,15 +36,13 @@ void PirTest::test_pir(bool use_bv) {
     // Initialize the client
     PirClient client(pir_params);
     const size_t client_id = client.get_client_id();
-    std::stringstream gsw_stream, query_stream, resp_stream;
+    std::stringstream resp_stream;
 
     // Client create BV galois keys and gsw(sk)
     auto bv_galois_keys = client.create_bv_galois_keys();
     galois_key_size = bvks::BvGaloisKeys::compute_size_bytes(
         bv_galois_keys.keys.size(), DBConsts::PolyDegree,
         pir_params.get_ct_mod_width(), /*use_seed=*/true);
-    client.write_gsw_to_stream(
-        client.generate_gsw_from_key(), gsw_stream);
     //--------------------------------------------------------------------------------
     // Server receives the BV galois keys, (optionally SEAL galois keys), and gsw keys
     server.set_client_bv_galois_key(client_id, std::move(bv_galois_keys));
@@ -53,18 +51,18 @@ void PirTest::test_pir(bool use_bv) {
       client.create_galois_keys(galois_key_stream);
       server.set_client_galois_key(client_id, galois_key_stream);
     }
-    server.set_client_gsw_key(client_id, gsw_stream);
+    server.set_client_gsw_key(client_id, client.generate_gsw_from_key());
 
     // ===================== ONLINE PHASE =====================
     size_t query_pt_idx = query_indices[i];
 
     TIME_START(CLIENT_TOT_TIME);
     seal::Ciphertext query = client.fast_generate_query(query_pt_idx);
-    query_size = client.write_query_to_stream(query, query_stream);
     TIME_END(CLIENT_TOT_TIME);
+    query_size = pir_params.get_BFV_size();
 
     TIME_START(SERVER_TOT_TIME);
-    seal::Ciphertext response = server.make_query(client_id, query_stream, client.decryptor_, use_bv);
+    seal::Ciphertext response = server.make_query(client_id, query, client.decryptor_, use_bv);
     TIME_END(SERVER_TOT_TIME);
 
 
@@ -113,7 +111,7 @@ void PirTest::test_pir(bool use_bv) {
   BENCH_PRINT("Success rate: " << success_count << "/" << num_experiments);
   BENCH_PRINT("BV galois key size: " << static_cast<double>(galois_key_size) / 1024 << " KB");
   // BENCH_PRINT("gsw key size: " << gsw_key_size << " bytes");
-  BENCH_PRINT("gsw key size: " << pir_params.get_gsw_key_size() << " bytes");
+  BENCH_PRINT("gsw key size: " << pir_params.get_gsw_key_size() << " bytes = " << static_cast<double>(pir_params.get_gsw_key_size()) / 1024 << " KB");
   BENCH_PRINT("total key size: " << static_cast<double>(galois_key_size + pir_params.get_gsw_key_size()) / 1024 << "KB");
   BENCH_PRINT("query size: " << query_size << " bytes = " << static_cast<double>(query_size) / 1024 << " KB");
   BENCH_PRINT("response size: " << resp_size << " bytes = " << static_cast<double>(resp_size) / 1024 << " KB");

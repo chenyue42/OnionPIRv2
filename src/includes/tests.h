@@ -56,4 +56,5 @@ class PirTest {
     void test_sk_mod_switch();
     void test_db_shape();
     void test_bv_keyswitch();
+    void test_hexl_ntt();
 };

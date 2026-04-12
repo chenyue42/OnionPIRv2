@@ -76,30 +76,8 @@ class GSWEval {
 
     void plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
                          seal::Encryptor const &encryptor,
-                         seal::SecretKey const &sk, const size_t half,
-                         const size_t level, seal::Ciphertext &output);
-
-    // The input plaintext is a vector of all the coefficients (In the coefficient form). Assert that the size of this vector 
-    // is equal to the number of coefficients in the Plaintext, including the zero coefficients.
-    void plain_to_half_gsw(std::vector<uint64_t> const &plaintext,
-                              seal::Encryptor const &encryptor,
-                              seal::SecretKey const &sk,
-                              std::vector<seal::Ciphertext> &output);
-
-    /**
-    @brief Helper function for plain_to_half_gsw. This function encrypts the
-    plaintext to a single row of the GSW ciphertext at the given "half" and the
-    given l. half = 0 means the first half of the GSW.
-
-    @param plaintext
-    @param half 0 denotes the top l rows, 1 denotes the bottom l rows
-    @param level level in the given half
-    @return seal::Ciphertext
-    */
-    void plain_to_half_gsw_one_row(std::vector<uint64_t> const &plaintext,
-                            seal::Encryptor const &encryptor,
-                            seal::SecretKey const &sk, const size_t half,
-                            const size_t level, seal::Ciphertext &output);
+                         seal::SecretKey const &sk, const size_t level,
+                         const size_t half, seal::Ciphertext &output);
 
     // Transform the given GSWCipher text from polynomial representation to NTT representation.
     void gsw_ntt_negacyclic_harvey(GSWCiphertext &gsw);

@@ -51,7 +51,7 @@ def main():
         help="Parallel make jobs (default: all cores)",
     )
     parser.add_argument(
-        "-n", "--experiments", type=int, default=10,
+        "-n", "--experiments", type=int, default=5,
         help="Number of experiment iterations (default: 10)",
     )
     parser.add_argument(

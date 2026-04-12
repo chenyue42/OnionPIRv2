@@ -18,6 +18,17 @@ public:
   seal::Ciphertext fast_generate_query(const size_t pt_idx);
 
 
+  /**
+  Generate multiple queries for double-stateless version.
+  In this setting, we send multiple queries to reduce the height of the expansion tree. 
+  This way we save more on the KSK size.
+  Here is how this function work: 
+  We can send multiple queries. For now, we let each query to expand to the TREE_HEIGHT. That means we can will get 
+  num_queries * (1<<TREE_HEIGHT) plaintext slots in total.
+  
+  */
+  seal::Ciphertext gen_mult_queries(const size_t pt_idx, const size_t num_queries);
+
   // helper function for fast_generate_query
   void add_gsw_to_query(seal::Ciphertext &query, const std::vector<size_t> query_indices);
 
@@ -61,7 +72,7 @@ private:
   seal::Decryptor decryptor_;
   seal::Encryptor encryptor_;
   seal::Evaluator evaluator_;
-  std::unique_ptr<seal::Decryptor> decryptor_mod_q_prime_;
+  std::vector<uint64_t> sk_ntt_small_q_; // secret key in NTT form under small_q
   seal::SEALContext context_mod_q_prime_;
   
 

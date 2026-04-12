@@ -19,7 +19,7 @@ typedef unsigned __int128 uint128_t;
 
 namespace DBConsts {
   
-  constexpr size_t DB_SIZE_MB = 256;
+  constexpr size_t DB_SIZE_MB = 128;
 
 #if ACTIVE_CONFIG == CONFIG_SINGLE_MOD_56
   // 256 MB, single ct mod, log q = 56
@@ -67,9 +67,9 @@ namespace DBConsts {
   constexpr size_t L_EP = 4;
   constexpr size_t L_KEY = 8;
   constexpr size_t TREE_HEIGHT = 7;
-  constexpr size_t PlainMod = 9;
+  constexpr size_t PlainMod = 12;
   constexpr size_t SmallQWidth = 55;
-  constexpr std::array<size_t, 2> CoeffMods = {58, 60};
+  constexpr std::array<size_t, 2> CoeffMods = {60, 60};
 
 #else
   #error "Unknown ACTIVE_CONFIG value"

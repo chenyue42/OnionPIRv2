@@ -24,12 +24,12 @@ public:
 
   // Given the client id and a packed client query, this function first unpacks the query, then returns the retrieved encrypted result.
   // use_bv: if true, use BV key-switching for expansion; if false, use GHS (SEAL galois keys).
-  seal::Ciphertext make_query(const size_t client_id, std::stringstream &query_stream, seal::Decryptor &decryptor, bool use_bv = true);
+  seal::Ciphertext make_query(const size_t client_id, seal::Ciphertext &query, seal::Decryptor &decryptor, bool use_bv = true);
   // return the number of bits needed to represent the server reponse
   size_t save_resp_to_stream(const seal::Ciphertext &response, std::stringstream &resp_stream);
   void set_client_galois_key(const size_t client_id, std::stringstream &gsw_stream);
   void set_client_bv_galois_key(const size_t client_id, bvks::BvGaloisKeys bv_keys);
-  void set_client_gsw_key(const size_t client_id, std::stringstream &gsw_stream);
+  void set_client_gsw_key(const size_t client_id, const std::vector<Ciphertext> &gsw_key);
 
   /**
   Asking the server to return the original plaintext (before NTT transformation) at the given index.

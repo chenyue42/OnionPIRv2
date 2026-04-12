@@ -18,10 +18,11 @@ void PirTest::run_test(const std::string &test_name, bool use_bv) {
   else if (test_name == "db_shape")          test_db_shape();
   else if (test_name == "bv_ks")             test_bv_keyswitch();
   else if (test_name == "cpu_info")          print_cpu_info();
+  else if (test_name == "hexl_ntt")          test_hexl_ntt();
   else {
     std::cerr << "Unknown test: " << test_name << std::endl;
     std::cerr << "Available tests: pir, bfv, serial, ext_prod, ext_prod_mux, "
               << "fst_dim, batch_decomp, fast_expand, raw_pt_ct, decrypt_mod_q, "
-              << "mod_switch, sk_mod_switch, db_shape, cpu_info" << std::endl;
+              << "mod_switch, sk_mod_switch, db_shape, hexl_ntt, cpu_info" << std::endl;
   }
 }

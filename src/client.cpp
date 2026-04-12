@@ -3,6 +3,7 @@
 #include "utils.h"
 #include "gsw_eval.h"
 #include "seal/util/iterator.h"
+#include "seal/util/polyarithsmallmod.h"
 #include <cassert>
 
 
@@ -15,18 +16,26 @@ PirClient::PirClient(const PirParams &pir_params)
       context_mod_q_prime_(init_mod_q_prime()) {}
 
 std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
-  std::vector<seal::Ciphertext> gsw_enc; // temporary GSW ciphertext using seal::Ciphertext
+  std::vector<seal::Ciphertext> gsw_enc;
   const auto sk_ = secret_key_.data();
   const auto ntt_tables = context_.first_context_data()->small_ntt_tables();
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const size_t coeff_count = DBConsts::PolyDegree;
-  std::vector<uint64_t> sk_ntt(sk_.data(), sk_.data() + coeff_count * rns_mod_cnt);
+  const size_t l_key = pir_params_.get_l_key();
+  std::vector<uint64_t> sk_coef(sk_.data(), sk_.data() + coeff_count * rns_mod_cnt);
 
-  RNSIter secret_key_iter(sk_ntt.data(), coeff_count);
+  RNSIter secret_key_iter(sk_coef.data(), coeff_count);
   inverse_ntt_negacyclic_harvey(secret_key_iter, rns_mod_cnt, ntt_tables);
 
-  GSWEval key_gsw(pir_params_, pir_params_.get_l_key(), pir_params_.get_base_log2_key());
-  key_gsw.plain_to_half_gsw(sk_ntt, encryptor_, secret_key_, gsw_enc);
+  GSWEval key_gsw(pir_params_, l_key, pir_params_.get_base_log2_key());
+  gsw_enc.reserve(2 * l_key);
+  for (size_t half = 0; half < 2; half++) {
+    for (size_t k = 0; k < l_key; k++) {
+      seal::Ciphertext cipher;
+      key_gsw.plain_to_gsw_one_row(sk_coef, encryptor_, secret_key_, k, half, cipher);
+      gsw_enc.push_back(std::move(cipher));
+    }
+  }
   return gsw_enc;
 }
 
@@ -109,13 +118,28 @@ seal::Ciphertext PirClient::fast_generate_query(const size_t pt_idx) {
 
   // Encrypt plain_query first. Later we will insert the rest. $\tilde c$ in paper
   seal::Ciphertext query;
-  encryptor_.encrypt_symmetric_seeded(plain_query, query);
+  encryptor_.encrypt_symmetric(plain_query, query);
 
   // add gsw values to the query bfv 
   add_gsw_to_query(query, query_indices);
 
   return query;
 }
+
+
+// seal::Ciphertext PirClient::gen_mult_queries(const size_t pt_idx, const size_t num_queries) {
+//   std::vector<size_t> query_indices = get_query_indices(pt_idx);
+//   const size_t bits_per_query = 1 << pir_params_.get_expan_height();
+//   // let's assume all queries are expanded to the same size.
+
+//   uint64_t inverse = 0;
+//   const uint64_t plain_modulus = pir_params_.get_plain_mod();
+//   seal::util::try_invert_uint_mod(bits_per_query, plain_modulus, inverse);  // finds bits_per_query^{-1} mod plain_modulus
+
+//   // create a vector of ciphertexts.
+//   std::vector<seal::Ciphertext> queries(num_queries);
+
+// }
 
 
 
@@ -164,18 +188,18 @@ void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size
 }
 
 
-size_t PirClient::write_query_to_stream(const seal::Ciphertext &query, std::stringstream &data_stream) {
-  return query.save(data_stream);
-}
+// size_t PirClient::write_query_to_stream(const seal::Ciphertext &query, std::stringstream &data_stream) {
+//   return query.save(data_stream);
+// }
 
-size_t PirClient::write_gsw_to_stream(const std::vector<Ciphertext> &gsw, std::stringstream &gsw_stream) {
-  size_t total_size = 0;
-  for (auto &ct : gsw) {
-    size_t size = ct.save(gsw_stream);
-    total_size += size;
-  }
-  return total_size;
-}
+// size_t PirClient::write_gsw_to_stream(const std::vector<Ciphertext> &gsw, std::stringstream &gsw_stream) {
+//   size_t total_size = 0;
+//   for (auto &ct : gsw) {
+//     size_t size = ct.save(gsw_stream);
+//     total_size += size;
+//   }
+//   return total_size;
+// }
 
 size_t PirClient::create_galois_keys(std::stringstream &galois_key_stream) {
   std::vector<uint32_t> galois_elts;
@@ -379,24 +403,61 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint6
 
 
 seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
-  // create a dummy ciphertext
-  seal::Ciphertext dummy_ct(context_mod_q_prime_);
-  dummy_ct.resize(context_mod_q_prime_, 2);
+  // Custom single-mod decryption that bypasses SEAL's RNS decryptor.
+  // Computes phase = c0 + c1*s (mod small_q), then recovers plaintext
+  // via round(phase * t / q) and measures noise directly.
+  constexpr size_t N = DBConsts::PolyDegree;
+  const uint64_t q = pir_params_.get_small_q();
+  const uint64_t t = pir_params_.get_plain_mod();
+  const seal::Modulus q_mod(q);
+  const auto ntt_tables = context_mod_q_prime_.key_context_data()->small_ntt_tables();
 
-  // create a new ciphertext under new context, then copy the data from the input ct, then decrypt using the new sk.
-  for (size_t i = 0; i < DBConsts::PolyDegree; i++) {
-    // copy the data from the input ct to the new ct
-    dummy_ct.data(0)[i] = ct.data(0)[i];
-    dummy_ct.data(1)[i] = ct.data(1)[i];
+  // phase = c0 + c1 * s  (mod q)
+  // NTT-transform c1, multiply with precomputed sk_ntt_small_q_, INTT back
+  std::vector<uint64_t> phase(N);
+  std::vector<uint64_t> c0(N), c1_ntt(N);
+  // Reduce mod q in case mod_switch_inplace produced values = q (from rounding)
+  for (size_t i = 0; i < N; i++) {
+    c0[i] = ct.data(0)[i] % q;
+    c1_ntt[i] = ct.data(1)[i] % q;
+  }
+  seal::util::ntt_negacyclic_harvey(c1_ntt.data(), ntt_tables[0]);
+  seal::util::dyadic_product_coeffmod(c1_ntt.data(), sk_ntt_small_q_.data(), N, q_mod, phase.data());
+  seal::util::inverse_ntt_negacyclic_harvey(phase.data(), ntt_tables[0]);
+  seal::util::add_poly_coeffmod(phase.data(), c0.data(), N, q_mod, phase.data());
+
+  // Recover plaintext and measure noise
+  seal::Plaintext result(N);
+  const uint64_t delta = q / t;  // floor(q / t)
+  const uint64_t half_q = q / 2;
+  uint64_t max_noise = 0;
+
+  for (size_t i = 0; i < N; i++) {
+    // m[i] = round(phase[i] * t / q)
+    uint128_t numerator = (uint128_t)phase[i] * t + half_q;
+    uint64_t m = static_cast<uint64_t>(numerator / q) % t;
+    result[i] = m;
+
+    // noise[i] = phase[i] - delta * m  (centered mod q)
+    uint64_t approx = static_cast<uint64_t>((uint128_t)delta * m % q);
+    uint64_t noise_pos = (phase[i] >= approx) ? (phase[i] - approx) : (q - approx + phase[i]);
+    uint64_t noise_abs = (noise_pos > half_q) ? (q - noise_pos) : noise_pos;
+    if (noise_abs > max_noise) max_noise = noise_abs;
   }
 
-  // decrypt the new ciphertext using the new sk
-  seal::Plaintext result;
-  decryptor_mod_q_prime_->decrypt(dummy_ct, result);
+  // Noise budget: log2(q / (2 * t * max_noise))
+  int budget = (max_noise > 0)
+    ? static_cast<int>(std::log2(static_cast<double>(q) / (2.0 * t * max_noise)))
+    : static_cast<int>(std::log2(static_cast<double>(q) / (2.0 * t)));
+  BENCH_PRINT("Noise budget after decryption: " << budget
+              << " (max noise: " << max_noise << ")");
 
-  // print the noise budget
-  double noise_budget = decryptor_mod_q_prime_->invariant_noise_budget(dummy_ct);
-  BENCH_PRINT("Noise budget after decryption: " << noise_budget);
+  // Trim trailing zeros
+  size_t sig = 0;
+  for (size_t i = N; i > 0; i--) {
+    if (result[i - 1] != 0) { sig = i; break; }
+  }
+  result.resize(std::max(sig, static_cast<size_t>(1)));
 
   return result;
 }
@@ -437,24 +498,34 @@ seal::SecretKey PirClient::sk_mod_switch(const seal::SecretKey &sk, const seal::
 seal::SEALContext PirClient::init_mod_q_prime() {
   const auto seal_params = pir_params_.get_seal_params();
   const auto full_mods = seal_params.coeff_modulus();
-  const size_t small_q = pir_params_.get_small_q();
+  const uint64_t small_q = pir_params_.get_small_q();
 
-  // display the moduli. Notice that there is one extra modulus used by seal. 
-  for (size_t i = 0; i < full_mods.size(); i++) {
-    DEBUG_PRINT("full_mods[" << i << "] = " << full_mods[i].value());
-  }
   DEBUG_PRINT("ct mod: " << pir_params_.get_coeff_modulus()[0].value());
   DEBUG_PRINT("small q = " << small_q);
 
-  // create a new secret key with new modulus
+  // Create a 2-prime context just for NTT tables (SEAL requires >= 2 primes).
+  // We only use the first prime's NTT table (for small_q) in our custom decryptor.
   seal::EncryptionParameters new_params(seal::scheme_type::bfv);
   new_params.set_poly_modulus_degree(DBConsts::PolyDegree);
   new_params.set_plain_modulus(pir_params_.get_plain_mod());
-  new_params.set_coeff_modulus({small_q, full_mods.back()}); // use the same last modulus as the original one.
+  new_params.set_coeff_modulus({small_q, full_mods.back()});
 
-  seal::SEALContext context_mod_q_prime_ = seal::SEALContext(new_params);
-  auto secret_key_mod_q_prime_ = sk_mod_switch(secret_key_, new_params);
-  // create a new decryptor and encryptor with the new secret key
-  decryptor_mod_q_prime_ = std::make_unique<seal::Decryptor>(context_mod_q_prime_, secret_key_mod_q_prime_);
-  return context_mod_q_prime_;
+  seal::SEALContext ctx(new_params, true, seal::sec_level_type::none);
+  const auto ntt_tables = ctx.key_context_data()->small_ntt_tables();
+
+  // Precompute sk in NTT form under small_q
+  constexpr size_t N = DBConsts::PolyDegree;
+  const auto old_ntt_tables = pir_params_.get_context().key_context_data()->small_ntt_tables();
+
+  // Get sk in coefficient form (ternary: {0, 1, q-1})
+  sk_ntt_small_q_.resize(N);
+  std::vector<uint64_t> sk_coef(secret_key_.data().data(), secret_key_.data().data() + N);
+  seal::util::inverse_ntt_negacyclic_harvey(sk_coef.data(), old_ntt_tables[0]);
+
+  for (size_t i = 0; i < N; i++) {
+    sk_ntt_small_q_[i] = (sk_coef[i] > 1) ? (small_q - 1) : sk_coef[i];
+  }
+  seal::util::ntt_negacyclic_harvey(sk_ntt_small_q_.data(), ntt_tables[0]);
+
+  return ctx;
 }
