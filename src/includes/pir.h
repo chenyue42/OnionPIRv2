@@ -49,8 +49,12 @@ public:
   inline size_t get_rns_mod_cnt() const { return seal_params_.coeff_modulus().size() - 1; }
   inline size_t get_coeff_val_cnt() const { return DBConsts::PolyDegree * get_rns_mod_cnt(); }
   inline uint64_t get_plain_mod() const { return seal_params_.plain_modulus().value(); }
-  inline std::vector<Modulus> get_coeff_modulus() const {
-    return context_.first_context_data()->parms().coeff_modulus();
+  inline std::vector<uint64_t> get_coeff_modulus() const {
+    const auto &mods = context_.first_context_data()->parms().coeff_modulus();
+    std::vector<uint64_t> result;
+    result.reserve(mods.size());
+    for (const auto &m : mods) result.push_back(m.value());
+    return result;
   }
   // The height of the expansion tree during packing unpacking stages
   inline const size_t get_expan_height() const { return DBConsts::TREE_HEIGHT; }

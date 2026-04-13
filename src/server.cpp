@@ -217,17 +217,17 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const inter
 
     // Process each modulus and coefficient.
     for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-      const seal::Modulus &modulus = coeff_modulus[mod_id];
+      const uint64_t modulus = coeff_modulus[mod_id];
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         #pragma unroll
         for (size_t idx = 0; idx < unroll_factor; idx++) {
           // Process polynomial 0 for ciphertext idx.
           inter_coeff_t x0 = inter_res[ base0[idx] + inter_idx0[idx] * inter_padding ];
-          cts[idx].data(0)[ ct_idx0[idx]++ ] = x0 % modulus.value();
+          cts[idx].data(0)[ ct_idx0[idx]++ ] = x0 % modulus;
 
           // Process polynomial 1 for ciphertext idx.
           inter_coeff_t x1 = inter_res[ base1[idx] + inter_idx1[idx] * inter_padding ];
-          cts[idx].data(1)[ ct_idx1[idx]++ ] = x1 % modulus.value();
+          cts[idx].data(1)[ ct_idx1[idx]++ ] = x1 % modulus;
           // Advance intermediate indices.
           inter_idx0[idx]++;
           inter_idx1[idx]++;
@@ -263,15 +263,15 @@ void PirServer::delay_modulus(std::vector<seal::Ciphertext> &result, const inter
 
     // Process each modulus and coefficient
     for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-      const seal::Modulus &modulus = coeff_modulus[mod_id];
+      const uint64_t modulus = coeff_modulus[mod_id];
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         // Process polynomial 0
         inter_coeff_t x0 = inter_res[base0 + inter_idx0 * inter_padding];
-        ct.data(0)[ct_idx0++] = x0 % modulus.value();
+        ct.data(0)[ct_idx0++] = x0 % modulus;
 
         // Process polynomial 1
         inter_coeff_t x1 = inter_res[base1 + inter_idx1 * inter_padding];
-        ct.data(1)[ct_idx1++] = x1 % modulus.value();
+        ct.data(1)[ct_idx1++] = x1 % modulus;
         
         // Advance intermediate indices
         inter_idx0++;
@@ -619,7 +619,7 @@ void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext, const uint64_t 
   constexpr size_t coeff_count = DBConsts::PolyDegree;
 
   // current ciphertext modulus
-  const size_t Q = pir_params_.get_coeff_modulus()[0].value(); 
+  const size_t Q = pir_params_.get_coeff_modulus()[0];
 
   // mod switch: round( (ct * q) / Q) ) (mod q)
   // the multiplication and division are in rational.

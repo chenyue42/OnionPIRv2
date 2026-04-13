@@ -45,14 +45,14 @@ void PirTest::serialization_example() {
   auto plain_modulus = pir_params.get_plain_mod();
   uint128_t ct_mod = 1;
   for (size_t mod_id = 0; mod_id < mods.size(); mod_id++) {
-    ct_mod *= mods[mod_id].value();
+    ct_mod *= mods[mod_id];
   }
   uint128_t delta = ct_mod / plain_modulus;  // delta = floor (ciphertext modulus / plaintext modulus)
   uint128_t message = 15;
   uint128_t to_add = delta * message;
   auto padding = params.poly_modulus_degree();
   for (size_t mod_id = 0; mod_id < mods.size(); mod_id++) {
-    ptr_0[mod_id * padding] = (ptr_0[mod_id * padding] + (to_add % mods[mod_id].value())) % mods[mod_id].value();
+    ptr_0[mod_id * padding] = (ptr_0[mod_id * padding] + (to_add % mods[mod_id])) % mods[mod_id];
   }
 
   // write the serializable object to the stream

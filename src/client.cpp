@@ -26,7 +26,7 @@ std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
 
   for (size_t k = 0; k < rns_mod_cnt; ++k) {
     utils::ntt_inv(sk_coef.data() + k * coeff_count, coeff_count,
-                                          coeff_mods[k].value());
+                                          coeff_mods[k]);
   }
 
   GSWEval key_gsw(pir_params_, l_key, pir_params_.get_base_log2_key());
@@ -179,7 +179,7 @@ void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size
         const size_t reversed_idx = utils::bit_reverse(coef_pos, expan_height);  // the position of the coefficient in the query
         for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
           const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
-          inter_coeff_t mod = coeff_modulus[mod_id].value();
+          inter_coeff_t mod = coeff_modulus[mod_id];
           // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
           uint64_t coef = (inter_coeff_t)gadget[mod_id][k] * inv[mod_id] % mod;
           q_head[reversed_idx + pad] = (q_head[reversed_idx + pad] + coef) % mod;
@@ -370,7 +370,7 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint6
   for (size_t i = 0; i < full_mods.size(); i++) {
     DEBUG_PRINT("full_mods[" << i << "] = " << full_mods[i].value());
   }
-  DEBUG_PRINT("ct mod: " << pir_params_.get_coeff_modulus()[0].value());
+  DEBUG_PRINT("ct mod: " << pir_params_.get_coeff_modulus()[0]);
   DEBUG_PRINT("small q = " << small_q);
 
   // create a new secret key with new modulus
@@ -470,7 +470,7 @@ seal::SecretKey PirClient::sk_mod_switch(const seal::SecretKey &sk, const seal::
   auto temp_keygen = seal::KeyGenerator(new_context);
   auto new_sk = temp_keygen.secret_key(); // create non-empty secret key. will use old sk data.
 
-  const uint64_t old_q = pir_params_.get_coeff_modulus()[0].value();
+  const uint64_t old_q = pir_params_.get_coeff_modulus()[0];
   const uint64_t new_q = new_params.coeff_modulus()[0].value();
 
   std::vector<uint64_t> sk_data(sk.data().data(), sk.data().data() + coeff_count);
@@ -494,7 +494,7 @@ seal::SEALContext PirClient::init_mod_q_prime() {
   const auto full_mods = seal_params.coeff_modulus();
   const uint64_t small_q = pir_params_.get_small_q();
 
-  DEBUG_PRINT("ct mod: " << pir_params_.get_coeff_modulus()[0].value());
+  DEBUG_PRINT("ct mod: " << pir_params_.get_coeff_modulus()[0]);
   DEBUG_PRINT("small q = " << small_q);
 
   // Create a 2-prime context just for NTT tables (SEAL requires >= 2 primes).
@@ -508,7 +508,7 @@ seal::SEALContext PirClient::init_mod_q_prime() {
 
   // Precompute sk in NTT form under small_q
   constexpr size_t N = DBConsts::PolyDegree;
-  const uint64_t old_q = pir_params_.get_coeff_modulus()[0].value();
+  const uint64_t old_q = pir_params_.get_coeff_modulus()[0];
 
   // Get sk in coefficient form (ternary: {0, 1, q-1})
   sk_ntt_small_q_.resize(N);

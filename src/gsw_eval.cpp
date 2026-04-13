@@ -21,12 +21,12 @@ void GSWEval::gsw_ntt_negacyclic_harvey(GSWCiphertext &gsw) {
     uint64_t *gsw_poly_ptr = poly.data();
     for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
       utils::ntt_fwd(gsw_poly_ptr + coeff_count * mod_id, coeff_count,
-                                    coeff_mods[mod_id].value());
+                                    coeff_mods[mod_id]);
     }
     uint64_t *gsw_poly_ptr2 = poly.data() + coeff_count * rns_mod_cnt;
     for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
       utils::ntt_fwd(gsw_poly_ptr2 + coeff_count * mod_id, coeff_count,
-                                    coeff_mods[mod_id].value());
+                                    coeff_mods[mod_id]);
     }
   }
 }
@@ -97,7 +97,7 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
       auto mod_idx = (mod_id * coeff_count);
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         auto x = pt_ptr[coeff_id + mod_idx];
-        ct_ptr[coeff_id + mod_idx] = x % coeff_modulus[mod_id].value();
+        ct_ptr[coeff_id + mod_idx] = x % coeff_modulus[mod_id];
       }
     }
   }
@@ -203,7 +203,7 @@ void GSWEval::decomp_rlwe_single_mod(seal::Ciphertext const &ct, std::vector<std
   assert(output.size() == 0);
   output.reserve(2 * l_);
   constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const uint64_t q = pir_params_.get_coeff_modulus()[0].value();
+  const uint64_t q = pir_params_.get_coeff_modulus()[0];
 
   // ============================ Signed Decomposition ============================
   // Coefficient-first loop: carry propagates across digits within each coefficient.
@@ -253,7 +253,7 @@ void GSWEval::decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,
   for (auto &coeffs : decomp_coeffs) {
     for (size_t i = 0; i < rns_mod_cnt; i++) {
       utils::ntt_fwd(coeffs.data() + coeff_count * i, coeff_count,
-                                    coeff_mods[i].value());
+                                    coeff_mods[i]);
     }
   }
   TIME_END(extern_ntt_log_key);
@@ -332,7 +332,7 @@ void GSWEval::plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
   // plaintext is multiplied by the gadget and added to the ciphertext
   for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
     const size_t pad = (mod_id * coeff_count);
-    const inter_coeff_t mod = coeff_modulus[mod_id].value();
+    const inter_coeff_t mod = coeff_modulus[mod_id];
     const uint64_t gadget_coef = gadget[mod_id][level];
     auto pt = plaintext.data();
     if (plaintext.size() == coeff_count * rns_mod_cnt) {

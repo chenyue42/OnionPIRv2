@@ -13,7 +13,7 @@ void PirTest::test_hexl_ntt() {
   // Use an NTT-friendly prime: q ≡ 1 (mod 2N)
   // We'll reuse the PIR ciphertext modulus which is already NTT-friendly.
   PirParams pir_params;
-  const uint64_t q = pir_params.get_coeff_modulus()[0].value();
+  const uint64_t q = pir_params.get_coeff_modulus()[0];
   BENCH_PRINT("N = " << N << ", q = " << q << " (" << std::ceil(std::log2(q)) << " bits)");
 
   // ===================== Create HEXL NTT object =====================

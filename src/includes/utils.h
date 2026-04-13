@@ -90,11 +90,6 @@ inline void right_shift_uint128(uint64_t *operand, int shift, uint64_t *result) 
 void ntt_fwd(uint64_t *data, size_t N, uint64_t q);
 void ntt_inv(uint64_t *data, size_t N, uint64_t q);
 
-// Overload accepting a seal::Modulus (convenience wrapper, same semantics).
-inline bool try_invert_uint_mod(uint64_t value, const seal::Modulus &modulus, uint64_t &result) {
-  return try_invert_uint_mod(value, modulus.value(), result);
-}
-
 // void shift_polynomial(const seal::EncryptionParameters &params,
 //                       const seal::Ciphertext &src, seal::Ciphertext &dst,std::int64_t k);
 
@@ -115,7 +110,7 @@ std::string uint128_to_string(uint128_t value);
  */
 std::vector<std::vector<uint64_t>>
 gsw_gadget(size_t l, uint64_t base_log2, size_t rns_mod_cnt,
-           const std::vector<seal::Modulus> &coeff_modulus);
+           const std::vector<uint64_t> &coeff_modulus);
 
 // Generate a prime that is bit_width long
 std::uint64_t generate_prime(size_t bit_width);

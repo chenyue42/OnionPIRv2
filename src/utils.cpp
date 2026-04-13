@@ -189,11 +189,11 @@ std::string utils::uint128_to_string(uint128_t value) {
 
 
 std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log2, size_t rns_mod_cnt,
-                const std::vector<seal::Modulus> &coeff_modulus) {
+                const std::vector<uint64_t> &coeff_modulus) {
   // Create RGSW gadget.
   std::vector<std::vector<uint64_t>> gadget(rns_mod_cnt, std::vector<uint64_t>(l));
   for (size_t i = 0; i < rns_mod_cnt; i++) {
-    const uint64_t mod = coeff_modulus[i].value();
+    const uint64_t mod = coeff_modulus[i];
     uint64_t pow = 1;
     for (int j = l - 1; j >= 0; j--) {
       gadget[i][j] = pow;

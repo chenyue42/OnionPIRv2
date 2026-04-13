@@ -21,6 +21,6 @@ void PirTest::test_decrypt_mod_q() {
   seal::Ciphertext a_encrypted;    // encrypted "a" will be stored here.
   encryptor_.encrypt_symmetric(a, a_encrypted);
   const auto coeff_modulus = pir_params.get_coeff_modulus();
-  result = client.decrypt_mod_q(a_encrypted, coeff_modulus[0].value());
+  result = client.decrypt_mod_q(a_encrypted, coeff_modulus[0]);
   BENCH_PRINT("Decrypted result: " << result.to_string());
 }
