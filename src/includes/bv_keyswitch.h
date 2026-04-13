@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdint>
 #include <iosfwd>
+#include <random>
 
 // ============================================================================
 // BV-Style Galois Key-Switching (No Special Prime)
@@ -77,13 +78,13 @@ public:
 
 // Generate a single BV key-switching key for automorphism σ_{galois_k}
 // under secret key `sk`. The secret key must be in NTT form.
-// Essentially, we switch from s(x^k) to s(x), for k = galois_k.
+// Error σ is read from pir_params.get_noise_std_dev().
 BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
                              const seal::SecretKey &sk, uint32_t galois_k,
-                             std::shared_ptr<seal::UniformRandomGenerator> prng);
+                             std::mt19937_64 &rng);
 
-// Generate a full set of BV key-switching keys for all 9 expansion-level
-// automorphisms (galois_ks = N/k + 1 for k = 1, 2, 4, ..., 256).
+// Generate a full set of BV key-switching keys for all expansion-level
+// automorphisms. Error σ is read from pir_params.get_noise_std_dev().
 BvGaloisKeys gen_bv_galois_keys(const PirParams &pir_params,
                                 const seal::SecretKey &sk);
 

@@ -59,6 +59,17 @@ public:
   // The height of the expansion tree during packing unpacking stages
   inline const size_t get_expan_height() const { return DBConsts::TREE_HEIGHT; }
 
+  // Standard deviation σ of the Gaussian error distribution used during
+  // encryption and key generation.  This is the standard deviation in the
+  // statistical sense: the distribution is N(0, σ²), i.e. samples are
+  // rounded Gaussians with ≈68% of values within ±σ of zero.
+  //
+  // Relationship to the "width parameter" r used in Spiral/Respire:
+  //   σ_std = r / sqrt(2π)  ←→  r = σ_std * sqrt(2π)
+  // For example, SEAL's default σ_std = 3.2 corresponds to r ≈ 8.01.
+  inline double get_noise_std_dev() const { return noise_std_dev_; }
+  inline void   set_noise_std_dev(double s) { noise_std_dev_ = s; }
+
   inline const size_t get_BFV_size(bool use_seed = true) const {
     if (use_seed) {
       return (get_ct_mod_width() * get_coeff_val_cnt() + 32) / 8;
@@ -86,4 +97,7 @@ private:
   size_t num_dims_;          // total number of dimensions
   seal::EncryptionParameters seal_params_;
   seal::SEALContext context_;
+  // σ for the error distribution: standard deviation, NOT the width parameter.
+  // Default 3.2 matches SEAL-For-OnionPIR's noise_standard_deviation.
+  double noise_std_dev_ = 3.2;
 };

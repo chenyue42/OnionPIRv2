@@ -108,8 +108,8 @@ void PirTest::test_bv_keyswitch() {
   std::cout << "SEAL galois: " << dec_seal.to_string().substr(0, 50) << "\n" << std::flush;
 
   // Now test BV key-switching
-  auto prng = seal::UniformRandomGeneratorFactory::DefaultFactory()->create();
-  auto bv_ksk = bvks::gen_bv_ks_key(pir_params, sk, static_cast<uint32_t>(galois_k), prng);
+  std::mt19937_64 rng(std::random_device{}());
+  auto bv_ksk = bvks::gen_bv_ks_key(pir_params, sk, static_cast<uint32_t>(galois_k), rng);
 
   seal::Ciphertext ct_bv = ct;
   bvks::bv_apply_galois_inplace(ct_bv, galois_k, bv_ksk, pir_params);

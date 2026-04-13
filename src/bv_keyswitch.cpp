@@ -3,7 +3,6 @@
 #include "utils.h"
 #include "hexl/hexl.hpp"
 #include "seal/seal.h"
-#include "seal/util/rlwe.h"
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
@@ -142,13 +141,11 @@ void BvGaloisKeys::load(std::istream &stream) {
 
 BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
                              const seal::SecretKey &sk, uint32_t galois_k,
-                             std::shared_ptr<seal::UniformRandomGenerator> prng) {
-  using namespace seal::util;
-
+                             std::mt19937_64 &rng) {
+  const double sigma = pir_params.get_noise_std_dev();
   const auto context = pir_params.get_context();
   const auto &ctx_data = *context.key_context_data();
   const auto &parms = ctx_data.parms();
-  const auto &coeff_modulus = parms.coeff_modulus();
   const size_t rns_mod_cnt = pir_params.get_rns_mod_cnt();
   const size_t N = parms.poly_modulus_degree();
 
@@ -156,8 +153,7 @@ BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
     throw std::runtime_error(
         "BV key-switch currently supports only single RNS limb (rns_mod_cnt == 1)");
   }
-  const auto &mod = coeff_modulus[0]; // data modulus (first prime), still needed for galois_tool
-  const uint64_t q_val = mod.value();
+  const uint64_t q_val = parms.coeff_modulus()[0].value();
   const size_t base_log2 = bv_base_log2(pir_params);
 
   // sk is stored in NTT form across all primes. First N coeffs = first limb.
@@ -171,30 +167,20 @@ BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
   ksk.galois_k = galois_k;
   ksk.cts.resize(L_KS);
 
-  // Scratch buffers sized for the full RNS chain, so that SEAL's RNS-aware
-  // samplers write into valid memory. We only consume the first N coefficients.
-  const size_t total_rns = coeff_modulus.size();
-  std::vector<uint64_t> uniform_buf(N * total_rns);
-  std::vector<uint64_t> cbd_buf(N * total_rns);
-  std::vector<uint64_t> as(N);
-  std::vector<uint64_t> msg(N);
-  std::vector<uint64_t> e(N);
+  std::vector<uint64_t> as(N), msg(N), e(N);
 
   for (size_t i = 0; i < L_KS; ++i) {
     BvRlweCt &ct = ksk.cts[i];
     ct.a.assign(N, 0);
     ct.b.assign(N, 0);
 
-    // Sample a ← U(Z_q) and e ← chi, both over full parms (we only use the
-    // first limb). This avoids having to build a reduced EncryptionParameters.
-    sample_poly_uniform(prng, parms, uniform_buf.data());
-    sample_poly_cbd(prng, parms, cbd_buf.data());
-    std::copy(uniform_buf.begin(), uniform_buf.begin() + N, ct.a.begin());
-    std::copy(cbd_buf.begin(), cbd_buf.begin() + N, e.begin());
+    // a ← uniform [0, q),  e ← Gaussian(0, sigma)
+    utils::sample_uniform_poly(ct.a.data(), N, q_val, rng);
+    utils::sample_gaussian(e.data(), N, q_val, sigma, rng);
 
-    // NTT(a), NTT(e) under the first prime.
-    utils::ntt_fwd(ct.a.data(), N, mod.value());
-    utils::ntt_fwd(e.data(), N, mod.value());
+    // NTT(a), NTT(e) under the data modulus.
+    utils::ntt_fwd(ct.a.data(), N, q_val);
+    utils::ntt_fwd(e.data(), N, q_val);
 
     // a * s (pointwise in NTT form)
     intel::hexl::EltwiseMultMod(as.data(), ct.a.data(), sk_ptr, N, q_val, 1);
@@ -217,17 +203,13 @@ BvGaloisKeys gen_bv_galois_keys(const PirParams &pir_params,
   const size_t expan_height = pir_params.get_expan_height();
   const size_t N = pir_params.get_seal_params().poly_modulus_degree();
 
-  auto prng_factory =
-      pir_params.get_seal_params().random_generator()
-          ? pir_params.get_seal_params().random_generator()
-          : seal::UniformRandomGeneratorFactory::DefaultFactory();
-  auto prng = prng_factory->create();
+  std::mt19937_64 rng(std::random_device{}());
 
   result.keys.reserve(expan_height);
   // creates 2049, 1025, 513, ... keys.
   for (size_t i = 0; i < expan_height; ++i) {
     const uint32_t galois_k = static_cast<uint32_t>((N >> i) + 1);
-    result.keys.push_back(gen_bv_ks_key(pir_params, sk, galois_k, prng));
+    result.keys.push_back(gen_bv_ks_key(pir_params, sk, galois_k, rng));
   }
   return result;
 }
@@ -239,7 +221,6 @@ BvGaloisKeys gen_bv_galois_keys(const PirParams &pir_params,
 void bv_apply_galois_inplace(seal::Ciphertext &ct, uint32_t galois_k,
                              const BvKeySwitchKey &key,
                              const PirParams &pir_params) {
-  using namespace seal::util;
   assert(key.galois_k == galois_k);
   // BFV ciphertexts in SEAL are in coefficient form (is_ntt_form = false).
   assert(!ct.is_ntt_form());
