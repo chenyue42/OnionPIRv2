@@ -27,7 +27,7 @@ void PirTest::test_batch_decomp() {
   auto secret_key_ = keygen_.secret_key();
   auto encryptor_ = seal::Encryptor(context_, secret_key_);
   auto decryptor_ = seal::Decryptor(context_, secret_key_);
-  auto ntt_tables = context_data->small_ntt_tables();
+  const auto coeff_mods = pir_params.get_seal_params().coeff_modulus();
   seal::util::RNSBase *rns_base = context_data->rns_tool()->base_q();
   const size_t coeff_count = DBConsts::PolyDegree;
   auto pool = seal::MemoryManager::GetPool();
@@ -68,8 +68,8 @@ void PirTest::test_batch_decomp() {
       for (size_t p = 0; p < pir_params.get_l(); p++) {
         auto ct_ptr = ct_vec[i].data(poly_id);
         ct_vec[i].is_ntt_form() = true;
-        seal::util::ntt_negacyclic_harvey(ct_ptr, ntt_tables[0]);
-        seal::util::ntt_negacyclic_harvey(ct_ptr + coeff_count, ntt_tables[1]);
+        utils::ntt_fwd(ct_ptr, coeff_count, coeff_mods[0].value());
+        utils::ntt_fwd(ct_ptr + coeff_count, coeff_count, coeff_mods[1].value());
       }
     }
   }

@@ -1,13 +1,143 @@
 #include "utils.h"
+#include "hexl/hexl.hpp"
+#include <cstring>
 #include <fstream>
+#include <memory>
 #include <stdexcept>
+#include <unordered_map>
+
+namespace {
+// Thread-local cache of HEXL NTT objects keyed by (N << 64) | q-hash.
+// Each thread owns its own copy; no locking on the hot path.
+struct NttKey {
+  size_t N;
+  uint64_t q;
+  bool operator==(const NttKey &o) const noexcept { return N == o.N && q == o.q; }
+};
+struct NttKeyHash {
+  size_t operator()(const NttKey &k) const noexcept {
+    return std::hash<size_t>()(k.N) ^ (std::hash<uint64_t>()(k.q) * 0x9E3779B97F4A7C15ULL);
+  }
+};
+
+intel::hexl::NTT &get_ntt(size_t N, uint64_t q) {
+  thread_local std::unordered_map<NttKey, std::unique_ptr<intel::hexl::NTT>, NttKeyHash> cache;
+  auto it = cache.find({N, q});
+  if (it != cache.end()) return *it->second;
+  auto ins = cache.emplace(NttKey{N, q}, std::make_unique<intel::hexl::NTT>(N, q));
+  return *ins.first->second;
+}
+} // namespace
+
+void utils::automorphism_coeff(const uint64_t *in, size_t N, uint32_t k,
+                               uint64_t q, uint64_t *out) {
+  const size_t two_n = 2 * N;
+  for (size_t i = 0; i < N; i++) {
+    size_t dest = (static_cast<uint64_t>(i) * k) % two_n;
+    if (dest < N) {
+      out[dest] = in[i];
+    } else {
+      out[dest - N] = (in[i] == 0) ? 0 : (q - in[i]);
+    }
+  }
+}
+
+void utils::automorphism_ntt(const uint64_t *in, size_t N, uint32_t k,
+                              uint64_t q, uint64_t *out) {
+  // NTT → coeff → automorphism → NTT. Two extra transforms, only used in keygen.
+  std::vector<uint64_t> coeff(in, in + N);
+  ntt_inv(coeff.data(), N, q);
+  automorphism_coeff(coeff.data(), N, k, q, out);
+  ntt_fwd(out, N, q);
+}
+
+void utils::ntt_fwd(uint64_t *data, size_t N, uint64_t q) {
+  get_ntt(N, q).ComputeForward(data, data, 1, 1);
+}
+
+void utils::ntt_inv(uint64_t *data, size_t N, uint64_t q) {
+  get_ntt(N, q).ComputeInverse(data, data, 1, 1);
+}
+
+// Extended Euclidean algorithm: given a, b > 0, returns (gcd, s) such that
+// s * a + t * b = gcd.  We only return s since that's the Bezout coefficient
+// for `value` in try_invert_uint_mod.
+// For moduli < 2^62 the coefficients stay within int64_t range.
+static int64_t xgcd(int64_t a, int64_t b, int64_t &s) {
+  int64_t s0 = 1, s1 = 0;
+  int64_t r0 = a, r1 = b;
+  while (r1 != 0) {
+    int64_t q = r0 / r1;
+    int64_t tmp = r1; r1 = r0 - q * r1; r0 = tmp;
+    tmp = s1; s1 = s0 - q * s1; s0 = tmp;
+  }
+  s = s0;
+  return r0; // gcd
+}
+
+// (a * b) mod m without overflow, via 128-bit multiply.
+static inline uint64_t mulmod_u64(uint64_t a, uint64_t b, uint64_t m) {
+  return static_cast<uint64_t>((static_cast<__uint128_t>(a) * b) % m);
+}
+
+// (base^exp) mod m via binary exponentiation.
+static uint64_t powmod_u64(uint64_t base, uint64_t exp, uint64_t m) {
+  uint64_t result = 1 % m;
+  base %= m;
+  while (exp > 0) {
+    if (exp & 1) result = mulmod_u64(result, base, m);
+    base = mulmod_u64(base, base, m);
+    exp >>= 1;
+  }
+  return result;
+}
+
+// Miller-Rabin witness check: returns true if `a` is a witness that n is composite.
+static bool mr_composite_witness(uint64_t n, uint64_t d, int r, uint64_t a) {
+  uint64_t x = powmod_u64(a, d, n);
+  if (x == 1 || x == n - 1) return false;
+  for (int i = 0; i < r - 1; ++i) {
+    x = mulmod_u64(x, x, n);
+    if (x == n - 1) return false;
+  }
+  return true;
+}
+
+bool utils::is_prime(uint64_t n) {
+  if (n < 2) return false;
+  // Small-prime shortcut (also handles witnesses equal to n).
+  static constexpr uint64_t small_primes[] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};
+  for (uint64_t p : small_primes) {
+    if (n == p) return true;
+    if (n % p == 0) return false;
+  }
+  // Write n - 1 = d * 2^r with d odd.
+  uint64_t d = n - 1;
+  int r = 0;
+  while ((d & 1) == 0) { d >>= 1; ++r; }
+  // Deterministic for all 64-bit n.
+  for (uint64_t a : small_primes) {
+    if (mr_composite_witness(n, d, r, a)) return false;
+  }
+  return true;
+}
+
+bool utils::try_invert_uint_mod(uint64_t value, uint64_t modulus, uint64_t &result) {
+  if (value == 0) return false;
+  int64_t s;
+  int64_t g = xgcd(static_cast<int64_t>(value), static_cast<int64_t>(modulus), s);
+  if (g != 1) return false;
+  result = (s < 0) ? static_cast<uint64_t>(s + static_cast<int64_t>(modulus))
+                   : static_cast<uint64_t>(s);
+  return true;
+}
 
 
-void utils::negacyclic_shift_poly_coeffmod(seal::util::ConstCoeffIter poly, size_t coeff_count,
-                                           size_t shift, const seal::Modulus &modulus,
-                                           seal::util::CoeffIter result) {
+void utils::negacyclic_shift_poly_coeffmod(const uint64_t *poly, size_t coeff_count,
+                                           size_t shift, uint64_t modulus,
+                                           uint64_t *result) {
   if (shift == 0) {
-    set_uint(poly, coeff_count, result);
+    std::memcpy(result, poly, coeff_count * sizeof(uint64_t));
     return;
   }
 
@@ -20,7 +150,7 @@ void utils::negacyclic_shift_poly_coeffmod(seal::util::ConstCoeffIter poly, size
       result[index] = *poly;
     } else {
       // For wrapped around entries, we fill in additive inverse.
-      result[index] = modulus.value() - *poly; 
+      result[index] = modulus - *poly;
     }
   }
 }
@@ -33,7 +163,7 @@ void utils::shift_polynomial(seal::EncryptionParameters &params, seal::Ciphertex
   for (size_t i = 0; i < 2; i++) {  // two polynomials in ciphertext
     for (size_t j = 0; j < rns_mod_cnt; j++) {
       negacyclic_shift_poly_coeffmod(encrypted.data(i) + (j * coeff_count), coeff_count, index,
-                                     params.coeff_modulus()[j],
+                                     params.coeff_modulus()[j].value(),
                                      destination.data(i) + (j * coeff_count));
     }
   }
@@ -88,7 +218,7 @@ std::uint64_t utils::generate_prime(size_t bit_width) {
       candidate++;
       // Ensure candidate is odd, as even numbers greater than 2 cannot be prime
       candidate |= 1;
-  } while (!seal::util::is_prime(seal::Modulus(candidate)));
+  } while (!utils::is_prime(candidate));
   return candidate;
 }
 

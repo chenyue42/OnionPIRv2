@@ -1,5 +1,7 @@
 #include "tests.h"
 #include "hexl/hexl.hpp"
+#include "seal/util/ntt.h"
+#include <chrono>
 #include <random>
 #include <cstring>
 
@@ -133,8 +135,114 @@ void PirTest::test_hexl_ntt() {
   BENCH_PRINT("Encrypted m=" << m << ", decrypted m=" << m_recovered);
   BENCH_PRINT("Decryption correct: " << ((m_recovered == m) ? "YES" : "NO"));
 
+  // ===================== Test 5: HEXL vs SEAL NTT equivalence =====================
+  BENCH_PRINT("\n--- Test 5: HEXL NTT output matches SEAL NTT output? ---");
+  const auto seal_ctx = pir_params.get_context();
+  const auto seal_ntt_tables = seal_ctx.key_context_data()->small_ntt_tables();
+
+  std::vector<uint64_t> input(N);
+  for (size_t i = 0; i < N; i++) input[i] = rng() % q;
+
+  std::vector<uint64_t> hexl_fwd(N), seal_fwd(input.begin(), input.end());
+  ntt.ComputeForward(hexl_fwd.data(), input.data(), 1, 1);
+  seal::util::ntt_negacyclic_harvey(seal_fwd.data(), seal_ntt_tables[0]);
+
+  size_t fwd_diffs = 0;
+  for (size_t i = 0; i < N; i++) {
+    if (hexl_fwd[i] != seal_fwd[i]) {
+      if (fwd_diffs < 3) {
+        BENCH_PRINT("  [fwd " << i << "] hexl=" << hexl_fwd[i] << " seal=" << seal_fwd[i]);
+      }
+      ++fwd_diffs;
+    }
+  }
+  BENCH_PRINT("Forward NTT: " << (fwd_diffs == 0 ? "MATCH" : "DIFFER")
+              << " (" << fwd_diffs << " / " << N << " coeffs differ)");
+
+  std::vector<uint64_t> hexl_inv(N), seal_inv(hexl_fwd.begin(), hexl_fwd.end());
+  ntt.ComputeInverse(hexl_inv.data(), hexl_fwd.data(), 1, 1);
+  seal::util::inverse_ntt_negacyclic_harvey(seal_inv.data(), seal_ntt_tables[0]);
+
+  size_t inv_diffs = 0;
+  for (size_t i = 0; i < N; i++) {
+    if (hexl_inv[i] != seal_inv[i]) {
+      if (inv_diffs < 3) {
+        BENCH_PRINT("  [inv " << i << "] hexl=" << hexl_inv[i] << " seal=" << seal_inv[i]);
+      }
+      ++inv_diffs;
+    }
+  }
+  BENCH_PRINT("Inverse NTT: " << (inv_diffs == 0 ? "MATCH" : "DIFFER")
+              << " (" << inv_diffs << " / " << N << " coeffs differ)");
+
+  // ===================== Test 6: HEXL vs SEAL NTT performance =====================
+  BENCH_PRINT("\n--- Test 6: Performance comparison ---");
+  //
+  // Measures forward + inverse NTT per iteration, warmed up, hot cache.
+  // SEAL's NTT object is the one cached inside SEALContext (same path as prod code).
+  // HEXL's NTT object is constructed once and reused (matches utils:: cache behavior).
+  constexpr int warmup = 100;
+  constexpr int iters  = 10000;
+
+  std::vector<uint64_t> perf_buf(N);
+  for (size_t i = 0; i < N; i++) perf_buf[i] = rng() % q;
+
+  // Warmup both paths so branch predictor / caches are primed.
+  {
+    std::vector<uint64_t> tmp = perf_buf;
+    for (int i = 0; i < warmup; i++) {
+      ntt.ComputeForward(tmp.data(), tmp.data(), 1, 1);
+      ntt.ComputeInverse(tmp.data(), tmp.data(), 1, 1);
+    }
+  }
+  {
+    std::vector<uint64_t> tmp = perf_buf;
+    for (int i = 0; i < warmup; i++) {
+      seal::util::ntt_negacyclic_harvey(tmp.data(), seal_ntt_tables[0]);
+      seal::util::inverse_ntt_negacyclic_harvey(tmp.data(), seal_ntt_tables[0]);
+    }
+  }
+
+  using clk = std::chrono::steady_clock;
+
+  // --- HEXL direct ---
+  std::vector<uint64_t> hexl_buf = perf_buf;
+  auto t0 = clk::now();
+  for (int i = 0; i < iters; i++) {
+    ntt.ComputeForward(hexl_buf.data(), hexl_buf.data(), 1, 1);
+    ntt.ComputeInverse(hexl_buf.data(), hexl_buf.data(), 1, 1);
+  }
+  auto t1 = clk::now();
+  double hexl_us = std::chrono::duration<double, std::micro>(t1 - t0).count() / iters;
+
+  // --- SEAL ---
+  std::vector<uint64_t> seal_buf = perf_buf;
+  t0 = clk::now();
+  for (int i = 0; i < iters; i++) {
+    seal::util::ntt_negacyclic_harvey(seal_buf.data(), seal_ntt_tables[0]);
+    seal::util::inverse_ntt_negacyclic_harvey(seal_buf.data(), seal_ntt_tables[0]);
+  }
+  t1 = clk::now();
+  double seal_us = std::chrono::duration<double, std::micro>(t1 - t0).count() / iters;
+
+  // --- utils:: wrapper (HEXL under the hood, thread_local cache lookup) ---
+  std::vector<uint64_t> util_buf = perf_buf;
+  t0 = clk::now();
+  for (int i = 0; i < iters; i++) {
+    utils::ntt_fwd(util_buf.data(), N, q);
+    utils::ntt_inv(util_buf.data(), N, q);
+  }
+  t1 = clk::now();
+  double util_us = std::chrono::duration<double, std::micro>(t1 - t0).count() / iters;
+
+  BENCH_PRINT("Per iteration (forward + inverse), " << iters << " iters:");
+  BENCH_PRINT("  SEAL          : " << seal_us << " us");
+  BENCH_PRINT("  HEXL direct   : " << hexl_us << " us  (" << (seal_us / hexl_us) << "x vs SEAL)");
+  BENCH_PRINT("  utils:: wrap  : " << util_us << " us  (" << (seal_us / util_us) << "x vs SEAL)");
+
   // ===================== Summary =====================
   BENCH_PRINT("\n--- Summary ---");
-  int pass = match + mult_ok + add_ok + (m_recovered == m);
-  BENCH_PRINT("Passed " << pass << "/4 tests");
+  bool ntt_eq = (fwd_diffs == 0 && inv_diffs == 0);
+  int pass = match + mult_ok + add_ok + (m_recovered == m) + ntt_eq;
+  BENCH_PRINT("Passed " << pass << "/5 correctness tests (Test 6 is perf-only)");
 }

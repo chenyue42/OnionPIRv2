@@ -15,17 +15,18 @@
 void GSWEval::gsw_ntt_negacyclic_harvey(GSWCiphertext &gsw) {
   constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  const auto context = pir_params_.get_context();
-  auto ntt_tables = context.first_context_data()->small_ntt_tables();
+  const auto coeff_mods = pir_params_.get_coeff_modulus();
 
   for (auto &poly : gsw) {
-    seal::util::CoeffIter gsw_poly_ptr(poly.data());
+    uint64_t *gsw_poly_ptr = poly.data();
     for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-      seal::util::ntt_negacyclic_harvey(gsw_poly_ptr + coeff_count * mod_id, *(ntt_tables + mod_id));
+      utils::ntt_fwd(gsw_poly_ptr + coeff_count * mod_id, coeff_count,
+                                    coeff_mods[mod_id].value());
     }
-    seal::util::CoeffIter gsw_poly_ptr2(poly.data() + coeff_count * rns_mod_cnt);
+    uint64_t *gsw_poly_ptr2 = poly.data() + coeff_count * rns_mod_cnt;
     for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-      seal::util::ntt_negacyclic_harvey(gsw_poly_ptr2 + coeff_count * mod_id, *(ntt_tables + mod_id));
+      utils::ntt_fwd(gsw_poly_ptr2 + coeff_count * mod_id, coeff_count,
+                                    coeff_mods[mod_id].value());
     }
   }
 }
@@ -75,8 +76,8 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
   // matrix multiplication: decomp(bfv) * gsw = (1 x 2l) * (2l x 2) = (1 x 2)
   for (size_t k = 0; k < 2; ++k) {
     for (size_t j = 0; j < 2 * l_; j++) {
-      seal::util::ConstCoeffIter encrypted_gsw_ptr(gsw_enc[j].data() + k * coeff_val_cnt);
-      seal::util::ConstCoeffIter encrypted_rlwe_ptr(decomposed_bfv[j]);
+      const uint64_t *encrypted_gsw_ptr = gsw_enc[j].data() + k * coeff_val_cnt;
+      const uint64_t *encrypted_rlwe_ptr = decomposed_bfv[j].data();
       #pragma GCC unroll 32
       for (size_t i = 0; i < coeff_val_cnt; i++) {
         result[k][i] += (inter_coeff_t)(encrypted_rlwe_ptr[i]) * encrypted_gsw_ptr[i];
@@ -157,16 +158,22 @@ void GSWEval::decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<ui
       for (size_t k = 0; k < coeff_count; k++) {
         uint64_t* res_ptr = rshift_res.data() + k * rns_mod_cnt;
         if (rns_mod_cnt == 2) {
-            seal::util::right_shift_uint128(res_ptr, p * base_log2_, res_ptr);
+            utils::right_shift_uint128(res_ptr, p * base_log2_, res_ptr);
             res_ptr[0] &= mask;
             res_ptr[1] = 0;
         } else {
-          // ! when we have rns_mod_cnt > 2, this function is slow. Please compare to the single mod version.
-          // If in the future we want rns_mod_cnt == 3, we can use the right_shift_uint192 function.
-          seal::util::right_shift_uint(res_ptr, p * base_log2_, rns_mod_cnt, res_ptr);// shift right by p * base_log2
-          res_ptr[0] &= mask; // mask the first coefficient
+          // Generic n-limb little-endian right shift (only reached for rns_mod_cnt > 2).
+          const size_t shift = p * base_log2_;
+          const size_t word_shift = shift / 64;
+          const size_t bit_shift  = shift % 64;
+          for (size_t i = 0; i < rns_mod_cnt; i++) {
+            uint64_t lo = (i + word_shift     < rns_mod_cnt) ? res_ptr[i + word_shift]     : 0;
+            uint64_t hi = (i + word_shift + 1 < rns_mod_cnt) ? res_ptr[i + word_shift + 1] : 0;
+            res_ptr[i] = (bit_shift == 0) ? lo : (lo >> bit_shift) | (hi << (64 - bit_shift));
+          }
+          res_ptr[0] &= mask;
           for (size_t i = 1; i < rns_mod_cnt; i++) {
-            res_ptr[i] = 0; // set the rest to 0
+            res_ptr[i] = 0;
           }
         }
       }
@@ -239,14 +246,14 @@ void GSWEval::decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,
   // ============================ Parameters ============================
   constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  const auto &context_data = pir_params_.get_context().first_context_data();
-  const auto ntt_tables = context_data->small_ntt_tables();
+  const auto coeff_mods = pir_params_.get_coeff_modulus();
 
   // ============================ NTT Transformation ============================
   TIME_START(extern_ntt_log_key);
   for (auto &coeffs : decomp_coeffs) {
     for (size_t i = 0; i < rns_mod_cnt; i++) {
-      seal::util::ntt_negacyclic_harvey(coeffs.data() + coeff_count * i, ntt_tables[i]);
+      utils::ntt_fwd(coeffs.data() + coeff_count * i, coeff_count,
+                                    coeff_mods[i].value());
     }
   }
   TIME_END(extern_ntt_log_key);

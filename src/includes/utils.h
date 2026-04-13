@@ -50,13 +50,58 @@ template <typename T> std::string to_string(T x) {
 
 namespace utils {
 
+// Modular inverse using the extended Euclidean algorithm.
+// Returns true and sets result = value^{-1} mod modulus if gcd(value, modulus) == 1.
+// Returns false if value == 0 or gcd != 1 (not invertible).
+// Requires: modulus >= 2, value < modulus.
+bool try_invert_uint_mod(uint64_t value, uint64_t modulus, uint64_t &result);
+
+// Deterministic Miller-Rabin primality test for any uint64_t.
+// The witness set {2,3,5,7,11,13,17,19,23,29,31,37} is proven deterministic
+// for all n < 3.3 * 10^24, which covers the full uint64_t range.
+bool is_prime(uint64_t n);
+
+// Apply the Galois automorphism σ_k : x → x^k in Z_q[x]/(x^N+1), coefficient form.
+// Input/output in [0, q). Requires k odd, 1 ≤ k < 2N.
+// Maps coefficient i to position (i*k) % (2N); wraps with sign flip if index ≥ N.
+void automorphism_coeff(const uint64_t *in, size_t N, uint32_t k, uint64_t q, uint64_t *out);
+
+// Same automorphism but input/output in NTT form.
+// Internally converts coeff ↔ NTT; 2 extra NTTs but only used in keygen.
+void automorphism_ntt(const uint64_t *in, size_t N, uint32_t k, uint64_t q, uint64_t *out);
+
+// 128-bit right shift of a little-endian 2-uint64 integer (in-place safe).
+inline void right_shift_uint128(uint64_t *operand, int shift, uint64_t *result) {
+  if (shift == 0) {
+    result[0] = operand[0]; result[1] = operand[1];
+  } else if (shift < 64) {
+    result[0] = (operand[0] >> shift) | (operand[1] << (64 - shift));
+    result[1] = operand[1] >> shift;
+  } else {
+    result[0] = operand[1] >> (shift - 64);
+    result[1] = 0;
+  }
+}
+
+// Negacyclic NTT over Z_q[x]/(x^N+1), implemented via HEXL under the hood.
+// Output is byte-identical to seal::util::ntt_negacyclic_harvey (verified in test_hexl_ntt).
+// The HEXL NTT object for each (N, q) pair is cached thread-locally so repeated
+// calls are fast and lock-free.
+void ntt_fwd(uint64_t *data, size_t N, uint64_t q);
+void ntt_inv(uint64_t *data, size_t N, uint64_t q);
+
+// Overload accepting a seal::Modulus (convenience wrapper, same semantics).
+inline bool try_invert_uint_mod(uint64_t value, const seal::Modulus &modulus, uint64_t &result) {
+  return try_invert_uint_mod(value, modulus.value(), result);
+}
+
 // void shift_polynomial(const seal::EncryptionParameters &params,
 //                       const seal::Ciphertext &src, seal::Ciphertext &dst,std::int64_t k);
 
-void negacyclic_shift_poly_coeffmod(seal::util::ConstCoeffIter poly,
+void negacyclic_shift_poly_coeffmod(const uint64_t *poly,
                                     size_t coeff_count, size_t shift,
-                                    const seal::Modulus &modulus,
-                                    seal::util::CoeffIter result);
+                                    uint64_t modulus,
+                                    uint64_t *result);
 void shift_polynomial(seal::EncryptionParameters &params,
                       seal::Ciphertext &encrypted,
                       seal::Ciphertext &destination, size_t index);

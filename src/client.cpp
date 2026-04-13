@@ -3,7 +3,7 @@
 #include "utils.h"
 #include "gsw_eval.h"
 #include "seal/util/iterator.h"
-#include "seal/util/polyarithsmallmod.h"
+#include "hexl/hexl.hpp"
 #include <cassert>
 
 
@@ -18,14 +18,16 @@ PirClient::PirClient(const PirParams &pir_params)
 std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
   std::vector<seal::Ciphertext> gsw_enc;
   const auto sk_ = secret_key_.data();
-  const auto ntt_tables = context_.first_context_data()->small_ntt_tables();
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const size_t coeff_count = DBConsts::PolyDegree;
   const size_t l_key = pir_params_.get_l_key();
+  const auto coeff_mods = pir_params_.get_coeff_modulus();
   std::vector<uint64_t> sk_coef(sk_.data(), sk_.data() + coeff_count * rns_mod_cnt);
 
-  RNSIter secret_key_iter(sk_coef.data(), coeff_count);
-  inverse_ntt_negacyclic_harvey(secret_key_iter, rns_mod_cnt, ntt_tables);
+  for (size_t k = 0; k < rns_mod_cnt; ++k) {
+    utils::ntt_inv(sk_coef.data() + k * coeff_count, coeff_count,
+                                          coeff_mods[k].value());
+  }
 
   GSWEval key_gsw(pir_params_, l_key, pir_params_.get_base_log2_key());
   gsw_enc.reserve(2 * l_key);
@@ -107,7 +109,7 @@ seal::Ciphertext PirClient::fast_generate_query(const size_t pt_idx) {
   // expanded ciphertext will be 1
   uint64_t inverse = 0;
   const uint64_t plain_modulus = pir_params_.get_plain_mod();
-  seal::util::try_invert_uint_mod(bits_per_ciphertext, plain_modulus, inverse);
+  utils::try_invert_uint_mod(bits_per_ciphertext, plain_modulus, inverse);
 
   // Since we are using new expansion method, where index b is split to even
   // part and odd part, even part is stored in index 2b, and odd part is stored
@@ -158,7 +160,7 @@ void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size
   std::vector<uint64_t> inv(rns_mod_cnt);
   for (size_t k = 0; k < rns_mod_cnt; k++) {
     uint64_t result;
-    seal::util::try_invert_uint_mod(bits_per_ciphertext, coeff_modulus[k], result);
+    utils::try_invert_uint_mod(bits_per_ciphertext, coeff_modulus[k], result);
     inv[k] = result;
   }
 
@@ -409,8 +411,6 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
   constexpr size_t N = DBConsts::PolyDegree;
   const uint64_t q = pir_params_.get_small_q();
   const uint64_t t = pir_params_.get_plain_mod();
-  const seal::Modulus q_mod(q);
-  const auto ntt_tables = context_mod_q_prime_.key_context_data()->small_ntt_tables();
 
   // phase = c0 + c1 * s  (mod q)
   // NTT-transform c1, multiply with precomputed sk_ntt_small_q_, INTT back
@@ -421,10 +421,10 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
     c0[i] = ct.data(0)[i] % q;
     c1_ntt[i] = ct.data(1)[i] % q;
   }
-  seal::util::ntt_negacyclic_harvey(c1_ntt.data(), ntt_tables[0]);
-  seal::util::dyadic_product_coeffmod(c1_ntt.data(), sk_ntt_small_q_.data(), N, q_mod, phase.data());
-  seal::util::inverse_ntt_negacyclic_harvey(phase.data(), ntt_tables[0]);
-  seal::util::add_poly_coeffmod(phase.data(), c0.data(), N, q_mod, phase.data());
+  utils::ntt_fwd(c1_ntt.data(), N, q);
+  intel::hexl::EltwiseMultMod(phase.data(), c1_ntt.data(), sk_ntt_small_q_.data(), N, q, 1);
+  utils::ntt_inv(phase.data(), N, q);
+  intel::hexl::EltwiseAddMod(phase.data(), phase.data(), c0.data(), N, q);
 
   // Recover plaintext and measure noise
   seal::Plaintext result(N);
@@ -465,29 +465,23 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
 
 seal::SecretKey PirClient::sk_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const {
   constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const seal::SEALContext old_context = pir_params_.get_context();
-    const seal::SEALContext new_context(new_params);
-  const auto old_context_data = old_context.key_context_data();
-  const auto new_context_data = new_context.key_context_data();
-  const auto old_ntt_tables = old_context_data->small_ntt_tables(); 
-  const auto new_ntt_tables = new_context_data->small_ntt_tables();
+  const seal::SEALContext new_context(new_params);
 
   auto temp_keygen = seal::KeyGenerator(new_context);
   auto new_sk = temp_keygen.secret_key(); // create non-empty secret key. will use old sk data.
 
-  std::vector<uint64_t> sk_data(sk.data().data(), sk.data().data() + coeff_count);
-  RNSIter intt_iter(sk_data.data(), coeff_count);
-  inverse_ntt_negacyclic_harvey(intt_iter, 1, old_ntt_tables);
+  const uint64_t old_q = pir_params_.get_coeff_modulus()[0].value();
   const uint64_t new_q = new_params.coeff_modulus()[0].value();
+
+  std::vector<uint64_t> sk_data(sk.data().data(), sk.data().data() + coeff_count);
+  utils::ntt_inv(sk_data.data(), coeff_count, old_q);
   for (size_t i = 0; i < coeff_count; ++i) {
     // sk in coefficient form only contains 0, 1, q-1, where q-1 \equiv -1 mod q
     if (sk_data[i] > 1) {
       sk_data[i] = new_q - 1; // change it to -1 mod small_q
     }
   }
-  // compute NTT forward for sk1 using new_ntt_tables
-  RNSIter ntt_iter(sk_data.data(), coeff_count);
-  ntt_negacyclic_harvey(ntt_iter, 1, new_ntt_tables);
+  utils::ntt_fwd(sk_data.data(), coeff_count, new_q);
 
   // replace the underlying data of new_sk with the data of sk
   std::copy(sk_data.begin(), sk_data.end(), new_sk.data().data());
@@ -511,21 +505,20 @@ seal::SEALContext PirClient::init_mod_q_prime() {
   new_params.set_coeff_modulus({small_q, full_mods.back()});
 
   seal::SEALContext ctx(new_params, true, seal::sec_level_type::none);
-  const auto ntt_tables = ctx.key_context_data()->small_ntt_tables();
 
   // Precompute sk in NTT form under small_q
   constexpr size_t N = DBConsts::PolyDegree;
-  const auto old_ntt_tables = pir_params_.get_context().key_context_data()->small_ntt_tables();
+  const uint64_t old_q = pir_params_.get_coeff_modulus()[0].value();
 
   // Get sk in coefficient form (ternary: {0, 1, q-1})
   sk_ntt_small_q_.resize(N);
   std::vector<uint64_t> sk_coef(secret_key_.data().data(), secret_key_.data().data() + N);
-  seal::util::inverse_ntt_negacyclic_harvey(sk_coef.data(), old_ntt_tables[0]);
+  utils::ntt_inv(sk_coef.data(), N, old_q);
 
   for (size_t i = 0; i < N; i++) {
     sk_ntt_small_q_[i] = (sk_coef[i] > 1) ? (small_q - 1) : sk_coef[i];
   }
-  seal::util::ntt_negacyclic_harvey(sk_ntt_small_q_.data(), ntt_tables[0]);
+  utils::ntt_fwd(sk_ntt_small_q_.data(), N, small_q);
 
   return ctx;
 }

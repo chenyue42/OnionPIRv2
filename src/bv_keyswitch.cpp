@@ -1,9 +1,8 @@
 #include "bv_keyswitch.h"
 #include "database_constants.h"
+#include "utils.h"
+#include "hexl/hexl.hpp"
 #include "seal/seal.h"
-#include "seal/util/galois.h"
-#include "seal/util/ntt.h"
-#include "seal/util/polyarithsmallmod.h"
 #include "seal/util/rlwe.h"
 #include <cassert>
 #include <cstring>
@@ -15,13 +14,6 @@ namespace bvks {
 // Helpers
 // ----------------------------------------------------------------------------
 
-// NTT wrappers: always operate on the first (data) prime.
-static inline void ntt_fwd(uint64_t *data, const seal::util::NTTTables *tables) {
-  seal::util::ntt_negacyclic_harvey(data, tables[0]);
-}
-static inline void ntt_inv(uint64_t *data, const seal::util::NTTTables *tables) {
-  seal::util::inverse_ntt_negacyclic_harvey(data, tables[0]);
-}
 
 // Signed (zero-centered) gadget decomposition.
 // Digits are in [-B/2, B/2), stored mod q. Reconstruction: Σ out[i]·B^i ≡ val (mod q).
@@ -55,11 +47,11 @@ static inline size_t bv_base_log2(const PirParams &pir_params) {
 }
 
 // Compute (1 << (i * base_log2)) mod q, safely.
-static inline uint64_t power_of_two_mod(size_t exp_bits, const seal::Modulus &q) {
+static inline uint64_t power_of_two_mod(size_t exp_bits, uint64_t q) {
   // Use repeated doubling mod q so we never overflow.
-  uint64_t result = 1 % q.value();
+  uint64_t result = 1 % q;
   for (size_t b = 0; b < exp_bits; ++b) {
-    result = (static_cast<uint128_t>(result) << 1) % q.value();
+    result = (static_cast<uint128_t>(result) << 1) % q;
   }
   return result;
 }
@@ -159,23 +151,21 @@ BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
   const auto &coeff_modulus = parms.coeff_modulus();
   const size_t rns_mod_cnt = pir_params.get_rns_mod_cnt();
   const size_t N = parms.poly_modulus_degree();
-  const auto ntt_tables = ctx_data.small_ntt_tables();
 
   if (rns_mod_cnt != 1) {
     throw std::runtime_error(
         "BV key-switch currently supports only single RNS limb (rns_mod_cnt == 1)");
   }
-  const auto &mod = coeff_modulus[0]; // data modulus (first prime)
+  const auto &mod = coeff_modulus[0]; // data modulus (first prime), still needed for galois_tool
+  const uint64_t q_val = mod.value();
   const size_t base_log2 = bv_base_log2(pir_params);
 
   // sk is stored in NTT form across all primes. First N coeffs = first limb.
   const uint64_t *sk_ptr = sk.data().data();
 
   // Compute sigma_k(s) = s(x^k) in NTT form under the data modulus.
-  auto galois_tool = ctx_data.galois_tool();
   std::vector<uint64_t> sigma_s(N);
-  galois_tool->apply_galois_ntt(ConstCoeffIter(sk_ptr), galois_k,
-                                CoeffIter(sigma_s.data()));
+  utils::automorphism_ntt(sk_ptr, N, galois_k, q_val, sigma_s.data());
 
   BvKeySwitchKey ksk;
   ksk.galois_k = galois_k;
@@ -203,19 +193,19 @@ BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
     std::copy(cbd_buf.begin(), cbd_buf.begin() + N, e.begin());
 
     // NTT(a), NTT(e) under the first prime.
-    ntt_fwd(ct.a.data(), ntt_tables);
-    ntt_fwd(e.data(), ntt_tables);
+    utils::ntt_fwd(ct.a.data(), N, mod.value());
+    utils::ntt_fwd(e.data(), N, mod.value());
 
     // a * s (pointwise in NTT form)
-    dyadic_product_coeffmod(ct.a.data(), sk_ptr, N, mod, as.data());
+    intel::hexl::EltwiseMultMod(as.data(), ct.a.data(), sk_ptr, N, q_val, 1);
 
     // Message: sigma_k(s) * B^i (scalar multiply in NTT form)
-    const uint64_t Bi = power_of_two_mod(i * base_log2, mod);
-    multiply_poly_scalar_coeffmod(sigma_s.data(), N, Bi, mod, msg.data());
+    const uint64_t Bi = power_of_two_mod(i * base_log2, q_val);
+    intel::hexl::EltwiseFMAMod(msg.data(), sigma_s.data(), Bi, nullptr, N, q_val, 1);
 
     // b = msg - a*s + e
-    sub_poly_coeffmod(msg.data(), as.data(), N, mod, ct.b.data());
-    add_poly_coeffmod(ct.b.data(), e.data(), N, mod, ct.b.data());
+    intel::hexl::EltwiseSubMod(ct.b.data(), msg.data(), as.data(), N, q_val);
+    intel::hexl::EltwiseAddMod(ct.b.data(), ct.b.data(), e.data(), N, q_val);
   }
 
   return ksk;
@@ -265,21 +255,16 @@ void bv_apply_galois_inplace(seal::Ciphertext &ct, uint32_t galois_k,
         "bv_apply_galois_inplace currently supports only single RNS limb");
   }
   const auto &mod = coeff_modulus[0];
-  const auto ntt_tables = ctx_data.small_ntt_tables();
-  auto galois_tool = ctx_data.galois_tool();
-
+  const uint64_t q_val = mod.value();
   const size_t base_log2 = bv_base_log2(pir_params);
 
   // Step 1: apply automorphism to (c0, c1) in coefficient form.
   std::vector<uint64_t> c0_perm(N), c1_perm(N);
-  galois_tool->apply_galois(ConstCoeffIter(ct.data(0)), galois_k, mod,
-                            CoeffIter(c0_perm.data()));
-  galois_tool->apply_galois(ConstCoeffIter(ct.data(1)), galois_k, mod,
-                            CoeffIter(c1_perm.data()));
+  utils::automorphism_coeff(ct.data(0), N, galois_k, q_val, c0_perm.data());
+  utils::automorphism_coeff(ct.data(1), N, galois_k, q_val, c1_perm.data());
 
   // Step 2: signed gadget-decompose σ(c1). Coefficient-first loop for carry propagation.
   std::vector<std::vector<uint64_t>> digits(L_KS, std::vector<uint64_t>(N));
-  const uint64_t q_val = mod.value();
   for (size_t k = 0; k < N; ++k) {
     uint64_t digit_vals[L_KS];
     signed_gadget_decompose(c1_perm[k], base_log2, q_val, digit_vals, L_KS);
@@ -289,7 +274,7 @@ void bv_apply_galois_inplace(seal::Ciphertext &ct, uint32_t galois_k,
   }
   // NTT each digit for the inner product with NTT-form KSK.
   for (size_t i = 0; i < L_KS; ++i) {
-    ntt_fwd(digits[i].data(), ntt_tables);
+    utils::ntt_fwd(digits[i].data(), N, q_val);
   }
 
   // Step 3: inner product with KSK (NTT form).
@@ -301,21 +286,19 @@ void bv_apply_galois_inplace(seal::Ciphertext &ct, uint32_t galois_k,
 
   for (size_t i = 0; i < L_KS; ++i) {
     const auto &ksk_ct = key.cts[i];
-    dyadic_product_coeffmod(digits[i].data(), ksk_ct.b.data(), N, mod,
-                            tmp.data());
-    add_poly_coeffmod(delta_b.data(), tmp.data(), N, mod, delta_b.data());
+    intel::hexl::EltwiseMultMod(tmp.data(), digits[i].data(), ksk_ct.b.data(), N, q_val, 1);
+    intel::hexl::EltwiseAddMod(delta_b.data(), delta_b.data(), tmp.data(), N, q_val);
 
-    dyadic_product_coeffmod(digits[i].data(), ksk_ct.a.data(), N, mod,
-                            tmp.data());
-    add_poly_coeffmod(delta_a.data(), tmp.data(), N, mod, delta_a.data());
+    intel::hexl::EltwiseMultMod(tmp.data(), digits[i].data(), ksk_ct.a.data(), N, q_val, 1);
+    intel::hexl::EltwiseAddMod(delta_a.data(), delta_a.data(), tmp.data(), N, q_val);
   }
 
   // Step 4: INTT the inner product results back to coefficient form.
-  ntt_inv(delta_b.data(), ntt_tables);
-  ntt_inv(delta_a.data(), ntt_tables);
+  utils::ntt_inv(delta_b.data(), N, q_val);
+  utils::ntt_inv(delta_a.data(), N, q_val);
 
   // Step 5: new_c0 = σ(c0) + Δb,  new_c1 = Δa   (coefficient form)
-  add_poly_coeffmod(c0_perm.data(), delta_b.data(), N, mod, c0_perm.data());
+  intel::hexl::EltwiseAddMod(c0_perm.data(), c0_perm.data(), delta_b.data(), N, q_val);
 
   // Write back into ct's first RNS limb. Higher limbs left untouched.
   std::memcpy(ct.data(0), c0_perm.data(), N * sizeof(uint64_t));
