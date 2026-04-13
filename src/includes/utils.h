@@ -3,6 +3,7 @@
 #include "seal/seal.h"
 #include <iostream>
 #include <fstream>
+#include <random>
 
 
 #ifdef _DEBUG
@@ -127,6 +128,21 @@ size_t next_pow_of_2(const size_t n);
 size_t roundup_div(const size_t numerator, const size_t denominator);
 
 void fill_rand_arr(uint64_t *arr, size_t size);
+
+// ---------------------------------------------------------------------------
+// Polynomial noise / randomness samplers
+// ---------------------------------------------------------------------------
+
+// Error polynomial: e[i] = round(N(0, sigma)) mod q.
+// Positive values stored as-is; negative values stored as q - |e| (two's complement mod q).
+void sample_gaussian(uint64_t *out, size_t N, uint64_t q, double sigma, std::mt19937_64 &rng);
+
+// Uniform polynomial: a[i] uniformly in [0, q).
+void sample_uniform_poly(uint64_t *out, size_t N, uint64_t q, std::mt19937_64 &rng);
+
+// Ternary secret key: s[i] in {0, 1, q-1} with equal probability 1/3 each.
+// Stores 0 for 0, 1 for +1, q-1 for -1 (additive inverse).
+void sample_ternary(uint64_t *out, size_t N, uint64_t q, std::mt19937_64 &rng);
 
 // Given the target number of plaintexts, GSW ell for further dims, and the expansion tree height,
 // calculate the database shape that maximizes the first dimension size under the constraints:

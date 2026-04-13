@@ -20,10 +20,12 @@ void PirTest::run_test(const std::string &test_name, bool use_bv) {
   else if (test_name == "cpu_info")          print_cpu_info();
   else if (test_name == "hexl_ntt")          test_hexl_ntt();
   else if (test_name == "utils_arith")       test_utils_arith();
+  else if (test_name == "noise_sampling")    test_noise_sampling();
   else {
     std::cerr << "Unknown test: " << test_name << std::endl;
     std::cerr << "Available tests: pir, bfv, serial, ext_prod, ext_prod_mux, "
               << "fst_dim, batch_decomp, fast_expand, raw_pt_ct, decrypt_mod_q, "
-              << "mod_switch, sk_mod_switch, db_shape, hexl_ntt, utils_arith, cpu_info" << std::endl;
+              << "mod_switch, sk_mod_switch, db_shape, hexl_ntt, utils_arith, "
+              << "noise_sampling, cpu_info" << std::endl;
   }
 }
