@@ -12,21 +12,16 @@
 // polynomial coefficient representation.
 
 
-void GSWEval::gsw_ntt_negacyclic_harvey(GSWCiphertext &gsw) {
+void GSWEval::gsw_ntt_forward(GSWCiphertext &gsw) {
   constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  const auto coeff_mods = pir_params_.get_coeff_modulus();
+  const auto &coeff_mods = pir_params_.get_coeff_modulus();
 
+  // Each poly holds c0||c1, each split into rns_mod_cnt limbs of coeff_count.
   for (auto &poly : gsw) {
-    uint64_t *gsw_poly_ptr = poly.data();
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-      utils::ntt_fwd(gsw_poly_ptr + coeff_count * mod_id, coeff_count,
-                                    coeff_mods[mod_id]);
-    }
-    uint64_t *gsw_poly_ptr2 = poly.data() + coeff_count * rns_mod_cnt;
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-      utils::ntt_fwd(gsw_poly_ptr2 + coeff_count * mod_id, coeff_count,
-                                    coeff_mods[mod_id]);
+    for (size_t i = 0; i < 2 * rns_mod_cnt; i++) {
+      utils::ntt_fwd(poly.data() + coeff_count * i, coeff_count,
+                     coeff_mods[i % rns_mod_cnt]);
     }
   }
 }
@@ -275,7 +270,7 @@ void GSWEval::query_to_gsw(std::vector<seal::Ciphertext> query, GSWCiphertext gs
       output[i].push_back(query[i].data(1)[j]);
     }
   }
-  gsw_ntt_negacyclic_harvey(output);  // And the first half should be in NTT form
+  gsw_ntt_forward(output);  // And the first half should be in NTT form
   
   // The second half is computed using external product.
   output.resize(2 * curr_l);
@@ -306,7 +301,7 @@ GSWCiphertext GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
     }
   }
   seal_GSW_vec_to_GSW(output, temp);
-  gsw_ntt_negacyclic_harvey(output);
+  gsw_ntt_forward(output);
   return output;
 }
 

@@ -28,6 +28,11 @@ seal::EncryptionParameters PirParams::init_seal_params() {
 
 PirParams::PirParams()
     : seal_params_(init_seal_params()), context_(seal_params_) {
+  // Cache coeff modulus as plain uint64_t vector (built once, not per call).
+  const auto &mods = context_.first_context_data()->parms().coeff_modulus();
+  coeff_modulus_.reserve(mods.size());
+  for (const auto &m : mods) coeff_modulus_.push_back(m.value());
+
   // =============== Setting modulus ===============
   const uint64_t pt_mod = seal_params_.plain_modulus().value();
   // setup the modulus switching mod.

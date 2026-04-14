@@ -80,7 +80,7 @@ class GSWEval {
                          const size_t half, seal::Ciphertext &output);
 
     // Transform the given GSWCipher text from polynomial representation to NTT representation.
-    void gsw_ntt_negacyclic_harvey(GSWCiphertext &gsw);
+    void gsw_ntt_forward(GSWCiphertext &gsw);
 
     // helper functions
     void seal_GSW_vec_to_GSW(GSWCiphertext &output, const std::vector<seal::Ciphertext> &gsw_vec);
