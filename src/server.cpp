@@ -465,10 +465,7 @@ void PirServer::set_client_bv_galois_key(const size_t client_id, bvks::BvGaloisK
   client_bv_galois_keys_[client_id] = std::move(bv_keys);
 }
 
-void PirServer::set_client_gsw_key(const size_t client_id, const std::vector<Ciphertext> &gsw_cts) {
-  GSWCiphertext gsw_key;
-  key_gsw_.seal_GSW_vec_to_GSW(gsw_key, gsw_cts);
-  key_gsw_.gsw_ntt_forward(gsw_key);
+void PirServer::set_client_gsw_key(const size_t client_id, GSWCiphertext gsw_key) {
   client_gsw_keys_[client_id] = std::move(gsw_key);
 }
 

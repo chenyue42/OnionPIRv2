@@ -3,6 +3,7 @@
 #include "logging.h"
 #include "bv_keyswitch.h"
 #include <cassert>
+#include <cstring>
 
 // Here we compute a cross product between the transpose of the decomposed BFV
 // (a 2l vector of polynomials) and the GSW ciphertext (a 2lx2 matrix of
@@ -289,73 +290,46 @@ void GSWEval::query_to_gsw(std::vector<seal::Ciphertext> query, GSWCiphertext gs
 }
 
 GSWCiphertext GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
-                  seal::Encryptor const &encryptor, seal::SecretKey const &sk) { 
-  GSWCiphertext output;
-  std::vector<seal::Ciphertext> temp;
-  // when poly_id = 0, we are working on the first half of the GSWCiphertext
-  for (size_t poly_id = 0; poly_id < 2; poly_id++) {
-    for (size_t k = 0; k < l_; k++) {
-      seal::Ciphertext cipher; 
-      plain_to_gsw_one_row(plaintext, encryptor, sk, k, poly_id, cipher);
-      temp.push_back(cipher);
-    }
-  }
-  seal_GSW_vec_to_GSW(output, temp);
-  gsw_ntt_forward(output);
-  return output;
-}
-
-void GSWEval::plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
-                                   seal::Encryptor const &encryptor,
-                                   seal::SecretKey const &sk,
-                                   const size_t level, const size_t half,
-                                   seal::Ciphertext &output) {
-
-  // Accessing context data within this function instead of passing these parameters
-  const auto &context = pir_params_.get_context();
-  constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const auto &coeff_modulus = pir_params_.get_coeff_modulus();
-  const size_t rns_mod_cnt = coeff_modulus.size();
-  assert(plaintext.size() == coeff_count * rns_mod_cnt || plaintext.size() == coeff_count);
-
-  // Create RGSW gadget.
-  // We only use rns_mod_cnt many gadgets, we can save some computation here. Not a big deal though. 
-  std::vector<std::vector<uint64_t>> gadget = utils::gsw_gadget(l_, base_log2_, rns_mod_cnt, coeff_modulus);
-
-  encryptor.encrypt_zero_symmetric(output);
-  auto ct = output.data(half);
-  // plaintext is multiplied by the gadget and added to the ciphertext
-  for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-    const size_t pad = (mod_id * coeff_count);
-    const inter_coeff_t mod = coeff_modulus[mod_id];
-    const uint64_t gadget_coef = gadget[mod_id][level];
-    auto pt = plaintext.data();
-    if (plaintext.size() == coeff_count * rns_mod_cnt) {
-      pt = plaintext.data() + pad;
-    }
-    // Loop through plaintext coefficients
-    for (size_t j = 0; j < coeff_count; j++) {
-      uint64_t val = (inter_coeff_t)pt[j] * gadget_coef % mod;
-      ct[j + pad] =
-          static_cast<uint64_t>((ct[j + pad] + val) % mod);
-    }
-  }
-}
-
-void GSWEval::seal_GSW_vec_to_GSW(GSWCiphertext &output, const std::vector<seal::Ciphertext> &gsw_vec) {
-  constexpr size_t coeff_count = DBConsts::PolyDegree;
+                                    const RlweSk &sk, std::mt19937_64 &rng) {
+  constexpr size_t N = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  assert(rns_mod_cnt == 1 && "plain_to_gsw currently supports only single-mod");
+  assert(plaintext.size() == N);
 
-  output.clear();
-  for (auto &ct : gsw_vec) {
-    std::vector<uint64_t> row;
-    row.reserve(2 * coeff_count * rns_mod_cnt);
-    for (size_t i = 0; i < coeff_count * rns_mod_cnt; i++) {
-      row.push_back(ct.data(0)[i]);
+  const uint64_t q = pir_params_.get_coeff_modulus()[0];
+  const double sigma = pir_params_.get_noise_std_dev();
+
+  // Gadget: gadget[k] = B^(l-1-k) mod q, matching utils::gsw_gadget ordering
+  // (large → small, row 0 = B^(l-1), row l-1 = 1).
+  const auto gadget_table = utils::gsw_gadget(l_, base_log2_, 1, pir_params_.get_coeff_modulus());
+  const std::vector<uint64_t> &gadget = gadget_table[0];
+
+  // Output layout: 2*l_ rows, each row = [c0 (N) || c1 (N)] in NTT form.
+  GSWCiphertext output(2 * l_, std::vector<uint64_t>(2 * N));
+
+  RlweCt ct;
+  for (size_t half = 0; half < 2; half++) {
+    for (size_t k = 0; k < l_; k++) {
+      // Fresh (c0, c1) = Enc_sk(0) in coefficient form.
+      encrypt_zero(sk, N, q, sigma, rng, ct, /*ntt_form=*/false);
+
+      // Add gadget[k] * plaintext to c_{half}.
+      uint64_t *target = ct.data(half);
+      const uint64_t g = gadget[k];
+      for (size_t j = 0; j < N; j++) {
+        const uint64_t val =
+            static_cast<uint64_t>(static_cast<inter_coeff_t>(plaintext[j]) * g % q);
+        target[j] = (target[j] + val) % q;
+      }
+
+      // NTT both halves and write into the flat output row.
+      utils::ntt_fwd(ct.c0.data(), N, q);
+      utils::ntt_fwd(ct.c1.data(), N, q);
+      const size_t row = half * l_ + k;
+      std::memcpy(output[row].data(),     ct.c0.data(), N * sizeof(uint64_t));
+      std::memcpy(output[row].data() + N, ct.c1.data(), N * sizeof(uint64_t));
     }
-    for (size_t i = 0; i < coeff_count * rns_mod_cnt; i++) {
-      row.push_back(ct.data(1)[i]);
-    }
-    output.push_back(row);
   }
+
+  return output;
 }

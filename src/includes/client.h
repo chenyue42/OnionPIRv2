@@ -33,15 +33,15 @@ public:
   void add_gsw_to_query(seal::Ciphertext &query, const std::vector<size_t> query_indices);
 
   static size_t write_query_to_stream(const seal::Ciphertext &query, std::stringstream &data_stream);
-  static size_t write_gsw_to_stream(const std::vector<Ciphertext> &gsw, std::stringstream &gsw_stream);
   size_t create_galois_keys(std::stringstream &galois_key_stream);
   // Create custom BV-style Galois keys (no special prime).
   bvks::BvGaloisKeys create_bv_galois_keys();
   // decrypt the result returned from PIR. Assume modulus switching is applied.
   seal::Plaintext decrypt_reply(const seal::Ciphertext& reply);
   seal::Plaintext decrypt_ct(const seal::Ciphertext& ct);
-  // Retrieves a plaintext from the plaintext containing the plaintext.
-  std::vector<Ciphertext> generate_gsw_from_key();
+  // Produce the per-client GSW key (encryption of -s under the data modulus) in
+  // its final flat NTT layout, ready to hand to PirServer::set_client_gsw_key.
+  GSWCiphertext generate_gsw_from_key();
   
   inline size_t get_client_id() const { return client_id_; }
 

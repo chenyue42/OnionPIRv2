@@ -23,8 +23,12 @@ void PirTest::test_ext_prod_mux() {
   std::vector<uint64_t> zero(coeff_count);
   one[0] = 1;
   zero[0] = 0;
-  GSWCiphertext one_gsw = data_gsw.plain_to_gsw(one, client.encryptor_, client.secret_key_);
-  GSWCiphertext zero_gsw = data_gsw.plain_to_gsw(zero, client.encryptor_, client.secret_key_);
+  RlweSk rlwe_sk;
+  rlwe_sk.data.assign(client.secret_key_.data().data(),
+                      client.secret_key_.data().data() + coeff_count);
+  std::mt19937_64 rng(std::random_device{}());
+  GSWCiphertext one_gsw  = data_gsw.plain_to_gsw(one,  rlwe_sk, rng);
+  GSWCiphertext zero_gsw = data_gsw.plain_to_gsw(zero, rlwe_sk, rng);
 
   // test the mux
   seal::Ciphertext result;

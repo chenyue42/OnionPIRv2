@@ -1,6 +1,9 @@
 #pragma once
 #include "seal/seal.h"
 #include "pir.h"
+#include "rlwe.h"
+#include "rlwe_enc.h"
+#include <random>
 #include <vector>
 
 
@@ -63,25 +66,18 @@ class GSWEval {
     void query_to_gsw(std::vector<seal::Ciphertext> query, GSWCiphertext gsw_key,
                       GSWCiphertext &output);
 
-    // Although we don't need this function in the normal OnionPIR protocol, we provide this function for testing the external product. 
-    // void plain_to_gsw(std::vector<uint64_t> const &plaintext,
-    //                   seal::Encryptor const &encryptor,
-    //                   seal::SecretKey const &sk,
-    //                   std::vector<seal::Ciphertext> &output);
-
-    // Although we don't need this function in the normal OnionPIR protocol, we provide this function for testing the external product. 
+    /*!
+      Encrypt a plaintext polynomial as a full GSW ciphertext in NTT form.
+      Single-mod only. Produces the flat layout consumed by external_product:
+      2*l_ rows, each row = [c0 || c1] of size 2*N (NTT form, mod q).
+      @param plaintext - polynomial of length N (or N*rns_mod_cnt, but
+                         only the single-mod case is supported).
+      @param sk        - NTT-form ternary secret key.
+      @param rng       - randomness source for a, e.
+    */
     GSWCiphertext plain_to_gsw(std::vector<uint64_t> const &plaintext,
-                               seal::Encryptor const &encryptor,
-                               seal::SecretKey const &sk);
-
-    void plain_to_gsw_one_row(std::vector<uint64_t> const &plaintext,
-                         seal::Encryptor const &encryptor,
-                         seal::SecretKey const &sk, const size_t level,
-                         const size_t half, seal::Ciphertext &output);
+                               const RlweSk &sk, std::mt19937_64 &rng);
 
     // Transform the given GSWCipher text from polynomial representation to NTT representation.
     void gsw_ntt_forward(GSWCiphertext &gsw);
-
-    // helper functions
-    void seal_GSW_vec_to_GSW(GSWCiphertext &output, const std::vector<seal::Ciphertext> &gsw_vec);
 };

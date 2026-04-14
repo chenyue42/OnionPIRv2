@@ -29,7 +29,7 @@ public:
   size_t save_resp_to_stream(const seal::Ciphertext &response, std::stringstream &resp_stream);
   void set_client_galois_key(const size_t client_id, std::stringstream &gsw_stream);
   void set_client_bv_galois_key(const size_t client_id, bvks::BvGaloisKeys bv_keys);
-  void set_client_gsw_key(const size_t client_id, const std::vector<Ciphertext> &gsw_key);
+  void set_client_gsw_key(const size_t client_id, GSWCiphertext gsw_key);
 
   /**
   Asking the server to return the original plaintext (before NTT transformation) at the given index.

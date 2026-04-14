@@ -2,9 +2,11 @@
 #include "pir.h"
 #include "utils.h"
 #include "gsw_eval.h"
+#include "rlwe_enc.h"
 #include "seal/util/iterator.h"
 #include "hexl/hexl.hpp"
 #include <cassert>
+#include <random>
 
 
 // constructor
@@ -15,30 +17,22 @@ PirClient::PirClient(const PirParams &pir_params)
       encryptor_(context_, secret_key_), evaluator_(context_),
       context_mod_q_prime_(init_mod_q_prime()) {}
 
-std::vector<Ciphertext> PirClient::generate_gsw_from_key() {
-  std::vector<seal::Ciphertext> gsw_enc;
-  const auto sk_ = secret_key_.data();
-  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  const size_t coeff_count = DBConsts::PolyDegree;
-  const size_t l_key = pir_params_.get_l_key();
-  const auto coeff_mods = pir_params_.get_coeff_modulus();
-  std::vector<uint64_t> sk_coef(sk_.data(), sk_.data() + coeff_count * rns_mod_cnt);
+GSWCiphertext PirClient::generate_gsw_from_key() {
+  constexpr size_t N = DBConsts::PolyDegree;
+  const uint64_t q = pir_params_.get_coeff_modulus()[0];
 
-  for (size_t k = 0; k < rns_mod_cnt; ++k) {
-    utils::ntt_inv(sk_coef.data() + k * coeff_count, coeff_count,
-                                          coeff_mods[k]);
-  }
+  // Pull sk into coefficient form (it is stored in NTT form under q).
+  std::vector<uint64_t> sk_coef(secret_key_.data().data(),
+                                secret_key_.data().data() + N);
+  utils::ntt_inv(sk_coef.data(), N, q);
 
-  GSWEval key_gsw(pir_params_, l_key, pir_params_.get_base_log2_key());
-  gsw_enc.reserve(2 * l_key);
-  for (size_t half = 0; half < 2; half++) {
-    for (size_t k = 0; k < l_key; k++) {
-      seal::Ciphertext cipher;
-      key_gsw.plain_to_gsw_one_row(sk_coef, encryptor_, secret_key_, k, half, cipher);
-      gsw_enc.push_back(std::move(cipher));
-    }
-  }
-  return gsw_enc;
+  // Wrap sk in NTT form as an RlweSk for encrypt_zero.
+  RlweSk rlwe_sk;
+  rlwe_sk.data.assign(secret_key_.data().data(), secret_key_.data().data() + N);
+
+  std::mt19937_64 rng(std::random_device{}());
+  GSWEval key_gsw(pir_params_, pir_params_.get_l_key(), pir_params_.get_base_log2_key());
+  return key_gsw.plain_to_gsw(sk_coef, rlwe_sk, rng);
 }
 
 

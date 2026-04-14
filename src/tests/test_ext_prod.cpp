@@ -29,8 +29,13 @@ void PirTest::test_external_product() {
   // In the actual PIR scheme, we do this by encoding into the packed BFV and then
   // converting them from BFV to RGSW. This conversion process is called "external product".
   // We will test this conversion process in this test.
-  GSWCiphertext one_gsw = data_gsw.plain_to_gsw(one, encryptor_, secret_key_);
-  GSWCiphertext zero_gsw = data_gsw.plain_to_gsw(zero, encryptor_, secret_key_);
+  const uint64_t q = pir_params.get_coeff_modulus()[0];
+  RlweSk rlwe_sk;
+  rlwe_sk.data.assign(secret_key_.data().data(), secret_key_.data().data() + coeff_count);
+  std::mt19937_64 rng(std::random_device{}());
+  GSWCiphertext one_gsw  = data_gsw.plain_to_gsw(one,  rlwe_sk, rng);
+  GSWCiphertext zero_gsw = data_gsw.plain_to_gsw(zero, rlwe_sk, rng);
+  (void)q;
 
   // ================== Create BFV(a) ==================
   seal::Plaintext a(coeff_count), result;
