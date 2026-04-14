@@ -1,0 +1,70 @@
+#include "rlwe_enc.h"
+#include "utils.h"
+#include "hexl/hexl.hpp"
+#include <cstring>
+
+RlweSk gen_secret_key(size_t N, uint64_t q, std::mt19937_64 &rng) {
+  RlweSk sk;
+  sk.data.resize(N);
+  utils::sample_ternary(sk.data.data(), N, q, rng);
+  utils::ntt_fwd(sk.data.data(), N, q);
+  return sk;
+}
+
+void encrypt_zero(const RlweSk &sk, size_t N, uint64_t q, double sigma,
+                  std::mt19937_64 &rng, RlweCt &ct, bool ntt_form) {
+  ct.resize(N);
+
+  // Sample a ← U([0, q)) and e ← Gaussian(0, sigma²), both in coefficient form.
+  utils::sample_uniform_poly(ct.c1.data(), N, q, rng);
+  std::vector<uint64_t> e(N);
+  utils::sample_gaussian(e.data(), N, q, sigma, rng);
+
+  // Compute a*s in NTT form. sk is already NTT.
+  std::vector<uint64_t> a_ntt(N);
+  std::memcpy(a_ntt.data(), ct.c1.data(), N * sizeof(uint64_t));
+  utils::ntt_fwd(a_ntt.data(), N, q);
+  intel::hexl::EltwiseMultMod(ct.c0.data(), a_ntt.data(), sk.data.data(), N, q, 1);
+
+  // Bring a*s back to coefficient form so we can add e (which is in coef).
+  utils::ntt_inv(ct.c0.data(), N, q);
+
+  // c0 = (a*s) + e, then negate: c0 = -(a*s + e).
+  intel::hexl::EltwiseAddMod(ct.c0.data(), ct.c0.data(), e.data(), N, q);
+  const std::vector<uint64_t> zeros(N, 0);
+  intel::hexl::EltwiseSubMod(ct.c0.data(), zeros.data(), ct.c0.data(), N, q);
+
+  if (ntt_form) {
+    utils::ntt_fwd(ct.c0.data(), N, q);
+    utils::ntt_fwd(ct.c1.data(), N, q);
+  }
+  ct.ntt_form = ntt_form;
+}
+
+void decrypt(const RlweCt &ct, const RlweSk &sk, size_t N, uint64_t q,
+             uint64_t t, RlwePt &pt) {
+  // We need c0 in coefficient form and c1 in NTT form (for pointwise mult with sk).
+  std::vector<uint64_t> c0_coef(N), c1_ntt(N);
+  std::memcpy(c0_coef.data(), ct.c0.data(), N * sizeof(uint64_t));
+  std::memcpy(c1_ntt.data(),  ct.c1.data(), N * sizeof(uint64_t));
+
+  if (ct.ntt_form) {
+    utils::ntt_inv(c0_coef.data(), N, q);
+  } else {
+    utils::ntt_fwd(c1_ntt.data(), N, q);
+  }
+
+  // phase = c1 * s (NTT pointwise), then INTT back to coefficient form.
+  std::vector<uint64_t> phase(N);
+  intel::hexl::EltwiseMultMod(phase.data(), c1_ntt.data(), sk.data.data(), N, q, 1);
+  utils::ntt_inv(phase.data(), N, q);
+
+  // phase = c0 + c1*s  (coefficient form, values in [0, q)).
+  intel::hexl::EltwiseAddMod(phase.data(), phase.data(), c0_coef.data(), N, q);
+
+  // Scale-and-round q → t (centered, integer-exact). Same as round(phase*t/q) mod t.
+  pt.data.resize(N);
+  for (size_t i = 0; i < N; i++) {
+    pt.data[i] = utils::rescale(phase[i], q, t);
+  }
+}

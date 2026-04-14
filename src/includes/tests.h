@@ -59,4 +59,5 @@ class PirTest {
     void test_hexl_ntt();
     void test_utils_arith();
     void test_noise_sampling();
+    void test_rlwe_enc();
 };

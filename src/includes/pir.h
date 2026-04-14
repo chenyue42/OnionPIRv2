@@ -67,8 +67,8 @@ public:
   // Relationship to the "width parameter" r used in Spiral/Respire:
   //   σ_std = r / sqrt(2π)  ←→  r = σ_std * sqrt(2π)
   // For example, SEAL's default σ_std = 3.2 corresponds to r ≈ 8.01.
-  inline double get_noise_std_dev() const { return noise_std_dev_; }
-  inline void   set_noise_std_dev(double s) { noise_std_dev_ = s; }
+  // Defined in DBConsts::NoiseStdDev (database_constants.h).
+  inline double get_noise_std_dev() const { return DBConsts::NoiseStdDev; }
 
   inline const size_t get_BFV_size(bool use_seed = true) const {
     if (use_seed) {
@@ -97,7 +97,4 @@ private:
   size_t num_dims_;          // total number of dimensions
   seal::EncryptionParameters seal_params_;
   seal::SEALContext context_;
-  // σ for the error distribution: standard deviation, NOT the width parameter.
-  // Default 3.2 matches SEAL-For-OnionPIR's noise_standard_deviation.
-  double noise_std_dev_ = 3.2;
 };

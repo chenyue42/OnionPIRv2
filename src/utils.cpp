@@ -347,3 +347,20 @@ void utils::sample_ternary(uint64_t *out, size_t N, uint64_t q,
     else             out[i] = q - 1;
   }
 }
+
+uint64_t utils::rescale(uint64_t a, uint64_t inp_mod, uint64_t out_mod) {
+  const int64_t inp_mod_i64 = static_cast<int64_t>(inp_mod);
+  const __int128 out_mod_i128 = static_cast<__int128>(out_mod);
+
+  int64_t v = static_cast<int64_t>(a % inp_mod);
+  if (v >= inp_mod_i64 / 2) v -= inp_mod_i64;
+
+  const int64_t sign = (v >= 0) ? 1 : -1;
+  __int128 val = static_cast<__int128>(v) * static_cast<__int128>(out_mod);
+  __int128 r = (val + static_cast<__int128>(sign * (inp_mod_i64 / 2))) /
+               static_cast<__int128>(inp_mod);
+
+  r = (r + static_cast<__int128>((inp_mod / out_mod) * out_mod) +
+       2 * out_mod_i128) % out_mod_i128;
+  return static_cast<uint64_t>((r + out_mod_i128) % out_mod_i128);
+}

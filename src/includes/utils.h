@@ -144,6 +144,12 @@ void sample_uniform_poly(uint64_t *out, size_t N, uint64_t q, std::mt19937_64 &r
 // Stores 0 for 0, 1 for +1, q-1 for -1 (additive inverse).
 void sample_ternary(uint64_t *out, size_t N, uint64_t q, std::mt19937_64 &rng);
 
+// Rescale a single coefficient from modulus inp_mod to out_mod using
+// centered (signed) round-to-nearest: lifts a into [-inp_mod/2, inp_mod/2),
+// computes round(v * out_mod / inp_mod) in i128, and reduces into [0, out_mod).
+// Pure integer arithmetic — no FP precision loss. Matches Spiral's rescale.
+uint64_t rescale(uint64_t a, uint64_t inp_mod, uint64_t out_mod);
+
 // Given the target number of plaintexts, GSW ell for further dims, and the expansion tree height,
 // calculate the database shape that maximizes the first dimension size under the constraints:
 // (1) fst_dim_sz + l*(num_dims-1) = 2^h

@@ -626,12 +626,10 @@ void PirServer::mod_switch_inplace(seal::Ciphertext &ciphertext, const uint64_t 
   // there are two ciphertext polynomials
   auto* data0 = ciphertext.data(0);
   auto* data1 = ciphertext.data(1);
-  
-  const long double scale = static_cast<double>(q) / static_cast<double>(Q);
-  
+
   for (size_t i = 0; i < DBConsts::PolyDegree; i++) {
-    data0[i] = (uint64_t)std::round((long double)data0[i] * scale);
-    data1[i] = (uint64_t)std::round((long double)data1[i] * scale);
+    data0[i] = utils::rescale(data0[i], Q, q);
+    data1[i] = utils::rescale(data1[i], Q, q);
   }
 }
 

@@ -83,6 +83,12 @@ namespace DBConsts {
       if (CoeffMods[i] > w) w = CoeffMods[i];
     return w;
   }
+
+  // Standard deviation σ of the Gaussian error distribution.
+  // Matches SEAL-For-OnionPIR's noise_standard_deviation default.
+  // Equivalent width parameter (Spiral/Respire convention): σ * sqrt(2π) ≈ 8.02.
+  constexpr double NoiseStdDev = 3.2;
+
 } // namespace DBConsts
 
 // db_coeff_t: type for each NTT coefficient stored in the aligned database.
