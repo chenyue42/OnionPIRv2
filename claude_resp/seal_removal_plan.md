@@ -83,10 +83,33 @@ removed from callers. `seal::Modulus` remains only at SEAL API boundaries
 
 ## Current State
 
-SEAL utility functions are fully gone from production code. What remains is the **core BFV object
-layer**: `seal::Ciphertext`, `seal::Plaintext`, `seal::SecretKey`, `seal::EncryptionParameters`,
-`seal::SEALContext`, `seal::Encryptor`, `seal::Decryptor`, `seal::KeyGenerator`.
-Also: `sample_poly_uniform` / `sample_poly_cbd` in `bv_keyswitch.cpp` (via `seal/util/rlwe.h`).
+SEAL utility functions are fully gone from production code. Steps 11-13 below (noise samplers,
+`RlweCt`/`RlweSk`/`RlwePt` types, `encrypt_zero`/`decrypt`/`gen_secret_key`) are all **done**.
+
+**Recent progress (Phase A, partial):**
+- `utils::rescale(a, inp_mod, out_mod)` — integer-exact centered rescale ported from
+  Spiral `arith.rs:429`. Replaces the FP `round(phase * t / q)` in decryption and the FP
+  `round(v * q_small / q)` in `PirServer::mod_switch_inplace`. Same result mod t, but avoids
+  the upper-edge `q` output quirk of unsigned rounding.
+- `PirParams::get_coeff_modulus()` now returns `const std::vector<uint64_t> &` to a cached
+  member `coeff_modulus_` (populated once in ctor body after `context_` is built, to satisfy
+  the member-init-order rule).
+- `GSWEval::gsw_ntt_forward` (renamed from `gsw_ntt_negacyclic_harvey`) simplified: direct
+  `utils::ntt_fwd` loop over the 2·l rows × 2·rns_mod_cnt limbs.
+- `plain_to_gsw` **consolidated** to a single one-pass function
+  `GSWCiphertext plain_to_gsw(std::vector<uint64_t> const &plaintext, const RlweSk &sk,
+   std::mt19937_64 &rng)` that directly produces the final NTT-form flat layout.
+  Replaces the old 3-pass `plain_to_gsw → plain_to_gsw_one_row → seal_GSW_vec_to_GSW`
+  pipeline. Call sites updated: `PirClient::generate_gsw_from_key`, `test_ext_prod`,
+  `test_ext_prod_mux`.
+- `PirServer::set_client_gsw_key(size_t, GSWCiphertext)` streamlined to a single `std::move`.
+
+**What still uses SEAL objects:**
+- `seal::Ciphertext` (~56 uses): `external_product`, `decomp_rlwe*`, `query_to_gsw`,
+  all server eval paths, client query/decrypt paths, tests.
+- `seal::Plaintext`: decryption output, DB gen.
+- `seal::SecretKey` / `seal::KeyGenerator` / `seal::Encryptor` / `seal::Decryptor`: client only.
+- `seal::EncryptionParameters` / `seal::SEALContext`: `PirParams` holds them; caller binding.
 
 ---
 
@@ -169,18 +192,58 @@ Test: `./Onion-PIR --test rlwe_enc` — encrypt-then-decrypt round-trip for zero
 
 ---
 
-### Step 14 — Replace `seal::Ciphertext` breadth-first (one file per sub-step)
+### Step 14 — Replace `seal::Ciphertext` breadth-first (big-bang, phase-by-phase)
 
-Order: `gsw_eval` → `bv_keyswitch` → `client` → `server` → `pir`
+Because `seal::Ciphertext` flows transitively across `gsw_eval ↔ bv_keyswitch ↔ server ↔ client`,
+a file-by-file swap hits a type-propagation wall (tried once, rolled back). Do it as one
+coordinated series of phases; build only at phase boundaries.
 
+**Conversion rules applied everywhere:**
 - `evaluator_.transform_to_ntt_inplace(ct)` → `for (mod) utils::ntt_fwd(ct.data(i) + mod*N, N, q_mods[mod])`
 - `evaluator_.transform_from_ntt_inplace(ct)` → same with `ntt_inv`
-- `encryptor_.encrypt_zero_symmetric(ct)` → `encrypt_zero(sk, N, q, sigma, rng, ct)`
-- `decryptor_.decrypt(ct, pt)` → `decrypt(ct, sk, N, q, t, pt)`
-- `ct.resize(context, 2)` → `ct.resize(N * rns_mod_cnt)`
-- `parms_id` references → removed (no longer needed)
+- `encryptor_.encrypt_zero_symmetric(ct)` → `encrypt_zero(sk, N, q, sigma, rng, ct, /*ntt=*/...)`
+- `decryptor_.decrypt(ct, pt)` → `decrypt(ct, sk, N, q, t, pt)` (already wired in client)
+- `ct.resize(context, 2)` → `ct.resize(N * rns_mod_cnt)` (resizes both c0 and c1)
+- `parms_id` references → removed
 
-Build + `./Onion-PIR pir` (must stay at 14/14) after each file.
+**Phase A — `gsw_eval` key-generation path (DONE):**
+`plain_to_gsw(plaintext, RlweSk, rng) -> GSWCiphertext` consolidated; `gsw_ntt_forward`
+simplified. `external_product`, `decomp_rlwe*`, `query_to_gsw` still take `seal::Ciphertext`
+(moved to Phase B/C).
+
+**Phase B — `bv_keyswitch` (NEXT):**
+- `bvks::BvKeySwitch::apply_galois_inplace(seal::Ciphertext &ct, ...)` → `RlweCt &ct`
+- `bvks::BvKeySwitch::gen_bv_ks_key(seal::SecretKey, ...)` → takes `const RlweSk &sk` directly;
+  drops `seal::EncryptionParameters` / `seal::SEALContext` params (everything derived from
+  `PirParams` already).
+- Internal `seal::Ciphertext` locals → `RlweCt`.
+- `sample_poly_uniform` / `sample_poly_cbd` (from Step 11) are already replaced.
+
+**Phase C — `server`:**
+- `expand_query`, `fast_expand_qry`, `evaluate_first_dim`, `evaluate_other_dim`,
+  `delay_modulus`, `prep_query`, `make_query`, `mod_switch_inplace`, `ext_prod_mux` →
+  thread `RlweCt`.
+- Drop `seal::Evaluator evaluator_` member; replace each `evaluator_.*` call with the
+  corresponding `utils::` primitive.
+- `gsw_eval`-facing functions (`external_product`, `decomp_rlwe*`, `query_to_gsw`) flip to
+  `RlweCt` in this phase since the server is their primary caller.
+
+**Phase D — `client`:**
+- `PirClient` holds `RlweSk sk_` + `std::mt19937_64 rng_` instead of
+  `seal::SecretKey` / `seal::Encryptor` / `seal::Decryptor` / `seal::KeyGenerator`.
+- Rewrite `generate_query`, `generate_packed_query`, `add_gsw_to_query`, `decrypt_reply`,
+  `decrypt_ct`, `sk_mod_switch`, `init_mod_q_prime`.
+- Remove the `seal::KeyGenerator keygen_` ctor chain.
+
+**Phase E — tests:**
+Update each test to use `RlweCt` / `RlweSk` / direct `encrypt_zero` / `decrypt`:
+`test_pir`, `test_bfv`, `test_serial`, `test_fast_expand`, `test_mod_switch`,
+`test_sk_mod_switch`, `test_batch_decomp`, `test_raw_pt_ct`, `test_decrypt_mod_q`,
+`test_bv_keyswitch`. (`test_ext_prod`, `test_ext_prod_mux`, `test_rlwe_enc` already updated.)
+
+**Phase F — cleanup:**
+Drop remaining `#include "seal/..."` lines; drop `SEAL::seal` from CMakeLists.
+Verify `nm build/Onion-PIR | grep seal` is empty.
 
 ---
 

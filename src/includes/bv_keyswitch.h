@@ -1,7 +1,7 @@
 #pragma once
 
 #include "pir.h"
-#include "seal/seal.h"
+#include "rlwe.h"
 #include <vector>
 #include <cstdint>
 #include <iosfwd>
@@ -80,13 +80,13 @@ public:
 // under secret key `sk`. The secret key must be in NTT form.
 // Error σ is read from pir_params.get_noise_std_dev().
 BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
-                             const seal::SecretKey &sk, uint32_t galois_k,
+                             const RlweSk &sk, uint32_t galois_k,
                              std::mt19937_64 &rng);
 
 // Generate a full set of BV key-switching keys for all expansion-level
 // automorphisms. Error σ is read from pir_params.get_noise_std_dev().
 BvGaloisKeys gen_bv_galois_keys(const PirParams &pir_params,
-                                const seal::SecretKey &sk);
+                                const RlweSk &sk);
 
 // ============================================================================
 // Gadget decomposition
@@ -110,7 +110,7 @@ void signed_gadget_decompose(uint64_t val, size_t base_log2,
 //
 // Only operates on the first rns_mod_cnt limbs (data modulus). Any special
 // prime limbs are left untouched.
-void bv_apply_galois_inplace(seal::Ciphertext &ct, uint32_t galois_k,
+void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
                              const BvKeySwitchKey &key,
                              const PirParams &pir_params);
 

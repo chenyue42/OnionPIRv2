@@ -1,9 +1,11 @@
 #include "server.h"
 #include "gsw_eval.h"
+#include "rlwe.h"
 #include "utils.h"
 #include "matrix.h"
 #include <cassert>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <random>
@@ -434,9 +436,16 @@ PirServer::fast_expand_qry(std::size_t client_id,seal::Ciphertext &ciphertext) c
     seal::Ciphertext c_prime = cts[i];
     const uint32_t galois_k = DBConsts::PolyDegree / k + 1;
     TIME_START(APPLY_GALOIS);
-    bvks::bv_apply_galois_inplace(c_prime, galois_k,
+    constexpr size_t N = DBConsts::PolyDegree;
+    RlweCt c_prime_rlwe;
+    c_prime_rlwe.c0.assign(c_prime.data(0), c_prime.data(0) + N);
+    c_prime_rlwe.c1.assign(c_prime.data(1), c_prime.data(1) + N);
+    c_prime_rlwe.ntt_form = c_prime.is_ntt_form();
+    bvks::bv_apply_galois_inplace(c_prime_rlwe, galois_k,
                                   bv_galois_key.get(galois_k),
                                   pir_params_);
+    std::memcpy(c_prime.data(0), c_prime_rlwe.c0.data(), N * sizeof(uint64_t));
+    std::memcpy(c_prime.data(1), c_prime_rlwe.c1.data(), N * sizeof(uint64_t));
     TIME_END(APPLY_GALOIS);
     TIME_START("add_sub");
     // c_{2i}   =  c_i + c'

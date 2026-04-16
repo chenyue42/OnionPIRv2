@@ -213,7 +213,10 @@ size_t PirClient::create_galois_keys(std::stringstream &galois_key_stream) {
 }
 
 bvks::BvGaloisKeys PirClient::create_bv_galois_keys() {
-  return bvks::gen_bv_galois_keys(pir_params_, secret_key_);
+  constexpr size_t N = DBConsts::PolyDegree;
+  RlweSk rlwe_sk;
+  rlwe_sk.data.assign(secret_key_.data().data(), secret_key_.data().data() + N);
+  return bvks::gen_bv_galois_keys(pir_params_, rlwe_sk);
 }
 
 seal::Plaintext PirClient::decrypt_reply(const seal::Ciphertext& reply) {

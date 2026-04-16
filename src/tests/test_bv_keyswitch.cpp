@@ -1,5 +1,7 @@
 #include "tests.h"
 #include "bv_keyswitch.h"
+#include "rlwe.h"
+#include <cstring>
 #include <random>
 
 // ============================================================================
@@ -109,10 +111,18 @@ void PirTest::test_bv_keyswitch() {
 
   // Now test BV key-switching
   std::mt19937_64 rng(std::random_device{}());
-  auto bv_ksk = bvks::gen_bv_ks_key(pir_params, sk, static_cast<uint32_t>(galois_k), rng);
+  RlweSk rlwe_sk;
+  rlwe_sk.data.assign(sk.data().data(), sk.data().data() + N);
+  auto bv_ksk = bvks::gen_bv_ks_key(pir_params, rlwe_sk, static_cast<uint32_t>(galois_k), rng);
 
   seal::Ciphertext ct_bv = ct;
-  bvks::bv_apply_galois_inplace(ct_bv, galois_k, bv_ksk, pir_params);
+  RlweCt ct_bv_rlwe;
+  ct_bv_rlwe.c0.assign(ct_bv.data(0), ct_bv.data(0) + N);
+  ct_bv_rlwe.c1.assign(ct_bv.data(1), ct_bv.data(1) + N);
+  ct_bv_rlwe.ntt_form = ct_bv.is_ntt_form();
+  bvks::bv_apply_galois_inplace(ct_bv_rlwe, galois_k, bv_ksk, pir_params);
+  std::memcpy(ct_bv.data(0), ct_bv_rlwe.c0.data(), N * sizeof(uint64_t));
+  std::memcpy(ct_bv.data(1), ct_bv_rlwe.c1.data(), N * sizeof(uint64_t));
   std::cout << "BV galois noise budget: " << decryptor.invariant_noise_budget(ct_bv) << " bits\n" << std::flush;
   seal::Plaintext dec_bv;
   decryptor.decrypt(ct_bv, dec_bv);

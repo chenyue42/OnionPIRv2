@@ -2,7 +2,6 @@
 #include "database_constants.h"
 #include "utils.h"
 #include "hexl/hexl.hpp"
-#include "seal/seal.h"
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
@@ -140,24 +139,19 @@ void BvGaloisKeys::load(std::istream &stream) {
 // ----------------------------------------------------------------------------
 
 BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
-                             const seal::SecretKey &sk, uint32_t galois_k,
+                             const RlweSk &sk, uint32_t galois_k,
                              std::mt19937_64 &rng) {
   const double sigma = pir_params.get_noise_std_dev();
-  const auto context = pir_params.get_context();
-  const auto &ctx_data = *context.key_context_data();
-  const auto &parms = ctx_data.parms();
   const size_t rns_mod_cnt = pir_params.get_rns_mod_cnt();
-  const size_t N = parms.poly_modulus_degree();
+  constexpr size_t N = DBConsts::PolyDegree;
 
-  if (rns_mod_cnt != 1) {
-    throw std::runtime_error(
-        "BV key-switch currently supports only single RNS limb (rns_mod_cnt == 1)");
-  }
-  const uint64_t q_val = parms.coeff_modulus()[0].value();
+  assert(rns_mod_cnt == 1 &&
+         "BV key-switch currently supports only single RNS limb (rns_mod_cnt == 1)");
+  const uint64_t q_val = pir_params.get_coeff_modulus()[0];
   const size_t base_log2 = bv_base_log2(pir_params);
 
   // sk is stored in NTT form across all primes. First N coeffs = first limb.
-  const uint64_t *sk_ptr = sk.data().data();
+  const uint64_t *sk_ptr = sk.data.data();
 
   // Compute sigma_k(s) = s(x^k) in NTT form under the data modulus.
   std::vector<uint64_t> sigma_s(N);
@@ -198,10 +192,10 @@ BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
 }
 
 BvGaloisKeys gen_bv_galois_keys(const PirParams &pir_params,
-                                const seal::SecretKey &sk) {
+                                const RlweSk &sk) {
   BvGaloisKeys result;
   const size_t expan_height = pir_params.get_expan_height();
-  const size_t N = pir_params.get_seal_params().poly_modulus_degree();
+  constexpr size_t N = DBConsts::PolyDegree;
 
   std::mt19937_64 rng(std::random_device{}());
 
@@ -218,25 +212,18 @@ BvGaloisKeys gen_bv_galois_keys(const PirParams &pir_params,
 // Server-side apply
 // ----------------------------------------------------------------------------
 
-void bv_apply_galois_inplace(seal::Ciphertext &ct, uint32_t galois_k,
+void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
                              const BvKeySwitchKey &key,
                              const PirParams &pir_params) {
   assert(key.galois_k == galois_k);
-  // BFV ciphertexts in SEAL are in coefficient form (is_ntt_form = false).
-  assert(!ct.is_ntt_form());
+  // BFV ciphertexts are in coefficient form (is_ntt_form = false).
+  assert(!ct.ntt_form);
 
-  const auto context = pir_params.get_context();
-  const auto &ctx_data = *context.get_context_data(ct.parms_id());
-  const auto &parms = ctx_data.parms();
-  const auto &coeff_modulus = parms.coeff_modulus();
-  const size_t N = parms.poly_modulus_degree();
+  constexpr size_t N = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params.get_rns_mod_cnt();
-  if (rns_mod_cnt != 1) {
-    throw std::runtime_error(
-        "bv_apply_galois_inplace currently supports only single RNS limb");
-  }
-  const auto &mod = coeff_modulus[0];
-  const uint64_t q_val = mod.value();
+  assert(rns_mod_cnt == 1 &&
+         "bv_apply_galois_inplace currently supports only single RNS limb");
+  const uint64_t q_val = pir_params.get_coeff_modulus()[0];
   const size_t base_log2 = bv_base_log2(pir_params);
 
   // Step 1: apply automorphism to (c0, c1) in coefficient form.
