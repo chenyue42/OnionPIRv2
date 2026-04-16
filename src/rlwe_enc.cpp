@@ -68,3 +68,55 @@ void decrypt(const RlweCt &ct, const RlweSk &sk, size_t N, uint64_t q,
     pt.data[i] = utils::rescale(phase[i], q, t);
   }
 }
+
+void rlwe_add_inplace(RlweCt &a, const RlweCt &b, uint64_t q) {
+  const size_t n = a.poly_size();
+  intel::hexl::EltwiseAddMod(a.c0.data(), a.c0.data(), b.c0.data(), n, q);
+  intel::hexl::EltwiseAddMod(a.c1.data(), a.c1.data(), b.c1.data(), n, q);
+}
+
+void rlwe_sub_inplace(RlweCt &a, const RlweCt &b, uint64_t q) {
+  const size_t n = a.poly_size();
+  intel::hexl::EltwiseSubMod(a.c0.data(), a.c0.data(), b.c0.data(), n, q);
+  intel::hexl::EltwiseSubMod(a.c1.data(), a.c1.data(), b.c1.data(), n, q);
+}
+
+void rlwe_add(const RlweCt &a, const RlweCt &b, RlweCt &c, uint64_t q) {
+  const size_t n = a.poly_size();
+  c.c0.resize(n);
+  c.c1.resize(n);
+  intel::hexl::EltwiseAddMod(c.c0.data(), a.c0.data(), b.c0.data(), n, q);
+  intel::hexl::EltwiseAddMod(c.c1.data(), a.c1.data(), b.c1.data(), n, q);
+  c.ntt_form = a.ntt_form;
+}
+
+void rlwe_sub(const RlweCt &a, const RlweCt &b, RlweCt &c, uint64_t q) {
+  const size_t n = a.poly_size();
+  c.c0.resize(n);
+  c.c1.resize(n);
+  intel::hexl::EltwiseSubMod(c.c0.data(), a.c0.data(), b.c0.data(), n, q);
+  intel::hexl::EltwiseSubMod(c.c1.data(), a.c1.data(), b.c1.data(), n, q);
+  c.ntt_form = a.ntt_form;
+}
+
+void rlwe_ntt_fwd_inplace(RlweCt &ct, uint64_t q, size_t N) {
+  utils::ntt_fwd(ct.c0.data(), N, q);
+  utils::ntt_fwd(ct.c1.data(), N, q);
+  ct.ntt_form = true;
+}
+
+void rlwe_ntt_inv_inplace(RlweCt &ct, uint64_t q, size_t N) {
+  utils::ntt_inv(ct.c0.data(), N, q);
+  utils::ntt_inv(ct.c1.data(), N, q);
+  ct.ntt_form = false;
+}
+
+void rlwe_shift(const RlweCt &src, RlweCt &dst, size_t index, uint64_t q, size_t N) {
+  if (&dst != &src) {
+    dst.c0.resize(N);
+    dst.c1.resize(N);
+    dst.ntt_form = src.ntt_form;
+  }
+  utils::negacyclic_shift_poly_coeffmod(src.c0.data(), N, index, q, dst.c0.data());
+  utils::negacyclic_shift_poly_coeffmod(src.c1.data(), N, index, q, dst.c1.data());
+}

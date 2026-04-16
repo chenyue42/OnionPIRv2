@@ -3,6 +3,8 @@
 #include "pir.h"
 #include "gsw_eval.h"
 #include "bv_keyswitch.h"
+#include "rlwe.h"
+#include <random>
 
 class PirClient {
 public:
@@ -72,6 +74,8 @@ private:
   seal::Decryptor decryptor_;
   seal::Encryptor encryptor_;
   seal::Evaluator evaluator_;
+  RlweSk rlwe_sk_;            // ternary sk, NTT form under q (mirrors secret_key_)
+  std::mt19937_64 rng_;       // per-client PRNG for noise sampling
   std::vector<uint64_t> sk_ntt_small_q_; // secret key in NTT form under small_q
   seal::SEALContext context_mod_q_prime_;
   

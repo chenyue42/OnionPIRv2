@@ -27,8 +27,8 @@ void GSWEval::gsw_ntt_forward(GSWCiphertext &gsw) {
   }
 }
 
-void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext const &bfv,
-                              seal::Ciphertext &res_ct,
+void GSWEval::external_product(GSWCiphertext const &gsw_enc, RlweCt const &bfv,
+                              RlweCt &res_ct,
                               LogContext context) {
 
   // ============================ Logging ============================
@@ -101,7 +101,7 @@ void GSWEval::external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext co
   res_ct.is_ntt_form() = true;  // the result of two NTT form polynomials is still in NTT form.
 }
 
-void GSWEval::decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output,
+void GSWEval::decomp_rlwe(RlweCt const &ct, std::vector<std::vector<uint64_t>> &output,
                          LogContext context) {
   // ============================ Logging ============================
   const char* extern_compose_log_key;
@@ -183,7 +183,7 @@ void GSWEval::decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<ui
   }
 }
 
-void GSWEval::decomp_rlwe_single_mod(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output,
+void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<uint64_t>> &output,
                                    LogContext context) {
   // ============================ Logging ============================
   const char* right_shift_log_key;
@@ -255,7 +255,7 @@ void GSWEval::decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,
   TIME_END(extern_ntt_log_key);
 }
 
-void GSWEval::query_to_gsw(std::vector<seal::Ciphertext> query, GSWCiphertext gsw_key,
+void GSWEval::query_to_gsw(std::vector<RlweCt> query, GSWCiphertext gsw_key,
                            GSWCiphertext &output) {
   const size_t curr_l = query.size();
   output.resize(curr_l);

@@ -52,11 +52,26 @@ void PirTest::test_fast_expand_query() {
 
   // ============= Expand the query ==============
   auto fast_exp_q = server.fast_expand_qry(client_id, fast_query);
-  BENCH_PRINT("fast_exp_q noise budget: " << client.noise_budget(fast_exp_q[query_idx % fst_dim_sz]) << " bits");
+
+  // Bridge RlweCt -> seal::Ciphertext (single-mod)
+  auto to_seal = [&](const RlweCt &src) {
+    seal::Ciphertext r(context_);
+    r.resize(context_, 2);
+    std::copy(src.c0.begin(), src.c0.begin() + coeff_count, r.data(0));
+    std::copy(src.c1.begin(), src.c1.begin() + coeff_count, r.data(1));
+    r.is_ntt_form() = src.ntt_form;
+    return r;
+  };
+
+  {
+    seal::Ciphertext tmp = to_seal(fast_exp_q[query_idx % fst_dim_sz]);
+    BENCH_PRINT("fast_exp_q noise budget: " << client.noise_budget(tmp) << " bits");
+  }
 
   std::vector<seal::Plaintext> fast_exp_pt;
   for (size_t i = 0; i < useful_cnt; i++) {
-    fast_exp_pt.push_back(client.decrypt_ct(fast_exp_q[i]));
+    seal::Ciphertext tmp = to_seal(fast_exp_q[i]);
+    fast_exp_pt.push_back(client.decrypt_ct(tmp));
   }
   BENCH_PRINT("fast Expanded query: " << fast_exp_pt[query_idx % fst_dim_sz].to_string());
 }

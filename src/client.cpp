@@ -15,24 +15,23 @@ PirClient::PirClient(const PirParams &pir_params)
       context_(pir_params.get_seal_params()), keygen_(context_),
       secret_key_(keygen_.secret_key()), decryptor_(context_, secret_key_),
       encryptor_(context_, secret_key_), evaluator_(context_),
-      context_mod_q_prime_(init_mod_q_prime()) {}
+      rng_(std::random_device{}()),
+      context_mod_q_prime_(init_mod_q_prime()) {
+  // Mirror SEAL secret_key_ into RlweSk (NTT form under q).
+  constexpr size_t N = DBConsts::PolyDegree;
+  rlwe_sk_.data.assign(secret_key_.data().data(), secret_key_.data().data() + N);
+}
 
 GSWCiphertext PirClient::generate_gsw_from_key() {
   constexpr size_t N = DBConsts::PolyDegree;
   const uint64_t q = pir_params_.get_coeff_modulus()[0];
 
   // Pull sk into coefficient form (it is stored in NTT form under q).
-  std::vector<uint64_t> sk_coef(secret_key_.data().data(),
-                                secret_key_.data().data() + N);
+  std::vector<uint64_t> sk_coef(rlwe_sk_.data.begin(), rlwe_sk_.data.end());
   utils::ntt_inv(sk_coef.data(), N, q);
 
-  // Wrap sk in NTT form as an RlweSk for encrypt_zero.
-  RlweSk rlwe_sk;
-  rlwe_sk.data.assign(secret_key_.data().data(), secret_key_.data().data() + N);
-
-  std::mt19937_64 rng(std::random_device{}());
   GSWEval key_gsw(pir_params_, pir_params_.get_l_key(), pir_params_.get_base_log2_key());
-  return key_gsw.plain_to_gsw(sk_coef, rlwe_sk, rng);
+  return key_gsw.plain_to_gsw(sk_coef, rlwe_sk_, rng_);
 }
 
 
@@ -213,10 +212,7 @@ size_t PirClient::create_galois_keys(std::stringstream &galois_key_stream) {
 }
 
 bvks::BvGaloisKeys PirClient::create_bv_galois_keys() {
-  constexpr size_t N = DBConsts::PolyDegree;
-  RlweSk rlwe_sk;
-  rlwe_sk.data.assign(secret_key_.data().data(), secret_key_.data().data() + N);
-  return bvks::gen_bv_galois_keys(pir_params_, rlwe_sk);
+  return bvks::gen_bv_galois_keys(pir_params_, rlwe_sk_);
 }
 
 seal::Plaintext PirClient::decrypt_reply(const seal::Ciphertext& reply) {

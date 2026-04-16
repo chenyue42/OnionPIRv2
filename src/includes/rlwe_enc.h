@@ -26,3 +26,21 @@ void encrypt_zero(const RlweSk &sk, size_t N, uint64_t q, double sigma,
 // ct may be in either NTT or coefficient form (determined by ct.ntt_form).
 void decrypt(const RlweCt &ct, const RlweSk &sk, size_t N, uint64_t q,
              uint64_t t, RlwePt &pt);
+
+// ---------------------------------------------------------------------------
+// RlweCt arithmetic (single-modulus). All operands must be the same NTT form;
+// caller upholds the invariant (no runtime check on the hot path).
+// ---------------------------------------------------------------------------
+
+void rlwe_add_inplace(RlweCt &a, const RlweCt &b, uint64_t q);
+void rlwe_sub_inplace(RlweCt &a, const RlweCt &b, uint64_t q);
+void rlwe_add(const RlweCt &a, const RlweCt &b, RlweCt &c, uint64_t q);
+void rlwe_sub(const RlweCt &a, const RlweCt &b, RlweCt &c, uint64_t q);
+
+// NTT forward/inverse on both polynomials. Updates ct.ntt_form.
+void rlwe_ntt_fwd_inplace(RlweCt &ct, uint64_t q, size_t N);
+void rlwe_ntt_inv_inplace(RlweCt &ct, uint64_t q, size_t N);
+
+// Negacyclic shift by `index` of each polynomial (coefficient form only).
+// dst may alias src.
+void rlwe_shift(const RlweCt &src, RlweCt &dst, size_t index, uint64_t q, size_t N);

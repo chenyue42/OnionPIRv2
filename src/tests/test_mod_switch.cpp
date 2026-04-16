@@ -30,16 +30,29 @@ void PirTest::test_mod_switch() {
   seal::Ciphertext ct;
   encryptor_.encrypt_symmetric(pt, ct);
   BENCH_PRINT("Noise budget before: " << decryptor_.invariant_noise_budget(ct));
-  server.mod_switch_inplace(ct, small_q);
-  result = client.decrypt_mod_q(ct, small_q);
+
+  // Bridge seal::Ciphertext -> RlweCt for mod_switch_inplace
+  RlweCt rlwe_ct;
+  rlwe_ct.c0.assign(ct.data(0), ct.data(0) + coeff_count);
+  rlwe_ct.c1.assign(ct.data(1), ct.data(1) + coeff_count);
+  rlwe_ct.ntt_form = ct.is_ntt_form();
+  server.mod_switch_inplace(rlwe_ct, small_q);
+
+  // Bridge back for decrypt_mod_q
+  seal::Ciphertext ct_small(context_);
+  ct_small.resize(context_, 2);
+  std::copy(rlwe_ct.c0.begin(), rlwe_ct.c0.begin() + coeff_count, ct_small.data(0));
+  std::copy(rlwe_ct.c1.begin(), rlwe_ct.c1.begin() + coeff_count, ct_small.data(1));
+  ct_small.is_ntt_form() = rlwe_ct.ntt_form;
+  result = client.decrypt_mod_q(ct_small, small_q);
   BENCH_PRINT("Client decrypted: " << result.to_string());
 
   // verify if ct coeffs are all less than small_q
   bool can_compress = true; // if so, then we can use 32 bits to store the coeffs.
   for (size_t i = 0; i < coeff_count; i++) {
-    if (ct.data()[i] >= small_q) {
-      BENCH_PRINT("ct.data()[i] = " << ct.data()[i]);
-      BENCH_PRINT("ct.data()[i] >= small_q");
+    if (rlwe_ct.c0[i] >= small_q) {
+      BENCH_PRINT("rlwe_ct.c0[" << i << "] = " << rlwe_ct.c0[i]);
+      BENCH_PRINT("coeff >= small_q");
     }
   }
   BENCH_PRINT("can_compress: " << can_compress);

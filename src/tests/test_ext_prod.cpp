@@ -41,26 +41,49 @@ void PirTest::test_external_product() {
   seal::Plaintext a(coeff_count), result;
   const uint64_t t = pir_params.get_plain_mod();
   a[0] = t / 2 + 1; a[1] = t / 2 + 2; a[2] = t / 2 + 3;
-  seal::Ciphertext a_encrypted;
-  encryptor_.encrypt_symmetric(a, a_encrypted);
+  seal::Ciphertext a_seal;
+  encryptor_.encrypt_symmetric(a, a_seal);
+
+  // Bridge seal::Ciphertext -> RlweCt (single-mod)
+  RlweCt a_encrypted;
+  a_encrypted.c0.assign(a_seal.data(0), a_seal.data(0) + coeff_count);
+  a_encrypted.c1.assign(a_seal.data(1), a_seal.data(1) + coeff_count);
+  a_encrypted.ntt_form = a_seal.is_ntt_form();
+
+  auto to_seal = [&](const RlweCt &src) {
+    seal::Ciphertext r(context_);
+    r.resize(context_, 2);
+    std::copy(src.c0.begin(), src.c0.begin() + coeff_count, r.data(0));
+    std::copy(src.c1.begin(), src.c1.begin() + coeff_count, r.data(1));
+    r.is_ntt_form() = src.ntt_form;
+    return r;
+  };
 
   // ================== Test external product ==================
   // external product: BFV(a) * RGSW(1) = BFV(a * 1) = BFV(a)
-  seal::Ciphertext ext_prod_result(context_);
-  ext_prod_result.resize(2);
+  RlweCt ext_prod_result;
+  ext_prod_result.resize(coeff_count);
   data_gsw.external_product(one_gsw, a_encrypted, ext_prod_result, LogContext::GENERIC);
-  evaluator_.transform_from_ntt_inplace(ext_prod_result); // the output is in NTT form. Transform it back.
-  decryptor_.decrypt(ext_prod_result, result);
-  BENCH_PRINT("BFV(a) * RGSW(1) = " << result.to_string());
-  BENCH_PRINT("Noise budget: " << decryptor_.invariant_noise_budget(ext_prod_result));
+  ext_prod_result.ntt_form = true;
+  rlwe_ntt_inv_inplace(ext_prod_result, q, coeff_count); // output was in NTT form
+  {
+    seal::Ciphertext tmp = to_seal(ext_prod_result);
+    decryptor_.decrypt(tmp, result);
+    BENCH_PRINT("BFV(a) * RGSW(1) = " << result.to_string());
+    BENCH_PRINT("Noise budget: " << decryptor_.invariant_noise_budget(tmp));
+  }
   PRINT_BAR;
 
   // external product: BFV(a) * RGSW(0) = BFV(a * 0) = BFV(0)
   data_gsw.external_product(zero_gsw, a_encrypted, ext_prod_result, LogContext::GENERIC);
-  evaluator_.transform_from_ntt_inplace(ext_prod_result);
-  decryptor_.decrypt(ext_prod_result, result);
-  BENCH_PRINT("BFV(a) * RGSW(0) = " << result.to_string());
-  BENCH_PRINT("Noise budget: " << decryptor_.invariant_noise_budget(ext_prod_result));
+  ext_prod_result.ntt_form = true;
+  rlwe_ntt_inv_inplace(ext_prod_result, q, coeff_count);
+  {
+    seal::Ciphertext tmp = to_seal(ext_prod_result);
+    decryptor_.decrypt(tmp, result);
+    BENCH_PRINT("BFV(a) * RGSW(0) = " << result.to_string());
+    BENCH_PRINT("Noise budget: " << decryptor_.invariant_noise_budget(tmp));
+  }
   PRINT_BAR;
 
   // external product: BFV(a) * RGSW(1) for 100 times

@@ -31,8 +31,8 @@ class GSWEval {
       @param ct_poly_size - number of ciphertext polynomials
       @param res_ct - output ciphertext
     */
-    void external_product(GSWCiphertext const &gsw_enc, seal::Ciphertext const &bfv,
-                          seal::Ciphertext &res_ct,
+    void external_product(GSWCiphertext const &gsw_enc, RlweCt const &bfv,
+                          RlweCt &res_ct,
                           LogContext context = LogContext::GENERIC);
 
     /*!
@@ -44,11 +44,11 @@ class GSWEval {
       @param output - output to store the decomposed ciphertext as a vector of
       vectors of polynomial coefficients
     */
-    void decomp_rlwe(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output,
+    void decomp_rlwe(RlweCt const &ct, std::vector<std::vector<uint64_t>> &output,
                          LogContext context = LogContext::GENERIC);
 
     // Similar to decomp_rlwe. Use this when rn_mod_cnt = 1. It avoids RNS decomposition and uses faster right shift.
-    void decomp_rlwe_single_mod(seal::Ciphertext const &ct, std::vector<std::vector<uint64_t>> &output,
+    void decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<uint64_t>> &output,
                                    LogContext context = LogContext::GENERIC);
 
     // Transform decomposed coefficients to NTT form
@@ -63,7 +63,7 @@ class GSWEval {
       @param output - output to store the GSW ciphertext as a vector of vectors of
       polynomial coefficients
     */
-    void query_to_gsw(std::vector<seal::Ciphertext> query, GSWCiphertext gsw_key,
+    void query_to_gsw(std::vector<RlweCt> query, GSWCiphertext gsw_key,
                       GSWCiphertext &output);
 
     /*!
