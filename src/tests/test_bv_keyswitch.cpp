@@ -1,7 +1,7 @@
 #include "tests.h"
 #include "bv_keyswitch.h"
 #include "rlwe.h"
-#include <cstring>
+#include "utils.h"
 #include <random>
 
 // ============================================================================
@@ -11,14 +11,10 @@ static void test_signed_decompose() {
   std::cout << "--- test_signed_decompose ---\n";
 
   PirParams pir_params;
-  const size_t q_bits = pir_params.get_ct_mod_width(); // e.g. 56
+  const size_t q_bits = pir_params.get_ct_mod_width();
   const size_t base_log2 = (q_bits + bvks::L_KS - 1) / bvks::L_KS;
   const uint64_t B = uint64_t(1) << base_log2;
-
-  // Get the actual modulus value from SEAL params
-  auto context = pir_params.get_context();
-  const auto &ctx_data = *context.key_context_data();
-  const uint64_t q = ctx_data.parms().coeff_modulus()[0].value();
+  const uint64_t q = pir_params.get_coeff_modulus()[0];
   const uint64_t half_q = q >> 1;
 
   std::mt19937_64 rng(42);
@@ -30,7 +26,7 @@ static void test_signed_decompose() {
     uint64_t digits[bvks::L_KS];
     bvks::signed_gadget_decompose(val, base_log2, q, digits, bvks::L_KS);
 
-    // 1. Check reconstruction: Σ digits[i] * B^i ≡ val (mod q)
+    // 1. Reconstruction: Σ digits[i] * B^i ≡ val (mod q)
     uint128_t reconstructed = 0;
     uint128_t Bi = 1;
     for (size_t i = 0; i < bvks::L_KS; ++i) {
@@ -43,9 +39,8 @@ static void test_signed_decompose() {
       return;
     }
 
-    // 2. Check that each digit is small (signed magnitude ≤ B/2)
+    // 2. Each digit has signed magnitude ≤ B/2
     for (size_t i = 0; i < bvks::L_KS; ++i) {
-      // Interpret digit mod q as signed: if > q/2, it's negative
       uint64_t mag = (digits[i] > half_q) ? (q - digits[i]) : digits[i];
       if (mag > max_digit_mag) max_digit_mag = mag;
       if (mag > B / 2) {
@@ -63,73 +58,68 @@ static void test_signed_decompose() {
 
 // ============================================================================
 // Unit test: BV key-switching correctness
+//
+// Encrypt a known plaintext, apply the galois automorphism σ_k via BV
+// key-switching, decrypt natively, and verify the result matches the
+// automorphism applied directly to the plaintext.
 // ============================================================================
 void PirTest::test_bv_keyswitch() {
   test_signed_decompose();
   print_func_name(__FUNCTION__);
 
   PirParams pir_params;
-  auto context = pir_params.get_context();
-  auto keygen = seal::KeyGenerator(context);
-  auto sk = keygen.secret_key();
-  seal::PublicKey pk;
-  keygen.create_public_key(pk);
-  auto encryptor = seal::Encryptor(context, pk);
-  auto decryptor = seal::Decryptor(context, sk);
-  auto evaluator = seal::Evaluator(context);
-  constexpr size_t N = DBConsts::PolyDegree;
+  constexpr size_t N  = DBConsts::PolyDegree;
+  const uint64_t q    = pir_params.get_coeff_modulus()[0];
+  const uint64_t t    = pir_params.get_plain_mod();
+  const double sigma  = pir_params.get_noise_std_dev();
+  const uint32_t galois_k = 513;
 
-  seal::Plaintext plain(N);
-  plain[0] = 1;
-  plain[1] = 2;
-  plain[2] = 3;
-  plain[10] = 10;
-  plain[11] = 11;
-  plain[12] = 12;
-
-  size_t galois_k = 513;
-
-  seal::Ciphertext ct;
-  encryptor.encrypt(plain, ct);
-  std::cout << "noise budget: " << decryptor.invariant_noise_budget(ct) << " bits\n" << std::flush;
-
-  // Decrypt to verify
-  seal::Plaintext dec_plain;
-  decryptor.decrypt(ct, dec_plain);
-  std::cout << "Decrypted: " << dec_plain.to_string().substr(0, 50) << "\n" << std::flush;
-
-  // Test with SEAL's apply_galois for comparison
-  std::vector<uint32_t> galois_elts = {static_cast<uint32_t>(galois_k)};
-  seal::GaloisKeys seal_galois_keys;
-  keygen.create_galois_keys(galois_elts, seal_galois_keys);
-  seal::Ciphertext ct_seal = ct;
-  evaluator.apply_galois_inplace(ct_seal, galois_k, seal_galois_keys);
-  std::cout << "SEAL galois noise budget: " << decryptor.invariant_noise_budget(ct_seal) << " bits\n" << std::flush;
-  seal::Plaintext dec_seal;
-  decryptor.decrypt(ct_seal, dec_seal);
-  std::cout << "SEAL galois: " << dec_seal.to_string().substr(0, 50) << "\n" << std::flush;
-
-  // Now test BV key-switching
   std::mt19937_64 rng(std::random_device{}());
-  RlweSk rlwe_sk;
-  rlwe_sk.data.assign(sk.data().data(), sk.data().data() + N);
-  auto bv_ksk = bvks::gen_bv_ks_key(pir_params, rlwe_sk, static_cast<uint32_t>(galois_k), rng);
+  RlweSk sk = gen_secret_key(N, q, rng);
 
-  seal::Ciphertext ct_bv = ct;
-  RlweCt ct_bv_rlwe;
-  ct_bv_rlwe.c0.assign(ct_bv.data(0), ct_bv.data(0) + N);
-  ct_bv_rlwe.c1.assign(ct_bv.data(1), ct_bv.data(1) + N);
-  ct_bv_rlwe.ntt_form = ct_bv.is_ntt_form();
-  bvks::bv_apply_galois_inplace(ct_bv_rlwe, galois_k, bv_ksk, pir_params);
-  std::memcpy(ct_bv.data(0), ct_bv_rlwe.c0.data(), N * sizeof(uint64_t));
-  std::memcpy(ct_bv.data(1), ct_bv_rlwe.c1.data(), N * sizeof(uint64_t));
-  std::cout << "BV galois noise budget: " << decryptor.invariant_noise_budget(ct_bv) << " bits\n" << std::flush;
-  seal::Plaintext dec_bv;
-  decryptor.decrypt(ct_bv, dec_bv);
-  std::cout << "BV galois: " << dec_bv.to_string().substr(0, 50) << "\n" << std::flush;
+  // Build a plaintext with a few distinctive coefficients.
+  std::vector<uint64_t> pt(N, 0);
+  pt[0] = 1; pt[1] = 2; pt[2] = 3;
+  pt[10] = 10; pt[11] = 11; pt[12] = 12;
 
-  // Check coefficients
-  bool match = (dec_seal.to_string() == dec_bv.to_string());
-  if (match) std::cout << "PASS: BV key-switch matches SEAL\n";
-  else std::cout << "FAIL: BV key-switch does not match SEAL\n";
+  // Encrypt (coeff form).
+  RlweCt ct;
+  encrypt_bfv(pt, sk, N, q, t, sigma, rng, ct);
+
+  {
+    RlwePt dec;
+    int budget = decrypt_and_budget(ct, sk, N, q, t, dec);
+    std::cout << "fresh noise budget: " << budget << " bits\n" << std::flush;
+    BENCH_PRINT("fresh decrypt[0..2]: " << dec.data[0] << ", " << dec.data[1] << ", " << dec.data[2]);
+  }
+
+  // Expected result after σ_k: apply automorphism to the plaintext directly.
+  std::vector<uint64_t> pt_auto(N, 0);
+  utils::automorphism_coeff(pt.data(), N, galois_k, t, pt_auto.data());
+
+  // bv_apply_galois_inplace expects a coefficient-form ciphertext.
+  auto bv_ksk = bvks::gen_bv_ks_key(pir_params, sk, galois_k, rng);
+  bvks::bv_apply_galois_inplace(ct, galois_k, bv_ksk, pir_params);
+
+  RlwePt dec_bv;
+  int bv_budget = decrypt_and_budget(ct, sk, N, q, t, dec_bv);
+  std::cout << "BV galois noise budget: " << bv_budget << " bits\n" << std::flush;
+  BENCH_PRINT("BV galois decrypt[0..2]: " << dec_bv.data[0] << ", " << dec_bv.data[1] << ", " << dec_bv.data[2]);
+
+  // Compare against expected automorphism of the plaintext.
+  size_t diffs = 0;
+  for (size_t i = 0; i < N; i++) {
+    if (dec_bv.data[i] != pt_auto[i]) {
+      if (diffs < 5) {
+        std::cout << "  [" << i << "] expected=" << pt_auto[i]
+                  << "  got=" << dec_bv.data[i] << "\n";
+      }
+      ++diffs;
+    }
+  }
+  if (diffs == 0) {
+    std::cout << "PASS: BV key-switch matches native automorphism of plaintext\n";
+  } else {
+    std::cout << "FAIL: " << diffs << " / " << N << " coefficients differ\n";
+  }
 }

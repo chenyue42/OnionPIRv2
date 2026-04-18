@@ -4,6 +4,88 @@
 #include "bv_keyswitch.h"
 #include <cassert>
 #include <cstring>
+#include <stdexcept>
+
+namespace {
+
+// Native RNS ↔ multi-precision conversions (CRT), replacing
+// seal::util::RNSBase::compose_array / decompose_array. Only K=2 is actually
+// reached by any of our configs (CoeffMods contains at most 3 entries, the
+// last being the "special" modulus that is excluded from the RNS base).
+// A K=1 call is a no-op since the layout already matches.
+
+// RNS → multi-precision, in-place.
+// Before: buf[i*N + k] = coeff_k mod q_i, for i in [0, K), k in [0, N).
+// After:  buf[k*K + i] = limb_i (little-endian) of the CRT composition.
+void compose_rns_to_mp(uint64_t *buf, size_t N,
+                       const std::vector<uint64_t> &moduli, size_t K) {
+  if (K <= 1) return;
+  if (K != 2) {
+    throw std::runtime_error("compose_rns_to_mp: only K=1 or K=2 supported");
+  }
+  const uint64_t q0 = moduli[0];
+  const uint64_t q1 = moduli[1];
+  uint64_t q0_inv_mod_q1 = 0;
+  if (!utils::try_invert_uint_mod(q0 % q1, q1, q0_inv_mod_q1)) {
+    throw std::runtime_error("compose_rns_to_mp: moduli not coprime");
+  }
+
+  // Snapshot the two RNS rows; transpose then overwrites buf in K=2 layout.
+  std::vector<uint64_t> r0(buf + 0 * N, buf + 0 * N + N);
+  std::vector<uint64_t> r1(buf + 1 * N, buf + 1 * N + N);
+
+  for (size_t k = 0; k < N; k++) {
+    const uint64_t r0k = r0[k];
+    const uint64_t r1k = r1[k];
+    // diff = (r1 - (r0 mod q1)) mod q1
+    const uint64_t r0_mod_q1 = r0k % q1;
+    const uint64_t diff = (r1k + q1 - r0_mod_q1) % q1;
+    // s = diff * q0^{-1} mod q1; s ∈ [0, q1)
+    const uint64_t s = static_cast<uint64_t>(
+        (static_cast<uint128_t>(diff) * q0_inv_mod_q1) % q1);
+    // x = r0 + q0 * s  fits in 128 bits since q0 * s < q0 * q1.
+    const uint128_t x = static_cast<uint128_t>(q0) * s + r0k;
+    buf[k * 2 + 0] = static_cast<uint64_t>(x);
+    buf[k * 2 + 1] = static_cast<uint64_t>(x >> 64);
+  }
+}
+
+// Multi-precision → RNS, in-place.
+// Before: buf[k*K + i] = limb_i (little-endian) of a K-limb integer.
+// After:  buf[i*N + k] = value_k mod q_i.
+void decompose_mp_to_rns(uint64_t *buf, size_t N,
+                         const std::vector<uint64_t> &moduli, size_t K) {
+  if (K <= 1) return;
+  if (K != 2) {
+    throw std::runtime_error("decompose_mp_to_rns: only K=1 or K=2 supported");
+  }
+  const uint64_t q0 = moduli[0];
+  const uint64_t q1 = moduli[1];
+  const uint64_t r64_mod_q0 =
+      static_cast<uint64_t>((static_cast<uint128_t>(1) << 64) % q0);
+  const uint64_t r64_mod_q1 =
+      static_cast<uint64_t>((static_cast<uint128_t>(1) << 64) % q1);
+
+  std::vector<uint64_t> lo(N), hi(N);
+  for (size_t k = 0; k < N; k++) {
+    lo[k] = buf[k * 2 + 0];
+    hi[k] = buf[k * 2 + 1];
+  }
+
+  for (size_t k = 0; k < N; k++) {
+    const uint64_t L = lo[k];
+    const uint64_t H = hi[k];
+    // x mod q = ((H mod q) * (2^64 mod q) + (L mod q)) mod q.
+    const uint64_t m0 = static_cast<uint64_t>(
+        (static_cast<uint128_t>(H % q0) * r64_mod_q0 + (L % q0)) % q0);
+    const uint64_t m1 = static_cast<uint64_t>(
+        (static_cast<uint128_t>(H % q1) * r64_mod_q1 + (L % q1)) % q1);
+    buf[0 * N + k] = m0;
+    buf[1 * N + k] = m1;
+  }
+}
+
+} // namespace
 
 // Here we compute a cross product between the transpose of the decomposed BFV
 // (a 2l vector of polynomials) and the GSW ciphertext (a 2lx2 matrix of
@@ -131,19 +213,17 @@ void GSWEval::decomp_rlwe(RlweCt const &ct, std::vector<std::vector<uint64_t>> &
   constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt();
-  const auto &context_data = pir_params_.get_context().first_context_data();
-  seal::util::RNSBase *rns_base = context_data->rns_tool()->base_q();
-  auto pool = seal::MemoryManager::GetPool();
   std::vector<uint64_t> ct_coeffs(coeff_val_cnt);
 
   // ============================ Decomposition ============================
   for (size_t poly_id = 0; poly_id < 2; poly_id++) {
-    // we need a copy because we need to compose the array. This copy is very fast. 
+    // we need a copy because we need to compose the array. This copy is very fast.
     memcpy(ct_coeffs.data(), ct.data(poly_id), coeff_val_cnt * sizeof(uint64_t));
-    TIME_START(extern_compose_log_key); 
-    // the "compose_array" transform the coefficients from RNS form to multi-precision integer form. The lower bits are in the front. 
-    // ! the compose and decompose functions are slow when rns_mod_cnt > 1 because mod and div operations are slow.
-    rns_base->compose_array(ct_coeffs.data(), coeff_count, pool);
+    TIME_START(extern_compose_log_key);
+    // Transform the coefficients from RNS form to multi-precision integer form
+    // (little-endian limbs, K limbs per coefficient).
+    // ! compose / decompose are slow when rns_mod_cnt > 1 because of the per-coeff CRT work.
+    compose_rns_to_mp(ct_coeffs.data(), coeff_count, coeff_modulus, rns_mod_cnt);
     TIME_END(extern_compose_log_key);
 
     // we right shift certain amount to match the GSW ciphertext
@@ -175,7 +255,7 @@ void GSWEval::decomp_rlwe(RlweCt const &ct, std::vector<std::vector<uint64_t>> &
       }
       TIME_END(right_shift_log_key);
       TIME_START(extern_decomp_log_key);
-      rns_base->decompose_array(rshift_res.data(), coeff_count, pool);
+      decompose_mp_to_rns(rshift_res.data(), coeff_count, coeff_modulus, rns_mod_cnt);
       TIME_END(extern_decomp_log_key);
 
       output.emplace_back(std::move(rshift_res));

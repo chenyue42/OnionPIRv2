@@ -10,7 +10,6 @@
 #include "utils.h"
 #include "logging.h"
 #include "matrix.h"
-#include "seal/util/iterator.h"
 
 #include <cassert>
 #include <iostream>
@@ -37,9 +36,6 @@ class PirTest {
     void test_decrypt_mod_q();
     void test_ext_prod_mux();
 
-    // ======================== SEAL Serialization ========================
-    void serialization_example();
-
     // ======================== Matrix tests ========================
     // simulation of the first dimension multiplication
     void test_fst_dim_mult();
@@ -48,9 +44,7 @@ class PirTest {
     void print_cpu_info();
 
     // ======================== Other tests ========================
-    void test_batch_decomp();
     void test_fast_expand_query();
-    void test_raw_pt_ct_mult();
     void test_mod_switch();
     void test_db_shape();
     void test_bv_keyswitch();
