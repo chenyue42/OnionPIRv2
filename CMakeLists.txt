@@ -67,12 +67,6 @@ project(Onion-PIR)
 file(GLOB_RECURSE SRC_FILES src/*.cpp)
 add_executable(Onion-PIR ${SRC_FILES})
 
-# Find and link SEAL library
-set(SEAL_DIR "/u/yuec12/OnionPIRv2/seal_install/lib64/cmake/SEAL-4.1")
-set(SEAL_DIR "/u/yuec12/OnionPIRv2/seal_install/lib64/cmake/SEAL-4.1")
-find_package(SEAL 4.1 REQUIRED)
-target_link_libraries(Onion-PIR PUBLIC SEAL::seal)
-
 # Link HEXL if enabled
 if (USE_HEXL AND HEXL_FOUND)
     target_link_libraries(Onion-PIR PUBLIC HEXL::hexl)

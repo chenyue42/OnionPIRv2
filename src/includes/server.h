@@ -4,6 +4,8 @@
 #include "pir.h"
 #include "bv_keyswitch.h"
 #include "aligned_allocator.h"
+#include <map>
+#include <sstream>
 #include <unordered_map>
 
 class PirServer {

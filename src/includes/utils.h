@@ -1,7 +1,6 @@
 #pragma once
 #include "pir.h"
 #include "rlwe.h"
-#include "seal/seal.h"
 #include <iostream>
 #include <fstream>
 #include <random>
@@ -86,7 +85,6 @@ inline void right_shift_uint128(uint64_t *operand, int shift, uint64_t *result) 
 }
 
 // Negacyclic NTT over Z_q[x]/(x^N+1), implemented via HEXL under the hood.
-// Output is byte-identical to seal::util::ntt_negacyclic_harvey (verified in test_hexl_ntt).
 // The HEXL NTT object for each (N, q) pair is cached thread-locally so repeated
 // calls are fast and lock-free.
 void ntt_fwd(uint64_t *data, size_t N, uint64_t q);
@@ -110,6 +108,12 @@ gsw_gadget(size_t l, uint64_t base_log2, size_t rns_mod_cnt,
 
 // Generate a prime that is bit_width long
 std::uint64_t generate_prime(size_t bit_width);
+
+// Generate one NTT-friendly prime per bit width.  Each returned prime p satisfies
+//   p < 2^bit_width,  p ≡ 1 (mod 2N),  p is the largest such prime not already
+// returned for the same bit width.  Replaces SEAL's CoeffModulus::Create.
+std::vector<uint64_t> generate_ntt_friendly_primes(const std::vector<int> &bit_widths,
+                                                   size_t N);
 
 // New functions for plaintext handling
 void print_plaintext(const RlwePt &plaintext, size_t count = 10);

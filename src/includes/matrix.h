@@ -1,5 +1,4 @@
 #pragma once
-// #include "seal/seal.h"
 #include "utils.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -57,10 +56,6 @@ void mat_mat(const db_coeff_t *__restrict A, const db_coeff_t *__restrict B,
 
 // Doing levels of mat_mat, where each level is doing db_coeff_t x db_coeff_t -> inter_coeff_t multiplication.
 void level_mat_mat(db_matrix_t *A, db_matrix_t *B, inter_matrix_t *out);
-
-// calculate mod after each multiplication. Hence, output will be in uint64_t.
-void level_mat_mat_direct_mod(matrix_t *A, matrix_t *B, matrix_t *out, const seal::Modulus mod);
-
 
 // ======================== COMPONENT WISE MULTIPLICATION ========================
 

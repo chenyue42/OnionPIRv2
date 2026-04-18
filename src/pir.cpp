@@ -1,54 +1,32 @@
 #include "pir.h"
 #include "database_constants.h"
-#include "gsw.h"
 #include "utils.h"
 
 #include <cassert>
-
-// ================== helper functions ==================
-seal::EncryptionParameters PirParams::init_seal_params() {
-  // seal parameters requires at lest three parameters: poly_modulus_degree,
-  // coeff_modulus, plain_modulus Then the seal context will be set properly for
-  // encryption and decryption.
-
-  seal::EncryptionParameters params(seal::scheme_type::bfv);
-  params.set_poly_modulus_degree(
-      DBConsts::PolyDegree); // example: a_1 x^4095 + a_2 x^4094 + ...
-
-  const uint64_t pt_mod = utils::generate_prime(DBConsts::PlainMod);
-  params.set_plain_modulus(pt_mod);
-  std::vector<int> bit_sizes(DBConsts::CoeffMods.begin(),
-                             DBConsts::CoeffMods.end());
-  const auto coeff_modulus =
-      CoeffModulus::Create(DBConsts::PolyDegree, bit_sizes);
-  params.set_coeff_modulus(coeff_modulus);
-
-  return params;
-}
+#include <cmath>
+#include <iostream>
+#include <string>
 
 PirParams::PirParams()
-    : seal_params_(init_seal_params()), context_(seal_params_) {
-  // Cache coeff modulus as plain uint64_t vector (built once, not per call).
-  const auto &mods = context_.first_context_data()->parms().coeff_modulus();
-  coeff_modulus_.reserve(mods.size());
-  for (const auto &m : mods) coeff_modulus_.push_back(m.value());
+    : coeff_mod_bits_(DBConsts::CoeffMods.begin(), DBConsts::CoeffMods.end()),
+      coeff_modulus_(utils::generate_ntt_friendly_primes(coeff_mod_bits_,
+                                                         DBConsts::PolyDegree)) {
+  // =============== Plaintext modulus ===============
+  plain_mod_ = utils::generate_prime(DBConsts::PlainMod);
 
-  // =============== Setting modulus ===============
-  const uint64_t pt_mod = seal_params_.plain_modulus().value();
-  // setup the modulus switching mod.
-  small_q_ = CoeffModulus::Create(DBConsts::PolyDegree,
-                                {DBConsts::SmallQWidth, DBConsts::CoeffMods.back()})[0].value();
+  // =============== Small modulus for mod-switch ===============
+  // Two entries are requested so the first is guaranteed distinct from the
+  // top-level coeff moduli when the last coeff-mod bit width equals SmallQWidth.
+  const std::vector<int> small_q_bits = {static_cast<int>(DBConsts::SmallQWidth),
+                                         DBConsts::CoeffMods.back()};
+  small_q_ = utils::generate_ntt_friendly_primes(small_q_bits, DBConsts::PolyDegree)[0];
 
   // ================== GSW related parameters ==================
-  // The number of bits for representing the largest modulus possible in the
-  // given context. See analysis folder. This line rounds bits/l up to the
-  // nearest integer.
   size_t ct_mod_width = get_ct_mod_width();
   base_log2_ = (ct_mod_width + l_ep_ - 1) / l_ep_;
   base_log2_key_ = (ct_mod_width + l_key_ - 1) / l_key_;
 
   // =============== Database shape calculation ===============
-  // calculate the target number of plaintexts
   size_t target_num_pt = DBConsts::DB_SIZE_MB * 1024 * 1024 / get_pt_size();
   DEBUG_PRINT("target_num_pt: " << target_num_pt);
   auto [fst_dim_sz, num_dims] = utils::calculate_db_shape(target_num_pt, l_ep_, DBConsts::TREE_HEIGHT);
@@ -62,7 +40,7 @@ PirParams::PirParams()
 const size_t PirParams::get_ct_mod_width() const {
   size_t ct_mod_width = 0;
   for (size_t i = 0; i < get_rns_mod_cnt(); ++i) {
-    ct_mod_width += seal_params_.coeff_modulus()[i].bit_count();
+    ct_mod_width += coeff_mod_bits_[i];
   }
   return ct_mod_width;
 }
@@ -71,14 +49,13 @@ void PirParams::print_params() const {
   PRINT_BAR;
   std::cout << "                       PIR PARAMETERS                         " << std::endl;
   PRINT_BAR;
-  
-  // Helper function for consistent formatting
+
   auto print_field = [](const std::string& label, const std::string& value, int label_width = 35) {
     std::string padded_label = label;
     padded_label.resize(label_width, ' ');
     std::cout << "  " << padded_label << "= " << value << std::endl;
   };
-  
+
   auto print_field_num = [&print_field](const std::string& label, auto value) {
     print_field(label, std::to_string(value));
   };
@@ -92,39 +69,39 @@ void PirParams::print_params() const {
   print_field_num("l_ep_", l_ep_);
   print_field_num("l_key_", l_key_);
   print_field_num("base_log2_", base_log2_);
-  
+
   print_field_num("fst_dim_sz", fst_dim_sz_);
   print_field_num("num_dims", num_dims_);
-  
-  print_field_num("seal_params_.poly_modulus_degree()", seal_params_.poly_modulus_degree());
 
-  // Handle coeff_modulus bit count
+  print_field_num("poly_modulus_degree", DBConsts::PolyDegree);
+
+  // Coeff modulus bit widths
   size_t log_q = 0;
   std::string bit_count_str = "[";
-  for (std::size_t i = 0; i < seal_params_.coeff_modulus().size() - 1; i++) {
-    log_q += seal_params_.coeff_modulus()[i].bit_count();
-    bit_count_str += std::to_string(seal_params_.coeff_modulus()[i].bit_count()) + " + ";
+  for (std::size_t i = 0; i + 1 < coeff_mod_bits_.size(); i++) {
+    log_q += coeff_mod_bits_[i];
+    bit_count_str += std::to_string(coeff_mod_bits_[i]) + " + ";
   }
-  bit_count_str += std::to_string(seal_params_.coeff_modulus().back().bit_count());
+  bit_count_str += std::to_string(coeff_mod_bits_.back());
   bit_count_str += "] = " + std::to_string(get_ct_mod_width()) + " bits";
-  print_field("seal_params_.coeff_modulus().bit_count", bit_count_str, 40);
+  print_field("coeff_modulus bit widths", bit_count_str, 40);
 
-  // Handle coeff_modulus values
+  // Coeff modulus values
   std::string coeff_mod_str = "[";
-  for (std::size_t i = 0; i < seal_params_.coeff_modulus().size() - 1; i++) {
-    coeff_mod_str += std::to_string(seal_params_.coeff_modulus()[i].value()) + " + ";
+  for (std::size_t i = 0; i + 1 < coeff_modulus_.size(); i++) {
+    coeff_mod_str += std::to_string(coeff_modulus_[i]) + " + ";
   }
-  coeff_mod_str += std::to_string(seal_params_.coeff_modulus().back().value());
+  coeff_mod_str += std::to_string(coeff_modulus_.back());
   coeff_mod_str += "]";
-  print_field("seal_params_.coeff_modulus()", coeff_mod_str, 40);
-  
-  print_field_num("plain_modulus", seal_params_.plain_modulus().value());
+  print_field("coeff_modulus", coeff_mod_str, 40);
+
+  print_field_num("plain_modulus", plain_mod_);
   print_field_num("log(q)", log_q);
-  print_field_num("log(t)", seal_params_.plain_modulus().bit_count());
-  
+  print_field_num("log(t)", static_cast<int>(std::ceil(std::log2(plain_mod_))));
+
   if (get_rns_mod_cnt() == 1) {
     print_field_num("log(small_q)", static_cast<int>(std::ceil(std::log2(small_q_))));
   }
-  
+
   std::cout << "==============================================================" << std::endl;
 }

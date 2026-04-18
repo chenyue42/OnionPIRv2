@@ -1,13 +1,9 @@
 #pragma once
 
-#include "seal/seal.h"
 #include "logging.h"
 #include "database_constants.h"
+#include <cstdint>
 #include <vector>
-
-// ================== NAMESPACES  ==================
-using namespace seal::util;
-using namespace seal;
 
 // ================== CLASS DEFINITIONS ==================
 class PirParams {
@@ -25,8 +21,6 @@ public:
     return sizeof(db_coeff_t);
   }
   inline const size_t get_num_bits_per_coeff() const { return DBConsts::PlainMod - 1; }
-  inline seal::EncryptionParameters get_seal_params() const { return seal_params_; }
-  inline seal::SEALContext get_context() const { return context_; }
   // size of each plaintext in bytes
   inline size_t get_pt_size() const { return get_num_bits_per_coeff() * DBConsts::PolyDegree / 8; }
   inline double get_DBSize_MB() const { return static_cast<double>(num_pt_) * get_pt_size() / 1024 / 1024; }
@@ -46,10 +40,14 @@ public:
   // In terms of number of plaintexts
   // when other_dim_sz == 1, it means we only use the first dimension.
   inline size_t get_other_dim_sz() const { return num_pt_ / fst_dim_sz_; }
-  inline size_t get_rns_mod_cnt() const { return seal_params_.coeff_modulus().size() - 1; }
+  // Ciphertext coeff modulus carries an extra "special" prime (last entry) that
+  // is not used for RLWE arithmetic; active RNS count excludes it.
+  inline size_t get_rns_mod_cnt() const { return coeff_modulus_.size() - 1; }
   inline size_t get_coeff_val_cnt() const { return DBConsts::PolyDegree * get_rns_mod_cnt(); }
-  inline uint64_t get_plain_mod() const { return seal_params_.plain_modulus().value(); }
+  inline uint64_t get_plain_mod() const { return plain_mod_; }
   inline const std::vector<uint64_t> &get_coeff_modulus() const { return coeff_modulus_; }
+  inline const std::vector<int> &get_coeff_mod_bits() const { return coeff_mod_bits_; }
+  inline size_t get_poly_degree() const { return DBConsts::PolyDegree; }
   // The height of the expansion tree during packing unpacking stages
   inline const size_t get_expan_height() const { return DBConsts::TREE_HEIGHT; }
 
@@ -73,11 +71,10 @@ public:
   }
 
   inline const size_t get_gsw_key_size(bool use_seed = true) const {
-    return 2 * l_key_ * get_BFV_size(use_seed); 
+    return 2 * l_key_ * get_BFV_size(use_seed);
   }
 
   // ================== helper functions ==================
-  static seal::EncryptionParameters init_seal_params();
   void print_params() const;
 
 private:
@@ -89,7 +86,7 @@ private:
   size_t num_pt_;            // number of plaintexts in the database
   size_t fst_dim_sz_;        // first dimension size (number of plaintexts)
   size_t num_dims_;          // total number of dimensions
-  seal::EncryptionParameters seal_params_;
-  seal::SEALContext context_;
-  std::vector<uint64_t> coeff_modulus_; // cached plain uint64 copy of context_ coeff modulus
+  uint64_t plain_mod_ = 0;   // plaintext modulus t
+  std::vector<int> coeff_mod_bits_;     // bit widths of each coeff modulus limb
+  std::vector<uint64_t> coeff_modulus_; // NTT-friendly primes, last entry is the "special" limb
 };

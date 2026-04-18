@@ -207,6 +207,42 @@ std::uint64_t utils::generate_prime(size_t bit_width) {
   return candidate;
 }
 
+std::vector<uint64_t> utils::generate_ntt_friendly_primes(
+    const std::vector<int> &bit_widths, size_t N) {
+  // For each bit width bw, return the largest prime p < 2^bw with p ≡ 1 mod 2N.
+  // If the same bit width appears more than once, return distinct primes by
+  // continuing the downward scan from where we stopped last time.
+  const uint64_t step = 2 * static_cast<uint64_t>(N);
+  std::unordered_map<int, uint64_t> next_candidate;
+  std::vector<uint64_t> out;
+  out.reserve(bit_widths.size());
+
+  for (int bw : bit_widths) {
+    if (bw < 2 || bw > 63)
+      throw std::invalid_argument("bit width out of range [2, 63]");
+
+    auto it = next_candidate.find(bw);
+    uint64_t c;
+    if (it == next_candidate.end()) {
+      const uint64_t upper = (uint64_t{1} << bw);   // exclusive
+      // Largest value < 2^bw with value ≡ 1 mod 2N.
+      c = upper - 1;
+      c -= ((c - 1) % step);
+    } else {
+      c = it->second;
+    }
+
+    while (true) {
+      if (c < 2) throw std::runtime_error("No NTT-friendly prime found");
+      if (utils::is_prime(c)) break;
+      c -= step;
+    }
+    out.push_back(c);
+    next_candidate[bw] = (c >= step) ? (c - step) : 0;
+  }
+  return out;
+}
+
 // New functions for plaintext handling
 void utils::print_plaintext(const RlwePt &plaintext, const size_t count) {
   const size_t coeff_count = plaintext.coeff_count();
