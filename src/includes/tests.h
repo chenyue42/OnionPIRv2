@@ -26,11 +26,10 @@ class PirTest {
   public:
     size_t num_experiments = 10;
 
-    void run_test(const std::string &test_name, bool use_bv);
+    void run_test(const std::string &test_name);
 
     // ! the main test for PIR
-    // use_bv: true = BV key-switching expansion (default), false = GHS (SEAL galois keys)
-    void test_pir(bool use_bv = true);
+    void test_pir();
 
     // ======================== BFV & GSW tests ========================
     void bfv_example();

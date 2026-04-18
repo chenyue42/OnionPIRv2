@@ -1,7 +1,7 @@
 #include "tests.h"
 #include "bv_keyswitch.h"
 
-void PirTest::test_pir(bool use_bv) {
+void PirTest::test_pir() {
   print_func_name(__FUNCTION__);
   auto success_count = 0;
 
@@ -44,13 +44,8 @@ void PirTest::test_pir(bool use_bv) {
         bv_galois_keys.keys.size(), DBConsts::PolyDegree,
         pir_params.get_ct_mod_width(), /*use_seed=*/true);
     //--------------------------------------------------------------------------------
-    // Server receives the BV galois keys, (optionally SEAL galois keys), and gsw keys
+    // Server receives the BV galois keys and gsw keys
     server.set_client_bv_galois_key(client_id, std::move(bv_galois_keys));
-    if (!use_bv) {
-      std::stringstream galois_key_stream;
-      client.create_galois_keys(galois_key_stream);
-      server.set_client_galois_key(client_id, galois_key_stream);
-    }
     server.set_client_gsw_key(client_id, client.generate_gsw_from_key());
 
     // ===================== ONLINE PHASE =====================
@@ -62,7 +57,7 @@ void PirTest::test_pir(bool use_bv) {
     query_size = pir_params.get_BFV_size();
 
     TIME_START(SERVER_TOT_TIME);
-    RlweCt response = server.make_query(client_id, query, use_bv);
+    RlweCt response = server.make_query(client_id, query);
     TIME_END(SERVER_TOT_TIME);
 
 

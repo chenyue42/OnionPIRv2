@@ -20,7 +20,6 @@ public:
   // helper function for fast_generate_query
   void add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_indices);
 
-  size_t create_galois_keys(std::stringstream &galois_key_stream);
   // Create custom BV-style Galois keys (no special prime).
   bvks::BvGaloisKeys create_bv_galois_keys();
   // decrypt the result returned from PIR. Assume modulus switching is applied.

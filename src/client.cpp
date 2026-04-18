@@ -187,21 +187,6 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
 //   return total_size;
 // }
 
-size_t PirClient::create_galois_keys(std::stringstream &galois_key_stream) {
-  std::vector<uint32_t> galois_elts;
-
-  // This is related to the unpacking algorithm.
-  // expansion height is the height of the expansion tree such that
-  // 2^get_expan_height() is equal to the number of packed values padded to the next power of 2.
-  const size_t expan_height = pir_params_.get_expan_height();
-  for (size_t i = 0; i < expan_height; i++) {
-    galois_elts.push_back(1 + (DBConsts::PolyDegree >> i));
-  }
-  // PRINT_INT_ARRAY("galois_elts: ", galois_elts, galois_elts.size());
-  auto written_size = keygen_.create_galois_keys(galois_elts).save(galois_key_stream);
-  return written_size;
-}
-
 bvks::BvGaloisKeys PirClient::create_bv_galois_keys() {
   return bvks::gen_bv_galois_keys(pir_params_, rlwe_sk_);
 }

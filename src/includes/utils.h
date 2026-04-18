@@ -91,16 +91,10 @@ inline void right_shift_uint128(uint64_t *operand, int shift, uint64_t *result) 
 void ntt_fwd(uint64_t *data, size_t N, uint64_t q);
 void ntt_inv(uint64_t *data, size_t N, uint64_t q);
 
-// void shift_polynomial(const seal::EncryptionParameters &params,
-//                       const seal::Ciphertext &src, seal::Ciphertext &dst,std::int64_t k);
-
 void negacyclic_shift_poly_coeffmod(const uint64_t *poly,
                                     size_t coeff_count, size_t shift,
                                     uint64_t modulus,
                                     uint64_t *result);
-void shift_polynomial(seal::EncryptionParameters &params,
-                      seal::Ciphertext &encrypted,
-                      seal::Ciphertext &destination, size_t index);
 
 // Convert a 128-bit unsigned integer to a string
 std::string uint128_to_string(uint128_t value);

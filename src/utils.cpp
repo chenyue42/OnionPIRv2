@@ -155,21 +155,6 @@ void utils::negacyclic_shift_poly_coeffmod(const uint64_t *poly, size_t coeff_co
   }
 }
 
-void utils::shift_polynomial(seal::EncryptionParameters &params, seal::Ciphertext &encrypted,
-                             seal::Ciphertext &destination, size_t index) {
-  const auto coeff_count = DBConsts::PolyDegree;
-  const auto rns_mod_cnt = params.coeff_modulus().size() - 1;
-  destination = encrypted;
-  for (size_t i = 0; i < 2; i++) {  // two polynomials in ciphertext
-    for (size_t j = 0; j < rns_mod_cnt; j++) {
-      negacyclic_shift_poly_coeffmod(encrypted.data(i) + (j * coeff_count), coeff_count, index,
-                                     params.coeff_modulus()[j].value(),
-                                     destination.data(i) + (j * coeff_count));
-    }
-  }
-}
-
-
 std::string utils::uint128_to_string(uint128_t value) {
     // Split the 128-bit value into two 64-bit parts
     uint64_t high = value >> 64;

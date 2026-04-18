@@ -4,15 +4,12 @@
 #include <string>
 
 int main(int argc, char *argv[]) {
-  bool use_compression = true;
   std::string test_name = "pir";
   size_t num_experiments = 10;
   size_t warmup = 3;
 
   for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--no-compress") == 0) {
-      use_compression = false;
-    } else if (strcmp(argv[i], "--test") == 0 && i + 1 < argc) {
+    if (strcmp(argv[i], "--test") == 0 && i + 1 < argc) {
       test_name = argv[++i];
     } else if (strcmp(argv[i], "--experiments") == 0 && i + 1 < argc) {
       num_experiments = std::atoi(argv[++i]);
@@ -25,6 +22,6 @@ int main(int argc, char *argv[]) {
 
   PirTest test;
   test.num_experiments = num_experiments + warmup;
-  test.run_test(test_name, use_compression);
+  test.run_test(test_name);
   return 0;
 }

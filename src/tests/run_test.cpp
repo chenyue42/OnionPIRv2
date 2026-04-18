@@ -1,9 +1,9 @@
 #include "tests.h"
 
-void PirTest::run_test(const std::string &test_name, bool use_bv) {
+void PirTest::run_test(const std::string &test_name) {
   std::cout << "Running test: " << test_name << std::endl;
 
-  if (test_name == "pir")                    test_pir(use_bv);
+  if (test_name == "pir")                    test_pir();
   else if (test_name == "bfv")               bfv_example();
   else if (test_name == "serial")            serialization_example();
   else if (test_name == "ext_prod")          test_external_product();

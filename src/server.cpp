@@ -22,8 +22,8 @@
 #include <bitset>
 #endif
 
-// copy the pir_params and set evaluator equal to the context_. 
-// client_galois_keys_, client_gsw_keys_, and db_ are not set yet.
+// copy the pir_params and set evaluator equal to the context_.
+// client_bv_galois_keys_, client_gsw_keys_, and db_ are not set yet.
 PirServer::PirServer(const PirParams &pir_params)
     : pir_params_(pir_params), context_(pir_params.get_seal_params()),
       num_pt_(pir_params.get_num_pt()), evaluator_(context_),
@@ -377,63 +377,6 @@ void PirServer::ext_prod_mux(RlweCt &x, RlweCt &y, GSWCt &selection_cipher, Rlwe
     TIME_END(OTHER_DIM_ADD_SUB);
 }
 
-// This function is using the algorithm 5 in Constant-weight PIR: Single-round Keyword PIR via Constant-weight Equality Operators.
-// https://www.usenix.org/conference/usenixsecurity22/presentation/mahdavi. Basically, the algorithm 3 in Onion-Ring ORAM has some typos.
-// And we can save one Subs(c_b, k) operation in the algorithm 3. The notations of this function follows the constant-weight PIR paper.
-std::vector<RlweCt>
-PirServer::expand_query(size_t client_id, RlweCt &ciphertext) const {
-  seal::EncryptionParameters params = pir_params_.get_seal_params();
-  const size_t expan_height = pir_params_.get_expan_height();
-  const auto& client_galois_key = client_galois_keys_.at(client_id); // used for substitution
-  constexpr size_t N = DBConsts::PolyDegree;
-
-  /*  Pseudu code:
-  for a = 0 .. logN do
-    k = 2^a // tree width at level a
-    for b = 0 .. k - 1 do
-      c' = Subs(c_b, n/k + 1)
-      c_{b + k} = (c_b - c') * x^{-k}
-      c_{b} = c_b + c'
-    end
-  end
-  */
-
-  // SEAL-internal expansion: keep seal::Ciphertext locally so we can call
-  // evaluator_.apply_galois_inplace (requires SEAL GaloisKeys). Convert to
-  // RlweCt at the boundary.
-  constexpr size_t N_local = DBConsts::PolyDegree;
-  std::vector<seal::Ciphertext> seal_cts( (size_t)pow(2, expan_height) );
-  seal_cts[0] = seal::Ciphertext(context_);
-  seal_cts[0].resize(context_, 2);
-  std::copy(ciphertext.c0.begin(), ciphertext.c0.begin() + N_local, seal_cts[0].data(0));
-  std::copy(ciphertext.c1.begin(), ciphertext.c1.begin() + N_local, seal_cts[0].data(1));
-  seal_cts[0].is_ntt_form() = ciphertext.ntt_form;
-
-  for (size_t a = 0; a < expan_height; a++) {
-    const size_t level_size = pow(2, a);
-
-    for (size_t b = 0; b < level_size; b++) {
-      seal::Ciphertext c_prime = seal_cts[b];
-      TIME_START(APPLY_GALOIS);
-      evaluator_.apply_galois_inplace(c_prime, DBConsts::PolyDegree / level_size + 1,
-                                      client_galois_key); // Subs(c_b, n/k + 1)
-      TIME_END(APPLY_GALOIS);
-      seal::Ciphertext temp;
-      evaluator_.sub(seal_cts[b], c_prime, temp);
-      utils::shift_polynomial(params, temp, seal_cts[b + level_size], -level_size);
-      evaluator_.add_inplace(seal_cts[b], c_prime);
-    }
-  }
-
-  std::vector<RlweCt> cts(seal_cts.size());
-  for (size_t i = 0; i < seal_cts.size(); i++) {
-    cts[i].c0.assign(seal_cts[i].data(0), seal_cts[i].data(0) + N);
-    cts[i].c1.assign(seal_cts[i].data(1), seal_cts[i].data(1) + N);
-    cts[i].ntt_form = seal_cts[i].is_ntt_form();
-  }
-  return cts;
-}
-
 //  single-loop level-order expansion  (root index = 1)
 std::vector<RlweCt>
 PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
@@ -487,12 +430,6 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
       std::make_move_iterator(cts.begin() + w + useful_cnt));
 }
 
-void PirServer::set_client_galois_key(const size_t client_id, std::stringstream &galois_stream) {
-  seal::GaloisKeys client_key;
-  client_key.load(context_, galois_stream);
-  client_galois_keys_[client_id] = client_key;
-}
-
 void PirServer::set_client_bv_galois_key(const size_t client_id, bvks::BvGaloisKeys bv_keys) {
   client_bv_galois_keys_[client_id] = std::move(bv_keys);
 }
@@ -512,15 +449,12 @@ seal::Plaintext PirServer::direct_get_original_plaintext(const size_t plaintext_
 }
 
 
-RlweCt PirServer::make_query(const size_t client_id, RlweCt &query, bool use_bv) {
+RlweCt PirServer::make_query(const size_t client_id, RlweCt &query) {
   // receive the query from the client
 
   // ========================== Expansion & conversion ==========================
-  // Query expansion: BV key-switching (default) or GHS key-switching
   TIME_START(EXPAND_TIME);
-  std::vector<RlweCt> query_vector = use_bv
-      ? fast_expand_qry(client_id, query)
-      : expand_query(client_id, query);
+  std::vector<RlweCt> query_vector = fast_expand_qry(client_id, query);
   TIME_END(EXPAND_TIME);
 
   // Reconstruct RGSW queries
