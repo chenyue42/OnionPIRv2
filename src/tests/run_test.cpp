@@ -14,7 +14,6 @@ void PirTest::run_test(const std::string &test_name) {
   else if (test_name == "raw_pt_ct")         test_raw_pt_ct_mult();
   else if (test_name == "decrypt_mod_q")     test_decrypt_mod_q();
   else if (test_name == "mod_switch")        test_mod_switch();
-  else if (test_name == "sk_mod_switch")     test_sk_mod_switch();
   else if (test_name == "db_shape")          test_db_shape();
   else if (test_name == "bv_ks")             test_bv_keyswitch();
   else if (test_name == "cpu_info")          print_cpu_info();
@@ -26,7 +25,7 @@ void PirTest::run_test(const std::string &test_name) {
     std::cerr << "Unknown test: " << test_name << std::endl;
     std::cerr << "Available tests: pir, bfv, serial, ext_prod, ext_prod_mux, "
               << "fst_dim, batch_decomp, fast_expand, raw_pt_ct, decrypt_mod_q, "
-              << "mod_switch, sk_mod_switch, db_shape, hexl_ntt, utils_arith, "
+              << "mod_switch, db_shape, hexl_ntt, utils_arith, "
               << "noise_sampling, rlwe_enc, cpu_info" << std::endl;
   }
 }

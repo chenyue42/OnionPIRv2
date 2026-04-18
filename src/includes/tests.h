@@ -52,7 +52,6 @@ class PirTest {
     void test_fast_expand_query();
     void test_raw_pt_ct_mult();
     void test_mod_switch();
-    void test_sk_mod_switch();
     void test_db_shape();
     void test_bv_keyswitch();
     void test_hexl_ntt();

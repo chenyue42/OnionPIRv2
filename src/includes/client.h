@@ -49,17 +49,13 @@ private:
   std::mt19937_64 rng_;       // per-client PRNG for noise sampling
   RlweSk rlwe_sk_;            // ternary sk, NTT form under q
   std::vector<uint64_t> sk_ntt_small_q_; // secret key in NTT form under small_q
-  seal::SEALContext context_mod_q_prime_;
-
 
   // Gets the query indices for a given plaintext
   std::vector<size_t> get_query_indices(size_t pt_idx);
 
-  // switching the secret key mod old_q to mod new_q
-  // This matters since sk is a tenary polynomial, which contains -1 mod q.
-  seal::SecretKey sk_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const;
-
-  seal::SEALContext init_mod_q_prime();
+  // Populate sk_ntt_small_q_ by rewriting rlwe_sk_ from old_q to small_q
+  // (ternary sk has -1 ≡ q-1; we need -1 ≡ small_q-1).
+  void init_sk_small_q();
 
 };
 

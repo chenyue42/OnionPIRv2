@@ -13,8 +13,9 @@ PirClient::PirClient(const PirParams &pir_params)
     : client_id_(rand()), pir_params_(pir_params),
       rng_(std::random_device{}()),
       rlwe_sk_(gen_secret_key(DBConsts::PolyDegree,
-                              pir_params.get_coeff_modulus()[0], rng_)),
-      context_mod_q_prime_(init_mod_q_prime()) {}
+                              pir_params.get_coeff_modulus()[0], rng_)) {
+  init_sk_small_q();
+}
 
 GSWCt PirClient::generate_gsw_from_key() {
   constexpr size_t N = DBConsts::PolyDegree;
@@ -439,62 +440,19 @@ seal::Plaintext PirClient::decrypt_mod_q(const RlweCt &ct) const {
 }
 
 
-seal::SecretKey PirClient::sk_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const {
-  constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const seal::SEALContext new_context(new_params);
-
-  auto temp_keygen = seal::KeyGenerator(new_context);
-  auto new_sk = temp_keygen.secret_key(); // create non-empty secret key. will use old sk data.
-
-  const uint64_t old_q = pir_params_.get_coeff_modulus()[0];
-  const uint64_t new_q = new_params.coeff_modulus()[0].value();
-
-  std::vector<uint64_t> sk_data(sk.data().data(), sk.data().data() + coeff_count);
-  utils::ntt_inv(sk_data.data(), coeff_count, old_q);
-  for (size_t i = 0; i < coeff_count; ++i) {
-    // sk in coefficient form only contains 0, 1, q-1, where q-1 \equiv -1 mod q
-    if (sk_data[i] > 1) {
-      sk_data[i] = new_q - 1; // change it to -1 mod small_q
-    }
-  }
-  utils::ntt_fwd(sk_data.data(), coeff_count, new_q);
-
-  // replace the underlying data of new_sk with the data of sk
-  std::copy(sk_data.begin(), sk_data.end(), new_sk.data().data());
-
-  return new_sk;
-}
-
-seal::SEALContext PirClient::init_mod_q_prime() {
-  const auto seal_params = pir_params_.get_seal_params();
-  const auto full_mods = seal_params.coeff_modulus();
-  const uint64_t small_q = pir_params_.get_small_q();
-
-  DEBUG_PRINT("ct mod: " << pir_params_.get_coeff_modulus()[0]);
-  DEBUG_PRINT("small q = " << small_q);
-
-  // Create a 2-prime context just for NTT tables (SEAL requires >= 2 primes).
-  // We only use the first prime's NTT table (for small_q) in our custom decryptor.
-  seal::EncryptionParameters new_params(seal::scheme_type::bfv);
-  new_params.set_poly_modulus_degree(DBConsts::PolyDegree);
-  new_params.set_plain_modulus(pir_params_.get_plain_mod());
-  new_params.set_coeff_modulus({small_q, full_mods.back()});
-
-  seal::SEALContext ctx(new_params, true, seal::sec_level_type::none);
-
-  // Precompute sk in NTT form under small_q
+void PirClient::init_sk_small_q() {
   constexpr size_t N = DBConsts::PolyDegree;
   const uint64_t old_q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t small_q = pir_params_.get_small_q();
 
-  // Get sk in coefficient form (ternary: {0, 1, q-1})
-  sk_ntt_small_q_.resize(N);
+  // Convert rlwe_sk_ (NTT form under old_q) to coefficient form.
   std::vector<uint64_t> sk_coef(rlwe_sk_.data.begin(), rlwe_sk_.data.end());
   utils::ntt_inv(sk_coef.data(), N, old_q);
 
+  // Rewrite -1 mod old_q as -1 mod small_q (sk is ternary: {0, 1, -1}).
+  sk_ntt_small_q_.resize(N);
   for (size_t i = 0; i < N; i++) {
     sk_ntt_small_q_[i] = (sk_coef[i] > 1) ? (small_q - 1) : sk_coef[i];
   }
   utils::ntt_fwd(sk_ntt_small_q_.data(), N, small_q);
-
-  return ctx;
 }
