@@ -50,9 +50,6 @@ private:
   seal::SEALContext context_;
   seal::KeyGenerator keygen_;
   seal::SecretKey secret_key_;
-  seal::Decryptor decryptor_;
-  seal::Encryptor encryptor_;
-  seal::Evaluator evaluator_;
   RlweSk rlwe_sk_;            // ternary sk, NTT form under q (mirrors secret_key_)
   std::mt19937_64 rng_;       // per-client PRNG for noise sampling
   std::vector<uint64_t> sk_ntt_small_q_; // secret key in NTT form under small_q

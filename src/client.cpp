@@ -12,8 +12,7 @@
 PirClient::PirClient(const PirParams &pir_params)
     : client_id_(rand()), pir_params_(pir_params),
       context_(pir_params.get_seal_params()), keygen_(context_),
-      secret_key_(keygen_.secret_key()), decryptor_(context_, secret_key_),
-      encryptor_(context_, secret_key_), evaluator_(context_),
+      secret_key_(keygen_.secret_key()),
       rng_(std::random_device{}()),
       context_mod_q_prime_(init_mod_q_prime()) {
   // Mirror SEAL secret_key_ into RlweSk (NTT form under q).
