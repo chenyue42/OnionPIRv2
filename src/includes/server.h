@@ -53,8 +53,6 @@ public:
 
 private:
   size_t num_pt_;
-  seal::SEALContext context_;
-  seal::Evaluator evaluator_;
   std::map<size_t, bvks::BvGaloisKeys> client_bv_galois_keys_;
   std::map<size_t, GSWCt> client_gsw_keys_;
   std::unordered_map<size_t, RlwePt> recorded_pts_; // pre-NTT plaintexts for test verification

@@ -22,11 +22,10 @@
 #include <bitset>
 #endif
 
-// copy the pir_params and set evaluator equal to the context_.
 // client_bv_galois_keys_, client_gsw_keys_, and db_ are not set yet.
 PirServer::PirServer(const PirParams &pir_params)
-    : pir_params_(pir_params), context_(pir_params.get_seal_params()),
-      num_pt_(pir_params.get_num_pt()), evaluator_(context_),
+    : pir_params_(pir_params),
+      num_pt_(pir_params.get_num_pt()),
       key_gsw_(pir_params, pir_params.get_l_key(), pir_params.get_base_log2_key()),
       data_gsw_(pir_params, pir_params.get_l(), pir_params.get_base_log2()) {
   // after NTT, each database polynomial coefficient will be in mod q. Hence,
