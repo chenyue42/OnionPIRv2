@@ -17,9 +17,7 @@ void PirTest::test_ext_prod_mux() {
   const uint64_t t = pir_params.get_plain_mod();
   const double sigma = pir_params.get_noise_std_dev();
 
-  RlweSk rlwe_sk;
-  rlwe_sk.data.assign(client.secret_key_.data().data(),
-                      client.secret_key_.data().data() + coeff_count);
+  RlweSk rlwe_sk = client.rlwe_sk_;
   std::mt19937_64 rng(std::random_device{}());
 
   RlweCt a_encrypted, b_encrypted;

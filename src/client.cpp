@@ -11,14 +11,10 @@
 // constructor
 PirClient::PirClient(const PirParams &pir_params)
     : client_id_(rand()), pir_params_(pir_params),
-      context_(pir_params.get_seal_params()), keygen_(context_),
-      secret_key_(keygen_.secret_key()),
       rng_(std::random_device{}()),
-      context_mod_q_prime_(init_mod_q_prime()) {
-  // Mirror SEAL secret_key_ into RlweSk (NTT form under q).
-  constexpr size_t N = DBConsts::PolyDegree;
-  rlwe_sk_.data.assign(secret_key_.data().data(), secret_key_.data().data() + N);
-}
+      rlwe_sk_(gen_secret_key(DBConsts::PolyDegree,
+                              pir_params.get_coeff_modulus()[0], rng_)),
+      context_mod_q_prime_(init_mod_q_prime()) {}
 
 GSWCt PirClient::generate_gsw_from_key() {
   constexpr size_t N = DBConsts::PolyDegree;
@@ -492,7 +488,7 @@ seal::SEALContext PirClient::init_mod_q_prime() {
 
   // Get sk in coefficient form (ternary: {0, 1, q-1})
   sk_ntt_small_q_.resize(N);
-  std::vector<uint64_t> sk_coef(secret_key_.data().data(), secret_key_.data().data() + N);
+  std::vector<uint64_t> sk_coef(rlwe_sk_.data.begin(), rlwe_sk_.data.end());
   utils::ntt_inv(sk_coef.data(), N, old_q);
 
   for (size_t i = 0; i < N; i++) {

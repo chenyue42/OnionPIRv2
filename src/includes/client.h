@@ -46,14 +46,11 @@ public:
 private:
   const size_t client_id_;
   PirParams pir_params_;
-  seal::SEALContext context_;
-  seal::KeyGenerator keygen_;
-  seal::SecretKey secret_key_;
-  RlweSk rlwe_sk_;            // ternary sk, NTT form under q (mirrors secret_key_)
   std::mt19937_64 rng_;       // per-client PRNG for noise sampling
+  RlweSk rlwe_sk_;            // ternary sk, NTT form under q
   std::vector<uint64_t> sk_ntt_small_q_; // secret key in NTT form under small_q
   seal::SEALContext context_mod_q_prime_;
-  
+
 
   // Gets the query indices for a given plaintext
   std::vector<size_t> get_query_indices(size_t pt_idx);
@@ -61,7 +58,7 @@ private:
   // switching the secret key mod old_q to mod new_q
   // This matters since sk is a tenary polynomial, which contains -1 mod q.
   seal::SecretKey sk_mod_switch(const seal::SecretKey &sk, const seal::EncryptionParameters &new_params) const;
-  
+
   seal::SEALContext init_mod_q_prime();
 
 };
