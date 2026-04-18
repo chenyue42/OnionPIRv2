@@ -68,11 +68,11 @@ void PirTest::test_pir() {
     // client gets result from the server and decrypts it
     RlweCt reconstructed_result = client.load_resp_from_stream(resp_stream);
     TIME_START(CLIENT_TOT_TIME);
-    seal::Plaintext decrypted_result = client.decrypt_reply(reconstructed_result);
+    RlwePt decrypted_result = client.decrypt_reply(reconstructed_result);
     TIME_END(CLIENT_TOT_TIME);
 
     // ============= Directly get the plaintext from server. Not part of PIR.
-    seal::Plaintext actual_plaintext = server.direct_get_original_plaintext(query_pt_idx);
+    RlwePt actual_plaintext = server.direct_get_original_plaintext(query_pt_idx);
 
     END_EXPERIMENT();
     // ============= PRINTING RESULTS ===============

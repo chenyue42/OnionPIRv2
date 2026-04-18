@@ -28,8 +28,12 @@ void PirTest::test_mod_switch() {
 
   server.mod_switch_inplace(rlwe_ct, small_q);
 
-  seal::Plaintext result = client.decrypt_mod_q(rlwe_ct);
-  BENCH_PRINT("Client decrypted: " << result.to_string());
+  RlwePt result = client.decrypt_mod_q(rlwe_ct);
+  BENCH_PRINT("Client decrypted[0..9]: "
+              << result.data[0] << " " << result.data[1] << " " << result.data[2]
+              << " " << result.data[3] << " " << result.data[4] << " " << result.data[5]
+              << " " << result.data[6] << " " << result.data[7] << " " << result.data[8]
+              << " " << result.data[9]);
 
   // verify if ct coeffs are all less than small_q
   bool can_compress = true; // if so, then we can use 32 bits to store the coeffs.

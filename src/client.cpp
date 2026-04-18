@@ -188,7 +188,7 @@ bvks::BvGaloisKeys PirClient::create_bv_galois_keys() {
   return bvks::gen_bv_galois_keys(pir_params_, rlwe_sk_);
 }
 
-seal::Plaintext PirClient::decrypt_reply(const RlweCt& reply) {
+RlwePt PirClient::decrypt_reply(const RlweCt& reply) {
   return decrypt_mod_q(reply);
 }
 
@@ -198,7 +198,7 @@ seal::Plaintext PirClient::decrypt_reply(const RlweCt& reply) {
 static void decrypt_phase_single_mod(const RlweCt &ct,
                                      const uint64_t *sk_ntt,
                                      uint64_t q, uint64_t t,
-                                     seal::Plaintext &out_pt,
+                                     RlwePt &out_pt,
                                      int &out_budget) {
   constexpr size_t N = DBConsts::PolyDegree;
 
@@ -210,19 +210,17 @@ static void decrypt_phase_single_mod(const RlweCt &ct,
   }
 
   if (ct.ntt_form) {
-    // Already NTT: multiply pointwise, then INTT on the product only.
     intel::hexl::EltwiseMultMod(phase.data(), c1.data(), sk_ntt, N, q, 1);
     utils::ntt_inv(phase.data(), N, q);
     utils::ntt_inv(c0.data(), N, q);
   } else {
-    // c1 is in coefficient form: forward NTT it, multiply, INTT back.
     utils::ntt_fwd(c1.data(), N, q);
     intel::hexl::EltwiseMultMod(phase.data(), c1.data(), sk_ntt, N, q, 1);
     utils::ntt_inv(phase.data(), N, q);
   }
   intel::hexl::EltwiseAddMod(phase.data(), phase.data(), c0.data(), N, q);
 
-  seal::Plaintext result(N);
+  out_pt.data.assign(N, 0);
   const uint64_t delta = q / t;
   const uint64_t half_q = q / 2;
   uint64_t max_noise = 0;
@@ -230,7 +228,7 @@ static void decrypt_phase_single_mod(const RlweCt &ct,
   for (size_t i = 0; i < N; i++) {
     uint128_t numerator = (uint128_t)phase[i] * t + half_q;
     uint64_t m = static_cast<uint64_t>(numerator / q) % t;
-    result[i] = m;
+    out_pt.data[i] = m;
 
     uint64_t approx = static_cast<uint64_t>((uint128_t)delta * m % q);
     uint64_t noise_pos = (phase[i] >= approx) ? (phase[i] - approx) : (q - approx + phase[i]);
@@ -241,19 +239,12 @@ static void decrypt_phase_single_mod(const RlweCt &ct,
   out_budget = (max_noise > 0)
     ? static_cast<int>(std::log2(static_cast<double>(q) / (2.0 * t * max_noise)))
     : static_cast<int>(std::log2(static_cast<double>(q) / (2.0 * t)));
-
-  size_t sig = 0;
-  for (size_t i = N; i > 0; i--) {
-    if (result[i - 1] != 0) { sig = i; break; }
-  }
-  result.resize(std::max(sig, static_cast<size_t>(1)));
-  out_pt = std::move(result);
 }
 
-seal::Plaintext PirClient::decrypt_ct(const RlweCt &ct) {
+RlwePt PirClient::decrypt_ct(const RlweCt &ct) {
   const uint64_t q = pir_params_.get_coeff_modulus()[0];
   const uint64_t t = pir_params_.get_plain_mod();
-  seal::Plaintext result;
+  RlwePt result;
   int budget = 0;
   decrypt_phase_single_mod(ct, rlwe_sk_.data.data(), q, t, result, budget);
   return result;
@@ -262,7 +253,7 @@ seal::Plaintext PirClient::decrypt_ct(const RlweCt &ct) {
 int PirClient::noise_budget(const RlweCt &ct) {
   const uint64_t q = pir_params_.get_coeff_modulus()[0];
   const uint64_t t = pir_params_.get_plain_mod();
-  seal::Plaintext tmp;
+  RlwePt tmp;
   int budget = 0;
   decrypt_phase_single_mod(ct, rlwe_sk_.data.data(), q, t, tmp, budget);
   return budget;
@@ -383,10 +374,9 @@ RlweCt PirClient::load_resp_from_stream(std::stringstream &resp_stream) {
 }
 
 
-seal::Plaintext PirClient::decrypt_mod_q(const RlweCt &ct) const {
-  // Custom single-mod decryption that bypasses SEAL's RNS decryptor.
-  // Computes phase = c0 + c1*s (mod small_q), then recovers plaintext
-  // via round(phase * t / q) and measures noise directly.
+RlwePt PirClient::decrypt_mod_q(const RlweCt &ct) const {
+  // Custom single-mod decryption. Computes phase = c0 + c1*s (mod small_q),
+  // then recovers plaintext via round(phase * t / q) and measures noise.
   constexpr size_t N = DBConsts::PolyDegree;
   const uint64_t q = pir_params_.get_small_q();
   const uint64_t t = pir_params_.get_plain_mod();
@@ -403,38 +393,28 @@ seal::Plaintext PirClient::decrypt_mod_q(const RlweCt &ct) const {
   utils::ntt_inv(phase.data(), N, q);
   intel::hexl::EltwiseAddMod(phase.data(), phase.data(), c0.data(), N, q);
 
-  // Recover plaintext and measure noise
-  seal::Plaintext result(N);
-  const uint64_t delta = q / t;  // floor(q / t)
+  RlwePt result;
+  result.data.assign(N, 0);
+  const uint64_t delta = q / t;
   const uint64_t half_q = q / 2;
   uint64_t max_noise = 0;
 
   for (size_t i = 0; i < N; i++) {
-    // m[i] = round(phase[i] * t / q)
     uint128_t numerator = (uint128_t)phase[i] * t + half_q;
     uint64_t m = static_cast<uint64_t>(numerator / q) % t;
-    result[i] = m;
+    result.data[i] = m;
 
-    // noise[i] = phase[i] - delta * m  (centered mod q)
     uint64_t approx = static_cast<uint64_t>((uint128_t)delta * m % q);
     uint64_t noise_pos = (phase[i] >= approx) ? (phase[i] - approx) : (q - approx + phase[i]);
     uint64_t noise_abs = (noise_pos > half_q) ? (q - noise_pos) : noise_pos;
     if (noise_abs > max_noise) max_noise = noise_abs;
   }
 
-  // Noise budget: log2(q / (2 * t * max_noise))
   int budget = (max_noise > 0)
     ? static_cast<int>(std::log2(static_cast<double>(q) / (2.0 * t * max_noise)))
     : static_cast<int>(std::log2(static_cast<double>(q) / (2.0 * t)));
   BENCH_PRINT("Noise budget after decryption: " << budget
               << " (max noise: " << max_noise << ")");
-
-  // Trim trailing zeros
-  size_t sig = 0;
-  for (size_t i = N; i > 0; i--) {
-    if (result[i - 1] != 0) { sig = i; break; }
-  }
-  result.resize(std::max(sig, static_cast<size_t>(1)));
 
   return result;
 }

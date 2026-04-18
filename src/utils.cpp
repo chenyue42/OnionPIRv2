@@ -208,32 +208,29 @@ std::uint64_t utils::generate_prime(size_t bit_width) {
 }
 
 // New functions for plaintext handling
-void utils::print_plaintext(const seal::Plaintext &plaintext, const size_t count) {
-  size_t cnt = 0;
+void utils::print_plaintext(const RlwePt &plaintext, const size_t count) {
   const size_t coeff_count = plaintext.coeff_count();
-  for (size_t i = 0; i < coeff_count && cnt < count; ++i) {
-    std::cout << plaintext.data()[i] << ", ";
-    cnt += 1;
+  for (size_t i = 0; i < std::min(count, coeff_count); ++i) {
+    std::cout << plaintext.data[i] << ", ";
   }
   std::cout << std::endl;
 }
 
-bool utils::plaintext_is_equal(const seal::Plaintext &plaintext1, const seal::Plaintext &plaintext2) {
+bool utils::plaintext_is_equal(const RlwePt &plaintext1, const RlwePt &plaintext2) {
   const size_t coeff_count1 = plaintext1.coeff_count();
   const size_t coeff_count2 = plaintext2.coeff_count();
-  
+
   if (coeff_count1 != coeff_count2) {
     std::cerr << "Plaintexts have different coefficient counts" << std::endl;
     return false;
   }
-  
+
   for (size_t i = 0; i < coeff_count1; i++) {
-    if (plaintext1.data()[i] != plaintext2.data()[i]) {
+    if (plaintext1.data[i] != plaintext2.data[i]) {
       std::cerr << "Plaintexts are not equal at coefficient " << i << std::endl;
       return false;
     }
   }
-  std::cout << "Plaintexts are equal" << std::endl;
   return true;
 }
 

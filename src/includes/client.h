@@ -23,8 +23,8 @@ public:
   // Create custom BV-style Galois keys (no special prime).
   bvks::BvGaloisKeys create_bv_galois_keys();
   // decrypt the result returned from PIR. Assume modulus switching is applied.
-  seal::Plaintext decrypt_reply(const RlweCt& reply);
-  seal::Plaintext decrypt_ct(const RlweCt &ct);
+  RlwePt decrypt_reply(const RlweCt& reply);
+  RlwePt decrypt_ct(const RlweCt &ct);
   // Produce the per-client GSW key (encryption of -s under the data modulus) in
   // its final flat NTT layout, ready to hand to PirServer::set_client_gsw_key.
   GSWCt generate_gsw_from_key();
@@ -38,7 +38,7 @@ public:
   RlweCt load_resp_from_stream(std::stringstream &resp_stream);
 
   // Decrypt a single-mod RlweCt under small_q using our custom decryptor.
-  seal::Plaintext decrypt_mod_q(const RlweCt &ciphertext) const;
+  RlwePt decrypt_mod_q(const RlweCt &ciphertext) const;
 
 
   friend class PirTest;

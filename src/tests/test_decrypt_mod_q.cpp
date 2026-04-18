@@ -21,6 +21,8 @@ void PirTest::test_decrypt_mod_q() {
   RlweCt rlwe_ct;
   encrypt_bfv(a, client.rlwe_sk_, coeff_count, q, t, sigma, rng, rlwe_ct);
 
-  seal::Plaintext result = client.decrypt_mod_q(rlwe_ct);
-  BENCH_PRINT("Decrypted result: " << result.to_string());
+  RlwePt result = client.decrypt_mod_q(rlwe_ct);
+  BENCH_PRINT("Decrypted result[0..2]: " << result.data[0] << " "
+                                         << result.data[1] << " "
+                                         << result.data[2]);
 }

@@ -36,7 +36,7 @@ void PirTest::test_fast_expand_query() {
 
   {
     auto fast_decrypted = client.decrypt_ct(fast_query);
-    BENCH_PRINT("fast packed query: " << fast_decrypted.to_string());
+    BENCH_PRINT("fast packed query coeff[0]: " << fast_decrypted.data[0]);
   }
   PRINT_BAR;
 
@@ -45,9 +45,9 @@ void PirTest::test_fast_expand_query() {
 
   BENCH_PRINT("fast_exp_q noise budget: " << client.noise_budget(fast_exp_q[query_idx % fst_dim_sz]) << " bits");
 
-  std::vector<seal::Plaintext> fast_exp_pt;
+  std::vector<RlwePt> fast_exp_pt;
   for (size_t i = 0; i < useful_cnt; i++) {
     fast_exp_pt.push_back(client.decrypt_ct(fast_exp_q[i]));
   }
-  BENCH_PRINT("fast Expanded query: " << fast_exp_pt[query_idx % fst_dim_sz].to_string());
+  BENCH_PRINT("fast expanded query coeff[0]: " << fast_exp_pt[query_idx % fst_dim_sz].data[0]);
 }

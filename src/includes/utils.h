@@ -1,5 +1,6 @@
 #pragma once
 #include "pir.h"
+#include "rlwe.h"
 #include "seal/seal.h"
 #include <iostream>
 #include <fstream>
@@ -111,9 +112,9 @@ gsw_gadget(size_t l, uint64_t base_log2, size_t rns_mod_cnt,
 std::uint64_t generate_prime(size_t bit_width);
 
 // New functions for plaintext handling
-void print_plaintext(const seal::Plaintext &plaintext, size_t count = 10);
+void print_plaintext(const RlwePt &plaintext, size_t count = 10);
 
-bool plaintext_is_equal(const seal::Plaintext &plaintext1, const seal::Plaintext &plaintext2);
+bool plaintext_is_equal(const RlwePt &plaintext1, const RlwePt &plaintext2);
 
 void print_progress(size_t current, size_t total);
 

@@ -29,7 +29,7 @@ public:
   This is not doing PIR. So this reveals the index to the server. This is
   only for testing purposes.
   */
-  seal::Plaintext direct_get_original_plaintext(const size_t index) const;
+  RlwePt direct_get_original_plaintext(const size_t index) const;
 
 
   // high level: homomorphic matrix vector multiplication between plaintext database and query ciphertext
@@ -57,7 +57,7 @@ private:
   seal::Evaluator evaluator_;
   std::map<size_t, bvks::BvGaloisKeys> client_bv_galois_keys_;
   std::map<size_t, GSWCt> client_gsw_keys_;
-  std::unordered_map<size_t, seal::Plaintext> recorded_pts_; // pre-NTT plaintexts for test verification
+  std::unordered_map<size_t, RlwePt> recorded_pts_; // pre-NTT plaintexts for test verification
   std::unique_ptr<db_coeff_t[], AlignedDeleter<db_coeff_t>> db_aligned_; // aligned database for fast first dim
   std::vector<inter_coeff_t> inter_res_; // intermediate result vector for fst dim
   PirParams pir_params_;

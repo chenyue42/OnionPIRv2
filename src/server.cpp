@@ -59,10 +59,11 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
 
   // Pass 1: fill random coefficients and record requested entries
   TIME_ONCE_START("DB random fill");
-  std::vector<seal::Plaintext> plaintexts(num_pt_);
+  const uint64_t q = pir_params_.get_coeff_modulus()[0];
+  std::vector<RlwePt> plaintexts(num_pt_);
   for (size_t poly_id = 0; poly_id < num_pt_; ++poly_id) {
-    plaintexts[poly_id].resize(coeff_count);
-    uint64_t* coeffs = plaintexts[poly_id].data();
+    plaintexts[poly_id].data.resize(coeff_count);
+    uint64_t* coeffs = plaintexts[poly_id].data.data();
     for (size_t i = 0; i < coeff_count; ++i) {
       coeffs[i] = rng() % plain_mod;
     }
@@ -72,14 +73,14 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
   }
   TIME_ONCE_END("DB random fill");
 
-  // Pass 2: NTT-transform and scatter into db_aligned_
+  // Pass 2: NTT-transform and scatter into db_aligned_.
+  // Plaintext values are in [0, t) with t < q, so they lift into [0, q) directly.
   TIME_ONCE_START("DB NTT + realign");
   for (size_t poly_id = 0; poly_id < num_pt_; ++poly_id) {
-    evaluator_.transform_to_ntt_inplace(plaintexts[poly_id], context_.first_parms_id());
-    const uint64_t* ntt_coeffs = plaintexts[poly_id].data();
-    // ! Upon update, we just need to change these coeff_val_cnt many coefficients.
+    uint64_t* coeffs = plaintexts[poly_id].data.data();
+    utils::ntt_fwd(coeffs, coeff_count, q);
     for (size_t coeff_idx = 0; coeff_idx < coeff_val_cnt; ++coeff_idx) {
-      db_aligned_[coeff_idx * num_pt_ + poly_id] = static_cast<db_coeff_t>(ntt_coeffs[coeff_idx]);
+      db_aligned_[coeff_idx * num_pt_ + poly_id] = static_cast<db_coeff_t>(coeffs[coeff_idx]);
     }
   }
   TIME_ONCE_END("DB NTT + realign");
@@ -440,7 +441,7 @@ void PirServer::set_client_gsw_key(const size_t client_id, GSWCt gsw_key) {
 
 
 // Get original plaintext (before NTT transformation) from recorded entries
-seal::Plaintext PirServer::direct_get_original_plaintext(const size_t plaintext_idx) const {
+RlwePt PirServer::direct_get_original_plaintext(const size_t plaintext_idx) const {
   auto it = recorded_pts_.find(plaintext_idx);
   if (it == recorded_pts_.end()) {
     throw std::invalid_argument("Plaintext index " + std::to_string(plaintext_idx) + " was not recorded during gen_data()");
