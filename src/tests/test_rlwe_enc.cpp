@@ -1,5 +1,5 @@
 #include "tests.h"
-#include "rlwe_enc.h"
+#include "rlwe.h"
 #include "hexl/hexl.hpp"
 #include <algorithm>
 #include <cmath>

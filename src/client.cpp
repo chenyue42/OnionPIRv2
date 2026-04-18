@@ -1,9 +1,8 @@
 #include "client.h"
 #include "pir.h"
 #include "utils.h"
-#include "gsw_eval.h"
-#include "rlwe_enc.h"
-#include "seal/util/iterator.h"
+#include "gsw.h"
+#include "rlwe.h"
 #include "hexl/hexl.hpp"
 #include <cassert>
 #include <random>
@@ -22,7 +21,7 @@ PirClient::PirClient(const PirParams &pir_params)
   rlwe_sk_.data.assign(secret_key_.data().data(), secret_key_.data().data() + N);
 }
 
-GSWCiphertext PirClient::generate_gsw_from_key() {
+GSWCt PirClient::generate_gsw_from_key() {
   constexpr size_t N = DBConsts::PolyDegree;
   const uint64_t q = pir_params_.get_coeff_modulus()[0];
 
@@ -86,38 +85,31 @@ std::vector<size_t> PirClient::get_query_indices(size_t pt_idx) {
 
 
 
-seal::Ciphertext PirClient::fast_generate_query(const size_t pt_idx) {
-  // ================== Setup parameters ==================
-  // Get the corresponding index of the plaintext in the database
+RlweCt PirClient::fast_generate_query(const size_t pt_idx) {
+  constexpr size_t N = DBConsts::PolyDegree;
+  const uint64_t Q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t t = pir_params_.get_plain_mod();
+  const double sigma = pir_params_.get_noise_std_dev();
+
   std::vector<size_t> query_indices = get_query_indices(pt_idx);
   PRINT_INT_ARRAY("\t\tquery_indices", query_indices.data(), query_indices.size());
   const size_t expan_height = pir_params_.get_expan_height();
-  const size_t bits_per_ciphertext = 1 << expan_height; // padding msg_size to the next power of 2
+  const size_t bits_per_ciphertext = 1 << expan_height;
 
-  // Algorithm 1 from the OnionPIR Paper
-
-  // empty plaintext
-  seal::Plaintext plain_query(DBConsts::PolyDegree); // we allow 4096 coefficients in the plaintext polynomial to be set as suggested in the paper.
-  // We set the corresponding coefficient to the inverse so the value of the
-  // expanded ciphertext will be 1
+  // plaintext has one nonzero coefficient = inv(bits_per_ciphertext) mod t
   uint64_t inverse = 0;
-  const uint64_t plain_modulus = pir_params_.get_plain_mod();
-  utils::try_invert_uint_mod(bits_per_ciphertext, plain_modulus, inverse);
-
-  // Since we are using new expansion method, where index b is split to even
-  // part and odd part, even part is stored in index 2b, and odd part is stored
-  // in index 2b+1. This results in a bit-reversed order of the indices.
+  utils::try_invert_uint_mod(bits_per_ciphertext, t, inverse);
   const size_t reversed_index = utils::bit_reverse(query_indices[0], expan_height);
-  plain_query[ reversed_index ] = inverse; // Add the first dimension query vector to the query
   DEBUG_PRINT("reversed_index: " << reversed_index << ", query_indices[0]: " << query_indices[0]);
 
-  // Encrypt plain_query first. Later we will insert the rest. $\tilde c$ in paper
-  seal::Ciphertext query;
-  encryptor_.encrypt_symmetric(plain_query, query);
+  // BFV encrypt under sk: c0 = -(a*s+e) + round(Q*m/t),  c1 = a  (coefficient form)
+  RlweCt query;
+  encrypt_zero(rlwe_sk_, N, Q, sigma, rng_, query, /*ntt_form=*/false);
+  const uint64_t scaled = static_cast<uint64_t>(
+      ((__uint128_t)Q * inverse + (t >> 1)) / t % Q);
+  query.c0[reversed_index] = (query.c0[reversed_index] + scaled) % Q;
 
-  // add gsw values to the query bfv 
   add_gsw_to_query(query, query_indices);
-
   return query;
 }
 
@@ -138,7 +130,7 @@ seal::Ciphertext PirClient::fast_generate_query(const size_t pt_idx) {
 
 
 
-void PirClient::add_gsw_to_query(seal::Ciphertext &query, const std::vector<size_t> query_indices) {
+void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_indices) {
   // no further dimensions
   if (query_indices.size() == 1) { return; }
   const size_t expan_height = pir_params_.get_expan_height();
@@ -215,16 +207,84 @@ bvks::BvGaloisKeys PirClient::create_bv_galois_keys() {
   return bvks::gen_bv_galois_keys(pir_params_, rlwe_sk_);
 }
 
-seal::Plaintext PirClient::decrypt_reply(const seal::Ciphertext& reply) {
-  // most likely we are going to use our own decryption since we perform single mod mod-switch
+seal::Plaintext PirClient::decrypt_reply(const RlweCt& reply) {
   return decrypt_mod_q(reply);
 }
 
-seal::Plaintext PirClient::decrypt_ct(const seal::Ciphertext& ct) {
-  // otherwise, use the default decryptor of SEAL as follows:
+// Shared single-mod decryption under modulus `q` using the matching sk.
+// Computes phase = c0 + c1*s (mod q), recovers m = round(phase * t / q),
+// and returns (plaintext, noise_budget).
+static void decrypt_phase_single_mod(const RlweCt &ct,
+                                     const uint64_t *sk_ntt,
+                                     uint64_t q, uint64_t t,
+                                     seal::Plaintext &out_pt,
+                                     int &out_budget) {
+  constexpr size_t N = DBConsts::PolyDegree;
+
+  std::vector<uint64_t> phase(N);
+  std::vector<uint64_t> c0(N), c1(N);
+  for (size_t i = 0; i < N; i++) {
+    c0[i] = ct.c0[i] % q;
+    c1[i] = ct.c1[i] % q;
+  }
+
+  if (ct.ntt_form) {
+    // Already NTT: multiply pointwise, then INTT on the product only.
+    intel::hexl::EltwiseMultMod(phase.data(), c1.data(), sk_ntt, N, q, 1);
+    utils::ntt_inv(phase.data(), N, q);
+    utils::ntt_inv(c0.data(), N, q);
+  } else {
+    // c1 is in coefficient form: forward NTT it, multiply, INTT back.
+    utils::ntt_fwd(c1.data(), N, q);
+    intel::hexl::EltwiseMultMod(phase.data(), c1.data(), sk_ntt, N, q, 1);
+    utils::ntt_inv(phase.data(), N, q);
+  }
+  intel::hexl::EltwiseAddMod(phase.data(), phase.data(), c0.data(), N, q);
+
+  seal::Plaintext result(N);
+  const uint64_t delta = q / t;
+  const uint64_t half_q = q / 2;
+  uint64_t max_noise = 0;
+
+  for (size_t i = 0; i < N; i++) {
+    uint128_t numerator = (uint128_t)phase[i] * t + half_q;
+    uint64_t m = static_cast<uint64_t>(numerator / q) % t;
+    result[i] = m;
+
+    uint64_t approx = static_cast<uint64_t>((uint128_t)delta * m % q);
+    uint64_t noise_pos = (phase[i] >= approx) ? (phase[i] - approx) : (q - approx + phase[i]);
+    uint64_t noise_abs = (noise_pos > half_q) ? (q - noise_pos) : noise_pos;
+    if (noise_abs > max_noise) max_noise = noise_abs;
+  }
+
+  out_budget = (max_noise > 0)
+    ? static_cast<int>(std::log2(static_cast<double>(q) / (2.0 * t * max_noise)))
+    : static_cast<int>(std::log2(static_cast<double>(q) / (2.0 * t)));
+
+  size_t sig = 0;
+  for (size_t i = N; i > 0; i--) {
+    if (result[i - 1] != 0) { sig = i; break; }
+  }
+  result.resize(std::max(sig, static_cast<size_t>(1)));
+  out_pt = std::move(result);
+}
+
+seal::Plaintext PirClient::decrypt_ct(const RlweCt &ct) {
+  const uint64_t q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t t = pir_params_.get_plain_mod();
   seal::Plaintext result;
-  decryptor_.decrypt(ct, result);
+  int budget = 0;
+  decrypt_phase_single_mod(ct, rlwe_sk_.data.data(), q, t, result, budget);
   return result;
+}
+
+int PirClient::noise_budget(const RlweCt &ct) {
+  const uint64_t q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t t = pir_params_.get_plain_mod();
+  seal::Plaintext tmp;
+  int budget = 0;
+  decrypt_phase_single_mod(ct, rlwe_sk_.data.data(), q, t, tmp, budget);
+  return budget;
 }
 
 
@@ -303,101 +363,46 @@ seal::Plaintext PirClient::decrypt_ct(const seal::Ciphertext& ct) {
 
 
 
-seal::Ciphertext PirClient::load_resp_from_stream(std::stringstream &resp_stream) {
+RlweCt PirClient::load_resp_from_stream(std::stringstream &resp_stream) {
   // For now, we only serve the single modulus case.
-
-  // ------------ parameter setup -------------------------------------------
   const size_t small_q = pir_params_.get_small_q();
   const size_t small_q_width =
       static_cast<size_t>(std::ceil(std::log2(small_q)));
   constexpr size_t coeff_count = DBConsts::PolyDegree;
 
-  std::vector<uint64_t> c0(coeff_count);
-  std::vector<uint64_t> c1(coeff_count);
+  RlweCt result;
+  result.c0.assign(coeff_count, 0);
+  result.c1.assign(coeff_count, 0);
 
-  // ------------ helper: read one bit (LSB-first in every byte) ------------
   uint8_t current_byte = 0;
-  size_t bits_left = 0; // how many unread bits remain in current_byte
+  size_t bits_left = 0;
   auto next_bit = [&]() -> uint8_t {
-    if (bits_left == 0) { // fetch the next byte
+    if (bits_left == 0) {
       int ch = resp_stream.get();
       if (ch == EOF)
         throw std::runtime_error("unexpected end of response stream");
       current_byte = static_cast<uint8_t>(ch);
       bits_left = 8;
     }
-    uint8_t bit = current_byte & 1; // least-significant bit is next in order
+    uint8_t bit = current_byte & 1;
     current_byte >>= 1;
     --bits_left;
     return bit;
   };
-
-  // ------------ helper: read one coefficient ------------------------------
   auto read_coeff = [&](uint64_t &dest) {
     dest = 0;
     for (size_t j = 0; j < small_q_width; ++j)
-      dest |= static_cast<uint64_t>(next_bit()) << j; // LSB-first
+      dest |= static_cast<uint64_t>(next_bit()) << j;
   };
 
-  // ------------ fill both polynomials --------------------------------------
-  for (size_t i = 0; i < coeff_count; ++i)
-    read_coeff(c0[i]);
-  for (size_t i = 0; i < coeff_count; ++i)
-    read_coeff(c1[i]);
-
-  // ------------ reconstruct ciphertext -------------------------------------
-  seal::Ciphertext result(context_);
-  result.resize(context_, 2);
-  std::copy(c0.begin(), c0.end(), result.data(0));
-  std::copy(c1.begin(), c1.end(), result.data(1));
+  for (size_t i = 0; i < coeff_count; ++i) read_coeff(result.c0[i]);
+  for (size_t i = 0; i < coeff_count; ++i) read_coeff(result.c1[i]);
+  result.ntt_form = false;
   return result;
 }
 
 
-seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct, const uint64_t small_q) const {
-  constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const auto seal_params = pir_params_.get_seal_params();
-  const auto full_mods = seal_params.coeff_modulus();
-  
-  // display the moduli. Notice that there is one extra modulus used by seal. 
-  for (size_t i = 0; i < full_mods.size(); i++) {
-    DEBUG_PRINT("full_mods[" << i << "] = " << full_mods[i].value());
-  }
-  DEBUG_PRINT("ct mod: " << pir_params_.get_coeff_modulus()[0]);
-  DEBUG_PRINT("small q = " << small_q);
-
-  // create a new secret key with new modulus
-  seal::EncryptionParameters new_params(seal::scheme_type::bfv);
-  new_params.set_poly_modulus_degree(DBConsts::PolyDegree);
-  new_params.set_plain_modulus(pir_params_.get_plain_mod());
-  new_params.set_coeff_modulus({small_q, full_mods.back()}); // use the same last modulus as the original one.
-
-  seal::SecretKey new_sk = sk_mod_switch(secret_key_, new_params);
-  seal::SEALContext new_context(new_params);
-  seal::Decryptor new_decryptor(new_context, new_sk);
-  seal::Encryptor new_encryptor(new_context, new_sk);
-
-  // create a dummy ciphertext
-  seal::Ciphertext dummy_ct(new_context);
-  dummy_ct.resize(new_context, 2);
-
-  // create a new ciphertext under new context, then copy the data from the input ct, then decrypt using the new sk.
-  for (size_t i = 0; i < coeff_count; i++) {
-    // copy the data from the input ct to the new ct
-    dummy_ct.data(0)[i] = ct.data(0)[i];
-    dummy_ct.data(1)[i] = ct.data(1)[i];
-  }
-
-  // decrypt the new ciphertext using the new sk
-  seal::Plaintext result;
-  new_decryptor.decrypt(dummy_ct, result);
-  
-  return result;
-}
-
-
-
-seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
+seal::Plaintext PirClient::decrypt_mod_q(const RlweCt &ct) const {
   // Custom single-mod decryption that bypasses SEAL's RNS decryptor.
   // Computes phase = c0 + c1*s (mod small_q), then recovers plaintext
   // via round(phase * t / q) and measures noise directly.
@@ -405,14 +410,12 @@ seal::Plaintext PirClient::decrypt_mod_q(const seal::Ciphertext &ct) const {
   const uint64_t q = pir_params_.get_small_q();
   const uint64_t t = pir_params_.get_plain_mod();
 
-  // phase = c0 + c1 * s  (mod q)
-  // NTT-transform c1, multiply with precomputed sk_ntt_small_q_, INTT back
   std::vector<uint64_t> phase(N);
   std::vector<uint64_t> c0(N), c1_ntt(N);
   // Reduce mod q in case mod_switch_inplace produced values = q (from rounding)
   for (size_t i = 0; i < N; i++) {
-    c0[i] = ct.data(0)[i] % q;
-    c1_ntt[i] = ct.data(1)[i] % q;
+    c0[i] = ct.c0[i] % q;
+    c1_ntt[i] = ct.c1[i] % q;
   }
   utils::ntt_fwd(c1_ntt.data(), N, q);
   intel::hexl::EltwiseMultMod(phase.data(), c1_ntt.data(), sk_ntt_small_q_.data(), N, q, 1);

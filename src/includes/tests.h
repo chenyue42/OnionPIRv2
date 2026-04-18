@@ -3,7 +3,7 @@
 #include <string>
 
 // Common includes used by most tests
-#include "gsw_eval.h"
+#include "gsw.h"
 #include "pir.h"
 #include "server.h"
 #include "client.h"

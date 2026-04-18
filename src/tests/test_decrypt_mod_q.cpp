@@ -20,7 +20,12 @@ void PirTest::test_decrypt_mod_q() {
   BENCH_PRINT("Vector a: " << a.to_string());
   seal::Ciphertext a_encrypted;    // encrypted "a" will be stored here.
   encryptor_.encrypt_symmetric(a, a_encrypted);
-  const auto coeff_modulus = pir_params.get_coeff_modulus();
-  result = client.decrypt_mod_q(a_encrypted, coeff_modulus[0]);
+
+  // Bridge seal::Ciphertext -> RlweCt for decrypt_mod_q.
+  RlweCt rlwe_ct;
+  rlwe_ct.c0.assign(a_encrypted.data(0), a_encrypted.data(0) + coeff_count);
+  rlwe_ct.c1.assign(a_encrypted.data(1), a_encrypted.data(1) + coeff_count);
+  rlwe_ct.ntt_form = a_encrypted.is_ntt_form();
+  result = client.decrypt_mod_q(rlwe_ct);
   BENCH_PRINT("Decrypted result: " << result.to_string());
 }

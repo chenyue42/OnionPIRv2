@@ -57,12 +57,12 @@ void PirTest::test_pir(bool use_bv) {
     size_t query_pt_idx = query_indices[i];
 
     TIME_START(CLIENT_TOT_TIME);
-    seal::Ciphertext query = client.fast_generate_query(query_pt_idx);
+    RlweCt query = client.fast_generate_query(query_pt_idx);
     TIME_END(CLIENT_TOT_TIME);
     query_size = pir_params.get_BFV_size();
 
     TIME_START(SERVER_TOT_TIME);
-    seal::Ciphertext response = server.make_query(client_id, query, client.decryptor_, use_bv);
+    RlweCt response = server.make_query(client_id, query, use_bv);
     TIME_END(SERVER_TOT_TIME);
 
 
@@ -71,7 +71,7 @@ void PirTest::test_pir(bool use_bv) {
 
     // ============= CLIENT ===============
     // client gets result from the server and decrypts it
-    seal::Ciphertext reconstructed_result = client.load_resp_from_stream(resp_stream);
+    RlweCt reconstructed_result = client.load_resp_from_stream(resp_stream);
     TIME_START(CLIENT_TOT_TIME);
     seal::Plaintext decrypted_result = client.decrypt_reply(reconstructed_result);
     TIME_END(CLIENT_TOT_TIME);

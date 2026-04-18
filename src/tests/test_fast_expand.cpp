@@ -13,14 +13,6 @@ void PirTest::test_fast_expand_query() {
 
 
   PirParams pir_params;
-  auto params = pir_params.get_seal_params();
-  auto context_ = pir_params.get_context();
-  auto evaluator_ = seal::Evaluator(context_);
-  auto keygen_ = seal::KeyGenerator(context_);
-  auto secret_key_ = keygen_.secret_key();
-  auto encryptor_ = seal::Encryptor(context_, secret_key_);
-  auto decryptor_ = seal::Decryptor(context_, secret_key_);
-  const size_t coeff_count = DBConsts::PolyDegree;
   std::stringstream query_stream;
   const size_t fst_dim_sz = pir_params.get_fst_dim_sz();
   const size_t useful_cnt = fst_dim_sz + pir_params.get_l() * (pir_params.get_num_dims() - 1);
@@ -39,39 +31,23 @@ void PirTest::test_fast_expand_query() {
 
   // ============= Generate the query ==============
   const size_t query_idx = 253;
-  seal::Ciphertext fast_seeded = client.fast_generate_query(query_idx);
-
-  // ============= Serialize the query ==============
-  seal::Ciphertext fast_query;
-  fast_seeded.save(query_stream);
-  fast_query.load(context_, query_stream);
+  RlweCt fast_query = client.fast_generate_query(query_idx);
   BENCH_PRINT("fast_query initial noise budget: " << client.noise_budget(fast_query) << " bits");
-  auto fast_decrypted = client.decrypt_ct(fast_query);
-  BENCH_PRINT("fast packed query: " << fast_decrypted.to_string());
+
+  {
+    auto fast_decrypted = client.decrypt_ct(fast_query);
+    BENCH_PRINT("fast packed query: " << fast_decrypted.to_string());
+  }
   PRINT_BAR;
 
   // ============= Expand the query ==============
   auto fast_exp_q = server.fast_expand_qry(client_id, fast_query);
 
-  // Bridge RlweCt -> seal::Ciphertext (single-mod)
-  auto to_seal = [&](const RlweCt &src) {
-    seal::Ciphertext r(context_);
-    r.resize(context_, 2);
-    std::copy(src.c0.begin(), src.c0.begin() + coeff_count, r.data(0));
-    std::copy(src.c1.begin(), src.c1.begin() + coeff_count, r.data(1));
-    r.is_ntt_form() = src.ntt_form;
-    return r;
-  };
-
-  {
-    seal::Ciphertext tmp = to_seal(fast_exp_q[query_idx % fst_dim_sz]);
-    BENCH_PRINT("fast_exp_q noise budget: " << client.noise_budget(tmp) << " bits");
-  }
+  BENCH_PRINT("fast_exp_q noise budget: " << client.noise_budget(fast_exp_q[query_idx % fst_dim_sz]) << " bits");
 
   std::vector<seal::Plaintext> fast_exp_pt;
   for (size_t i = 0; i < useful_cnt; i++) {
-    seal::Ciphertext tmp = to_seal(fast_exp_q[i]);
-    fast_exp_pt.push_back(client.decrypt_ct(tmp));
+    fast_exp_pt.push_back(client.decrypt_ct(fast_exp_q[i]));
   }
   BENCH_PRINT("fast Expanded query: " << fast_exp_pt[query_idx % fst_dim_sz].to_string());
 }

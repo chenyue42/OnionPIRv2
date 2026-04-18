@@ -1,14 +1,12 @@
 #pragma once
-#include "seal/seal.h"
 #include "pir.h"
 #include "rlwe.h"
-#include "rlwe_enc.h"
 #include <random>
 #include <vector>
 
 
-// A GSWCiphertext is a flattened 2lx2 matrix of polynomials
-typedef std::vector<std::vector<uint64_t>> GSWCiphertext;
+// A GSWCt is a flattened 2l x 2 matrix of polynomials.
+typedef std::vector<std::vector<uint64_t>> GSWCt;
 
 class GSWEval {
   private:
@@ -31,7 +29,7 @@ class GSWEval {
       @param ct_poly_size - number of ciphertext polynomials
       @param res_ct - output ciphertext
     */
-    void external_product(GSWCiphertext const &gsw_enc, RlweCt const &bfv,
+    void external_product(GSWCt const &gsw_enc, RlweCt const &bfv,
                           RlweCt &res_ct,
                           LogContext context = LogContext::GENERIC);
 
@@ -63,8 +61,8 @@ class GSWEval {
       @param output - output to store the GSW ciphertext as a vector of vectors of
       polynomial coefficients
     */
-    void query_to_gsw(std::vector<RlweCt> query, GSWCiphertext gsw_key,
-                      GSWCiphertext &output);
+    void query_to_gsw(std::vector<RlweCt> query, GSWCt gsw_key,
+                      GSWCt &output);
 
     /*!
       Encrypt a plaintext polynomial as a full GSW ciphertext in NTT form.
@@ -75,9 +73,9 @@ class GSWEval {
       @param sk        - NTT-form ternary secret key.
       @param rng       - randomness source for a, e.
     */
-    GSWCiphertext plain_to_gsw(std::vector<uint64_t> const &plaintext,
+    GSWCt plain_to_gsw(std::vector<uint64_t> const &plaintext,
                                const RlweSk &sk, std::mt19937_64 &rng);
 
     // Transform the given GSWCipher text from polynomial representation to NTT representation.
-    void gsw_ntt_forward(GSWCiphertext &gsw);
+    void gsw_ntt_forward(GSWCt &gsw);
 };

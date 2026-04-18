@@ -1,5 +1,5 @@
 #include "server.h"
-#include "gsw_eval.h"
+#include "gsw.h"
 #include "rlwe.h"
 #include "utils.h"
 #include "matrix.h"
@@ -301,7 +301,7 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
   }
 }
 
-RlweCt PirServer::evaluate_other_dim(std::vector<RlweCt> &mid_db, std::vector<GSWCiphertext> &selectors) {
+RlweCt PirServer::evaluate_other_dim(std::vector<RlweCt> &mid_db, std::vector<GSWCt> &selectors) {
   // Handle single dimension case
   if (pir_params_.get_num_dims() == 1) {
     // For single dimension, we just return the first (and only) ciphertext
@@ -337,7 +337,7 @@ RlweCt PirServer::evaluate_other_dim(std::vector<RlweCt> &mid_db, std::vector<GS
 }
 
 
-void PirServer::ext_prod_mux(RlweCt &x, RlweCt &y, GSWCiphertext &selection_cipher, RlweCt &result) {
+void PirServer::ext_prod_mux(RlweCt &x, RlweCt &y, GSWCt &selection_cipher, RlweCt &result) {
     /**
    * Note that we only have a single GSWCiphertext for this selection.
    * Here is the logic:
@@ -381,7 +381,7 @@ void PirServer::ext_prod_mux(RlweCt &x, RlweCt &y, GSWCiphertext &selection_ciph
 // https://www.usenix.org/conference/usenixsecurity22/presentation/mahdavi. Basically, the algorithm 3 in Onion-Ring ORAM has some typos.
 // And we can save one Subs(c_b, k) operation in the algorithm 3. The notations of this function follows the constant-weight PIR paper.
 std::vector<RlweCt>
-PirServer::expand_query(size_t client_id, seal::Ciphertext &ciphertext) const {
+PirServer::expand_query(size_t client_id, RlweCt &ciphertext) const {
   seal::EncryptionParameters params = pir_params_.get_seal_params();
   const size_t expan_height = pir_params_.get_expan_height();
   const auto& client_galois_key = client_galois_keys_.at(client_id); // used for substitution
@@ -401,8 +401,13 @@ PirServer::expand_query(size_t client_id, seal::Ciphertext &ciphertext) const {
   // SEAL-internal expansion: keep seal::Ciphertext locally so we can call
   // evaluator_.apply_galois_inplace (requires SEAL GaloisKeys). Convert to
   // RlweCt at the boundary.
+  constexpr size_t N_local = DBConsts::PolyDegree;
   std::vector<seal::Ciphertext> seal_cts( (size_t)pow(2, expan_height) );
-  seal_cts[0] = ciphertext;
+  seal_cts[0] = seal::Ciphertext(context_);
+  seal_cts[0].resize(context_, 2);
+  std::copy(ciphertext.c0.begin(), ciphertext.c0.begin() + N_local, seal_cts[0].data(0));
+  std::copy(ciphertext.c1.begin(), ciphertext.c1.begin() + N_local, seal_cts[0].data(1));
+  seal_cts[0].is_ntt_form() = ciphertext.ntt_form;
 
   for (size_t a = 0; a < expan_height; a++) {
     const size_t level_size = pow(2, a);
@@ -431,7 +436,7 @@ PirServer::expand_query(size_t client_id, seal::Ciphertext &ciphertext) const {
 
 //  single-loop level-order expansion  (root index = 1)
 std::vector<RlweCt>
-PirServer::fast_expand_qry(std::size_t client_id, seal::Ciphertext &ciphertext) const {
+PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
   // ============== parameters
   const size_t useful_cnt = pir_params_.get_fst_dim_sz() +
                             pir_params_.get_l() * (pir_params_.get_num_dims() - 1); // u
@@ -443,10 +448,7 @@ PirServer::fast_expand_qry(std::size_t client_id, seal::Ciphertext &ciphertext) 
 
   // ============== storage   – index 0 is *unused*, root is slot 1
   std::vector<RlweCt> cts(2 * w); // slots 0 … 2w-1
-  // c1 ← input: bridge seal::Ciphertext query → RlweCt
-  cts[1].c0.assign(ciphertext.data(0), ciphertext.data(0) + N);
-  cts[1].c1.assign(ciphertext.data(1), ciphertext.data(1) + N);
-  cts[1].ntt_form = ciphertext.is_ntt_form();
+  cts[1] = ciphertext;
 
   // ============== level-order walk, skip right-of-u sub-trees
   for (size_t i = 1; i < w; ++i) { // internal nodes only
@@ -495,7 +497,7 @@ void PirServer::set_client_bv_galois_key(const size_t client_id, bvks::BvGaloisK
   client_bv_galois_keys_[client_id] = std::move(bv_keys);
 }
 
-void PirServer::set_client_gsw_key(const size_t client_id, GSWCiphertext gsw_key) {
+void PirServer::set_client_gsw_key(const size_t client_id, GSWCt gsw_key) {
   client_gsw_keys_[client_id] = std::move(gsw_key);
 }
 
@@ -510,7 +512,7 @@ seal::Plaintext PirServer::direct_get_original_plaintext(const size_t plaintext_
 }
 
 
-seal::Ciphertext PirServer::make_query(const size_t client_id, seal::Ciphertext &query, seal::Decryptor &decryptor, bool use_bv) {
+RlweCt PirServer::make_query(const size_t client_id, RlweCt &query, bool use_bv) {
   // receive the query from the client
 
   // ========================== Expansion & conversion ==========================
@@ -523,7 +525,7 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, seal::Ciphertext 
 
   // Reconstruct RGSW queries
   TIME_START(CONVERT_TIME);
-  std::vector<GSWCiphertext> gsw_vec(pir_params_.get_num_dims() - 1); // GSW ciphertexts
+  std::vector<GSWCt> gsw_vec(pir_params_.get_num_dims() - 1); // GSW ciphertexts
   if (pir_params_.get_num_dims() != 1) {  // if we do need futher dimensions
     for (size_t i = 1; i < pir_params_.get_num_dims(); i++) {
       std::vector<RlweCt> lwe_vector; // RLWE ciphertexts, size l. Reconstructed as a single RGSW ciphertext.
@@ -561,18 +563,11 @@ seal::Ciphertext PirServer::make_query(const size_t client_id, seal::Ciphertext 
   TIME_END(MOD_SWITCH);
   DEBUG_PRINT("Modulus switching done.");
 
-  // Bridge RlweCt -> seal::Ciphertext for the public return signature.
-  constexpr size_t N = DBConsts::PolyDegree;
-  seal::Ciphertext out(context_);
-  out.resize(context_, 2);
-  std::copy(result.c0.begin(), result.c0.begin() + N, out.data(0));
-  std::copy(result.c1.begin(), result.c1.begin() + N, out.data(1));
-  out.is_ntt_form() = result.ntt_form;
-  return out;
+  return result;
 }
 
 
-size_t PirServer::save_resp_to_stream(const seal::Ciphertext &response,
+size_t PirServer::save_resp_to_stream(const RlweCt &response,
                                       std::stringstream &stream) {
   // For now, we only serve the single modulus case.
 

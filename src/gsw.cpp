@@ -1,4 +1,4 @@
-#include "gsw_eval.h"
+#include "gsw.h"
 #include "utils.h"
 #include "logging.h"
 #include "bv_keyswitch.h"
@@ -9,11 +9,11 @@
 // (a 2l vector of polynomials) and the GSW ciphertext (a 2lx2 matrix of
 // polynomials) to obtain a size-2 vector of polynomials, which is exactly our
 // result ciphertext. We use an NTT multiplication to speed up polynomial
-// multiplication, assuming that both the GSWCiphertext and decomposed bfv is in
+// multiplication, assuming that both the GSWCt and decomposed bfv is in
 // polynomial coefficient representation.
 
 
-void GSWEval::gsw_ntt_forward(GSWCiphertext &gsw) {
+void GSWEval::gsw_ntt_forward(GSWCt &gsw) {
   constexpr size_t coeff_count = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const auto &coeff_mods = pir_params_.get_coeff_modulus();
@@ -27,7 +27,7 @@ void GSWEval::gsw_ntt_forward(GSWCiphertext &gsw) {
   }
 }
 
-void GSWEval::external_product(GSWCiphertext const &gsw_enc, RlweCt const &bfv,
+void GSWEval::external_product(GSWCt const &gsw_enc, RlweCt const &bfv,
                               RlweCt &res_ct,
                               LogContext context) {
 
@@ -255,8 +255,8 @@ void GSWEval::decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,
   TIME_END(extern_ntt_log_key);
 }
 
-void GSWEval::query_to_gsw(std::vector<RlweCt> query, GSWCiphertext gsw_key,
-                           GSWCiphertext &output) {
+void GSWEval::query_to_gsw(std::vector<RlweCt> query, GSWCt gsw_key,
+                           GSWCt &output) {
   const size_t curr_l = query.size();
   output.resize(curr_l);
   constexpr size_t coeff_count = DBConsts::PolyDegree;
@@ -289,7 +289,7 @@ void GSWEval::query_to_gsw(std::vector<RlweCt> query, GSWCiphertext gsw_key,
   }
 }
 
-GSWCiphertext GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
+GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
                                     const RlweSk &sk, std::mt19937_64 &rng) {
   constexpr size_t N = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
@@ -305,7 +305,7 @@ GSWCiphertext GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
   const std::vector<uint64_t> &gadget = gadget_table[0];
 
   // Output layout: 2*l_ rows, each row = [c0 (N) || c1 (N)] in NTT form.
-  GSWCiphertext output(2 * l_, std::vector<uint64_t>(2 * N));
+  GSWCt output(2 * l_, std::vector<uint64_t>(2 * N));
 
   RlweCt ct;
   for (size_t half = 0; half < 2; half++) {

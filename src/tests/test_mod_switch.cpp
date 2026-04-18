@@ -38,13 +38,7 @@ void PirTest::test_mod_switch() {
   rlwe_ct.ntt_form = ct.is_ntt_form();
   server.mod_switch_inplace(rlwe_ct, small_q);
 
-  // Bridge back for decrypt_mod_q
-  seal::Ciphertext ct_small(context_);
-  ct_small.resize(context_, 2);
-  std::copy(rlwe_ct.c0.begin(), rlwe_ct.c0.begin() + coeff_count, ct_small.data(0));
-  std::copy(rlwe_ct.c1.begin(), rlwe_ct.c1.begin() + coeff_count, ct_small.data(1));
-  ct_small.is_ntt_form() = rlwe_ct.ntt_form;
-  result = client.decrypt_mod_q(ct_small, small_q);
+  result = client.decrypt_mod_q(rlwe_ct);
   BENCH_PRINT("Client decrypted: " << result.to_string());
 
   // verify if ct coeffs are all less than small_q

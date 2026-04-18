@@ -1,6 +1,6 @@
 #include "pir.h"
 #include "database_constants.h"
-#include "gsw_eval.h"
+#include "gsw.h"
 #include "utils.h"
 
 #include <cassert>
