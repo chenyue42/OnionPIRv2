@@ -38,10 +38,16 @@ void signed_gadget_decompose(uint64_t val, size_t base_log2,
   }
 }
 
-// Gadget base log: ceil(log_q_data / L_KS).
+// Gadget base log: floor(log_q_data / L_KS) + 1.
+// The +1 guarantees B^L_KS > q, giving the signed-digit decomposition
+// enough headroom to absorb carries without leaving a non-zero residue in
+// the discarded (L_KS-th) digit. Without it, configurations where
+// base_log2 * L_KS == q_bits (e.g. L_KS=10 or 12 at q ~ 2^60) leak an
+// uncompensated sigma_k(s) * (B^L_KS mod q) term into the keyswitch noise.
+// Matches Spiral's convention (spiral/include/util.h:get_bits_per).
 static inline size_t bv_base_log2(const PirParams &pir_params) {
   const size_t q_bits = pir_params.get_ct_mod_width();
-  return (q_bits + L_KS - 1) / L_KS;
+  return q_bits / L_KS + 1;
 }
 
 // Compute (1 << (i * base_log2)) mod q, safely.

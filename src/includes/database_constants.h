@@ -26,6 +26,7 @@ namespace DBConsts {
   constexpr size_t PolyDegree = 2048;
   constexpr size_t L_EP = 5;
   constexpr size_t L_KEY = 12;
+  constexpr size_t L_KS = 8;
   constexpr size_t TREE_HEIGHT = 9;
   constexpr size_t PlainMod = 15;
   constexpr size_t SmallQWidth = 28;
@@ -36,6 +37,7 @@ namespace DBConsts {
   constexpr size_t PolyDegree = 2048;
   constexpr size_t L_EP = 5;
   constexpr size_t L_KEY = 12;
+  constexpr size_t L_KS = 8;
   constexpr size_t TREE_HEIGHT = 9;
   constexpr size_t PlainMod = 14;
   constexpr size_t SmallQWidth = 27;
@@ -46,6 +48,7 @@ namespace DBConsts {
   constexpr size_t PolyDegree = 2048;
   constexpr size_t L_EP = 5;
   constexpr size_t L_KEY = 9;
+  constexpr size_t L_KS = 8;
   constexpr size_t TREE_HEIGHT = 9;
   constexpr size_t PlainMod = 16;
   constexpr size_t SmallQWidth = 28;
@@ -56,6 +59,7 @@ namespace DBConsts {
   constexpr size_t PolyDegree = 4096;
   constexpr size_t L_EP = 4;
   constexpr size_t L_KEY = 10;
+  constexpr size_t L_KS = 8;
   constexpr size_t TREE_HEIGHT = 9;
   constexpr size_t PlainMod = 46;
   constexpr size_t SmallQWidth = 57;
@@ -66,8 +70,9 @@ namespace DBConsts {
   constexpr size_t PolyDegree = 2048;
   constexpr size_t L_EP = 4;
   constexpr size_t L_KEY = 8;
-  constexpr size_t TREE_HEIGHT = 7;
-  constexpr size_t PlainMod = 12;
+  constexpr size_t L_KS = 12;
+  constexpr size_t TREE_HEIGHT = 9;
+  constexpr size_t PlainMod = 14;
   constexpr size_t SmallQWidth = 55;
   constexpr std::array<size_t, 2> CoeffMods = {60, 60};
 

@@ -2,6 +2,7 @@
 
 #include "pir.h"
 #include "rlwe.h"
+#include "database_constants.h"
 #include <vector>
 #include <cstdint>
 #include <iosfwd>
@@ -31,8 +32,9 @@
 
 namespace bvks {
 
-// Number of gadget digits per key-switching key.
-constexpr size_t L_KS = 8;
+// Number of gadget digits per key-switching key. Sourced from DBConsts so
+// it lives alongside the other per-config gadget lengths (L_EP, L_KEY).
+constexpr size_t L_KS = DBConsts::L_KS;
 
 // A single RLWE ciphertext under the data modulus, stored in NTT form.
 // Layout: rns_mod_cnt * N uint64s per polynomial component.

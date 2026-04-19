@@ -110,22 +110,6 @@ RlweCt PirClient::fast_generate_query(const size_t pt_idx) {
 }
 
 
-// seal::Ciphertext PirClient::gen_mult_queries(const size_t pt_idx, const size_t num_queries) {
-//   std::vector<size_t> query_indices = get_query_indices(pt_idx);
-//   const size_t bits_per_query = 1 << pir_params_.get_expan_height();
-//   // let's assume all queries are expanded to the same size.
-
-//   uint64_t inverse = 0;
-//   const uint64_t plain_modulus = pir_params_.get_plain_mod();
-//   seal::util::try_invert_uint_mod(bits_per_query, plain_modulus, inverse);  // finds bits_per_query^{-1} mod plain_modulus
-
-//   // create a vector of ciphertexts.
-//   std::vector<seal::Ciphertext> queries(num_queries);
-
-// }
-
-
-
 void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_indices) {
   // no further dimensions
   if (query_indices.size() == 1) { return; }
@@ -258,80 +242,6 @@ int PirClient::noise_budget(const RlweCt &ct) {
   decrypt_phase_single_mod(ct, rlwe_sk_.data.data(), q, t, tmp, budget);
   return budget;
 }
-
-
-// =======================================================================
-// Below is my previous attempt to decrypt the ciphertext using new modulus.
-// However, I didn't notice that the secret key used in this method is not setup
-// correctly. After we have the secret_key_mod_switch, it is easier to simply
-// create new decryptor using the new secret key. 
-// -- Yue
-// =======================================================================
-
-// seal::Plaintext PirClient::custom_decrypt_mod_q(const seal::Ciphertext &ct, const std::vector<seal::Modulus>& q_mod) {
-//   auto params = pir_params_.get_seal_params();
-//   auto context_ = pir_params_.get_context();
-//   const size_t plain_mod = pir_params_.get_plain_mod();
-//   auto ntt_tables = context_.get_context_data(params.parms_id())->small_ntt_tables();
-//   const size_t coeff_count = DBConsts::PolyDegree;
-//   MemoryPoolHandle pool_ = MemoryManager::GetPool(mm_prof_opt::mm_force_new, true);
-//   seal::Plaintext phase(coeff_count), result(coeff_count);
-
-//   // Create a new RNSTool (copied from context.cpp)
-//   Pointer<RNSBase> coeff_modulus_base = allocate<RNSBase>(pool_, q_mod, pool_);
-//   util::Pointer<util::RNSTool> rns_tool_ = allocate<RNSTool>(pool_, coeff_count, *coeff_modulus_base, plain_mod, pool_);
-
-//   // =========================== Now let's try to decrypt the ciphertext. Adapted from decryptor.cpp
-//   /*
-//     The high-level is to compute round( (c0 * s + c1) / Delta )
-//     The questions are:
-//     1. how do you do polynomial multiplication and addition?
-//       ANS: we transform c1 to NTT form, use dyadic_product_coeffmod to do the
-//           multiplication, then INTT it back to coeff form and compute
-//           add_poly_coeffmod.
-//     2. What is Delta?
-//       ANS: Delta = floor(new_q / plain_mod) = (new_q - new_q % plain_mod) / plain_mod
-//     3. How do we calculate the division?
-//       ANS: Doesn't look like a division over rationals... I am checking
-//           RNSTool::decrypt_scale_and_round. It "divide scaling variant using
-//           BEHZ FullRNS techniques", as introduced by comment in decryptor.cpp
-//           We can use this function if we setup the RNSTool correctly.j
-//   */
-
-//   const size_t rns_mod_cnt = q_mod.size();
-
-//   // ======================= Compute the phase = c0 + c1 * s
-//   util::Pointer<std::uint64_t> secret_key_array_ = allocate_poly(coeff_count, 2, pool_);
-//   set_poly(secret_key_.data().data(), coeff_count, 2, secret_key_array_.get());
-
-//   // settingup iterators for input and the phase
-//   ConstRNSIter secret_key_array(secret_key_array_.get(), coeff_count);
-//   ConstRNSIter c0(ct.data(0), coeff_count);
-//   ConstRNSIter c1(ct.data(1), coeff_count);
-//   SEAL_ALLOCATE_ZERO_GET_RNS_ITER(phase_iter, coeff_count, rns_mod_cnt, pool_);
-
-//   // perform the elementwise multiplication and addition
-//   SEAL_ITERATE(
-//     iter(c0, c1, secret_key_array, q_mod, ntt_tables, phase_iter), rns_mod_cnt,
-//     [&](auto I) {
-//       set_uint(get<1>(I), coeff_count, get<5>(I));
-//       // Transform c_1 to NTT form
-//       ntt_negacyclic_harvey_lazy(get<5>(I), get<4>(I));
-//       // put < c_1 * s > mod q in destination
-//       dyadic_product_coeffmod(get<5>(I), get<2>(I), coeff_count, get<3>(I), get<5>(I));
-//       // Transform back
-//       inverse_ntt_negacyclic_harvey(get<5>(I), get<4>(I));
-//       // add c_0 to the result; note that destination should be in the same (NTT) form as encrypted
-//       add_poly_coeffmod(get<5>(I), get<0>(I), coeff_count, get<3>(I), get<5>(I));
-//   });
-
-//   // ======================= scale the phase and round it to get the result.
-//   rns_tool_->decrypt_scale_and_round(phase_iter, result.data(), pool_);
-
-//   size_t plain_coeff_count = get_significant_uint64_count_uint(result.data(), coeff_count);
-//   result.resize(std::max(plain_coeff_count, size_t(1)));
-//   return result;
-// }
 
 
 
