@@ -5,6 +5,13 @@
 #include <cstdint>
 #include <vector>
 
+// Precomputed constants for K=2 CRT compose/decompose in gsw.cpp. Depends
+// only on coeff_modulus, so computed once in PirParams and reused per call.
+struct RnsTables {
+  uint64_t q0_inv_mod_q1 = 0; // (q0 mod q1)^{-1} mod q1
+  std::vector<uint64_t> r64_mod_q; // 2^64 mod q_i, one per limb
+};
+
 // ================== CLASS DEFINITIONS ==================
 class PirParams {
 public:
@@ -40,16 +47,21 @@ public:
   // In terms of number of plaintexts
   // when other_dim_sz == 1, it means we only use the first dimension.
   inline size_t get_other_dim_sz() const { return num_pt_ / fst_dim_sz_; }
-  // Ciphertext coeff modulus carries an extra "special" prime (last entry) that
-  // is not used for RLWE arithmetic; active RNS count excludes it.
-  inline size_t get_rns_mod_cnt() const { return coeff_modulus_.size() - 1; }
-  inline size_t get_coeff_val_cnt() const { return DBConsts::PolyDegree * get_rns_mod_cnt(); }
+  inline size_t get_coeff_mod_cnt() const { return coeff_modulus_.size(); }
+  inline size_t get_coeff_val_cnt() const { return DBConsts::PolyDegree * get_coeff_mod_cnt(); }
   inline uint64_t get_plain_mod() const { return plain_mod_; }
   inline const std::vector<uint64_t> &get_coeff_modulus() const { return coeff_modulus_; }
   inline const std::vector<int> &get_coeff_mod_bits() const { return coeff_mod_bits_; }
+  inline const RnsTables &get_rns_tables() const { return rns_tables_; }
   inline size_t get_poly_degree() const { return DBConsts::PolyDegree; }
   // The height of the expansion tree during packing unpacking stages
   inline const size_t get_expan_height() const { return DBConsts::TREE_HEIGHT; }
+  // Number of independent BFV queries the client sends. Stateful == 1.
+  inline size_t get_num_queries() const { return DBConsts::NumQueries; }
+  // Number of subsequent ("other") dimensions, excluding the first dim.
+  inline size_t get_num_other_dims() const { return num_dims_ - 1; }
+  inline DBConsts::QueryMode get_query_mode() const { return DBConsts::Mode; }
+  inline DBConsts::GswSource get_gsw_source() const { return DBConsts::GswSrc; }
 
   // Standard deviation σ of the Gaussian error distribution used during
   // encryption and key generation.  This is the standard deviation in the
@@ -80,7 +92,7 @@ public:
 private:
   static constexpr size_t l_ep_ = DBConsts::L_EP;                  // l for GSW
   static constexpr size_t l_key_ = DBConsts::L_KEY;          // l for GSW key
-  uint64_t small_q_ = 0; // small modulus used for modulus switching. Use only when rns_mod_cnt == 1
+  uint64_t small_q_ = 0; // small modulus used for modulus switching. Use only when coeff_mod_cnt == 1
   size_t base_log2_;         // log of base for data RGSW
   size_t base_log2_key_;     // log of base for key RGSW
   size_t num_pt_;            // number of plaintexts in the database
@@ -88,5 +100,6 @@ private:
   size_t num_dims_;          // total number of dimensions
   uint64_t plain_mod_ = 0;   // plaintext modulus t
   std::vector<int> coeff_mod_bits_;     // bit widths of each coeff modulus limb
-  std::vector<uint64_t> coeff_modulus_; // NTT-friendly primes, last entry is the "special" limb
+  std::vector<uint64_t> coeff_modulus_; // NTT-friendly primes for RLWE ciphertexts
+  RnsTables rns_tables_;                // precomputed CRT constants (K=2 only)
 };

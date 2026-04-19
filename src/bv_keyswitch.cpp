@@ -148,11 +148,11 @@ BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
                              const RlweSk &sk, uint32_t galois_k,
                              std::mt19937_64 &rng) {
   const double sigma = pir_params.get_noise_std_dev();
-  const size_t rns_mod_cnt = pir_params.get_rns_mod_cnt();
+  const size_t coeff_mod_cnt = pir_params.get_coeff_mod_cnt();
   constexpr size_t N = DBConsts::PolyDegree;
 
-  assert(rns_mod_cnt == 1 &&
-         "BV key-switch currently supports only single RNS limb (rns_mod_cnt == 1)");
+  assert(coeff_mod_cnt == 1 &&
+         "BV key-switch currently supports only single RNS limb (coeff_mod_cnt == 1)");
   const uint64_t q_val = pir_params.get_coeff_modulus()[0];
   const size_t base_log2 = bv_base_log2(pir_params);
 
@@ -226,8 +226,8 @@ void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
   assert(!ct.ntt_form);
 
   constexpr size_t N = DBConsts::PolyDegree;
-  const size_t rns_mod_cnt = pir_params.get_rns_mod_cnt();
-  assert(rns_mod_cnt == 1 &&
+  const size_t coeff_mod_cnt = pir_params.get_coeff_mod_cnt();
+  assert(coeff_mod_cnt == 1 &&
          "bv_apply_galois_inplace currently supports only single RNS limb");
   const uint64_t q_val = pir_params.get_coeff_modulus()[0];
   const size_t base_log2 = bv_base_log2(pir_params);

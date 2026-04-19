@@ -52,4 +52,9 @@ class PirTest {
     void test_utils_arith();
     void test_noise_sampling();
     void test_rlwe_enc();
+
+    // Search (tree_height, num_queries, num_other_dims) for minimum total
+    // communication in each (QueryMode, GswSource) combination, given the
+    // current config's num_pt, L_EP, L_KEY and BFV ciphertext size.
+    void plan_params();
 };

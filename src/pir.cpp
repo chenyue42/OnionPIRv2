@@ -15,11 +15,23 @@ PirParams::PirParams()
   plain_mod_ = utils::generate_prime(DBConsts::PlainMod);
 
   // =============== Small modulus for mod-switch ===============
-  // Two entries are requested so the first is guaranteed distinct from the
-  // top-level coeff moduli when the last coeff-mod bit width equals SmallQWidth.
-  const std::vector<int> small_q_bits = {static_cast<int>(DBConsts::SmallQWidth),
-                                         DBConsts::CoeffMods.back()};
-  small_q_ = utils::generate_ntt_friendly_primes(small_q_bits, DBConsts::PolyDegree)[0];
+  small_q_ = utils::generate_ntt_friendly_primes(
+                 {static_cast<int>(DBConsts::SmallQWidth)}, DBConsts::PolyDegree)[0];
+
+  // ================== RNS tables (K=2 CRT constants) ==================
+  const size_t K = coeff_modulus_.size();
+  rns_tables_.r64_mod_q.resize(K);
+  for (size_t i = 0; i < K; i++) {
+    rns_tables_.r64_mod_q[i] = static_cast<uint64_t>(
+        (static_cast<uint128_t>(1) << 64) % coeff_modulus_[i]);
+  }
+  if (K == 2) {
+    if (!utils::try_invert_uint_mod(coeff_modulus_[0] % coeff_modulus_[1],
+                                    coeff_modulus_[1],
+                                    rns_tables_.q0_inv_mod_q1)) {
+      throw std::runtime_error("PirParams: coeff moduli not coprime");
+    }
+  }
 
   // ================== GSW related parameters ==================
   size_t ct_mod_width = get_ct_mod_width();
@@ -39,7 +51,7 @@ PirParams::PirParams()
 
 const size_t PirParams::get_ct_mod_width() const {
   size_t ct_mod_width = 0;
-  for (size_t i = 0; i < get_rns_mod_cnt(); ++i) {
+  for (size_t i = 0; i < get_coeff_mod_cnt(); ++i) {
     ct_mod_width += coeff_mod_bits_[i];
   }
   return ct_mod_width;
@@ -72,14 +84,22 @@ void PirParams::print_params() const {
 
   print_field_num("fst_dim_sz", fst_dim_sz_);
   print_field_num("num_dims", num_dims_);
+  print_field_num("num_other_dims", get_num_other_dims());
+  print_field_num("num_queries", get_num_queries());
+  print_field("query_mode",
+              get_query_mode() == DBConsts::QueryMode::Stateful
+                  ? "Stateful"
+                  : "DoubleStateless");
+  print_field("gsw_source",
+              get_gsw_source() == DBConsts::GswSource::FromExpansion
+                  ? "FromExpansion (RGSW(s))"
+                  : "FromFreshSend (RGSW(b))");
 
   print_field_num("poly_modulus_degree", DBConsts::PolyDegree);
 
   // Coeff modulus bit widths
-  size_t log_q = 0;
   std::string bit_count_str = "[";
   for (std::size_t i = 0; i + 1 < coeff_mod_bits_.size(); i++) {
-    log_q += coeff_mod_bits_[i];
     bit_count_str += std::to_string(coeff_mod_bits_[i]) + " + ";
   }
   bit_count_str += std::to_string(coeff_mod_bits_.back());
@@ -96,10 +116,10 @@ void PirParams::print_params() const {
   print_field("coeff_modulus", coeff_mod_str, 40);
 
   print_field_num("plain_modulus", plain_mod_);
-  print_field_num("log(q)", log_q);
+  print_field_num("log(q)", get_ct_mod_width());
   print_field_num("log(t)", static_cast<int>(std::ceil(std::log2(plain_mod_))));
 
-  if (get_rns_mod_cnt() == 1) {
+  if (get_coeff_mod_cnt() == 1) {
     print_field_num("log(small_q)", static_cast<int>(std::ceil(std::log2(small_q_))));
   }
 

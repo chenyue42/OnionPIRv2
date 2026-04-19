@@ -18,17 +18,14 @@
 //
 // Unlike GHS, BV does not use a special prime. Each key-switching key is a
 // set of L_KS RLWE ciphertexts encrypting σ_k(s) · B^i (for i = 0..L_KS-1)
-// under the *data* modulus q_data (the first rns_mod_cnt primes of the SEAL
-// coeff_modulus, excluding the last "special" prime which SEAL normally uses
-// for GHS).
+// under the ciphertext modulus q (product of coeff_modulus).
 //
 // Key-switch operation:
 //   σ_k(ct) = (σ_k(c0) + Σ d_i · ksk.b[i],  Σ d_i · ksk.a[i])
 // where d_i = gadget_decompose(σ_k(c1))[i] and all products are in NTT form.
 //
-// For the currently active single-RNS-limb configuration (CONFIG_SECURE:
-// coeff_modulus = {56, 60}), rns_mod_cnt == 1 and gadget decomposition is a
-// straightforward bit-shift on uint64 coefficients.
+// For the currently active single-limb configuration, coeff_mod_cnt == 1 and
+// gadget decomposition is a straightforward bit-shift on uint64 coefficients.
 
 namespace bvks {
 
@@ -37,10 +34,10 @@ namespace bvks {
 constexpr size_t L_KS = DBConsts::L_KS;
 
 // A single RLWE ciphertext under the data modulus, stored in NTT form.
-// Layout: rns_mod_cnt * N uint64s per polynomial component.
+// Layout: coeff_mod_cnt * N uint64s per polynomial component.
 struct BvRlweCt {
-  std::vector<uint64_t> a; // size = rns_mod_cnt * N
-  std::vector<uint64_t> b; // size = rns_mod_cnt * N
+  std::vector<uint64_t> a; // size = coeff_mod_cnt * N
+  std::vector<uint64_t> b; // size = coeff_mod_cnt * N
 };
 
 // Key-switching key for one automorphism σ_k.
@@ -110,8 +107,7 @@ void signed_gadget_decompose(uint64_t val, size_t base_log2,
 // using BV. Modifies `ct` in place. `ct` must be in NTT form on entry and will
 // be in NTT form on return.
 //
-// Only operates on the first rns_mod_cnt limbs (data modulus). Any special
-// prime limbs are left untouched.
+// Operates on all coeff_mod_cnt limbs.
 void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
                              const BvKeySwitchKey &key,
                              const PirParams &pir_params);

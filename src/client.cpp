@@ -118,19 +118,19 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
   const size_t l = pir_params_.get_l();
   const size_t base_log2 = pir_params_.get_base_log2();
   const auto coeff_modulus = pir_params_.get_coeff_modulus();
-  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
   const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
 
   // The following two for-loops calculates the powers for GSW gadgets.
-  std::vector<uint64_t> inv(rns_mod_cnt);
-  for (size_t k = 0; k < rns_mod_cnt; k++) {
+  std::vector<uint64_t> inv(coeff_mod_cnt);
+  for (size_t k = 0; k < coeff_mod_cnt; k++) {
     uint64_t result;
     utils::try_invert_uint_mod(bits_per_ciphertext, coeff_modulus[k], result);
     inv[k] = result;
   }
 
-  // rns_mod_cnt many rows, each row is B^{l-1},, ..., B^0 under different moduli
-  std::vector<std::vector<uint64_t>> gadget = utils::gsw_gadget(l, base_log2, rns_mod_cnt, coeff_modulus);
+  // coeff_mod_cnt many rows, each row is B^{l-1},, ..., B^0 under different moduli
+  std::vector<std::vector<uint64_t>> gadget = utils::gsw_gadget(l, base_log2, coeff_mod_cnt, coeff_modulus);
 
   // This for-loop corresponds to the for-loop in Algorithm 1 from the OnionPIR paper
   auto q_head = query.data(0); // points to the first coefficient of the first ciphertext(c0) 
@@ -142,7 +142,7 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
       for (size_t k = 0; k < l; k++) {
         const size_t coef_pos = fst_dim_sz + (i-1) * l + k;  // the position of the coefficient in the resulting query
         const size_t reversed_idx = utils::bit_reverse(coef_pos, expan_height);  // the position of the coefficient in the query
-        for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+        for (size_t mod_id = 0; mod_id < coeff_mod_cnt; mod_id++) {
           const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
           inter_coeff_t mod = coeff_modulus[mod_id];
           // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext

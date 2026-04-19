@@ -29,7 +29,7 @@ PirServer::PirServer(const PirParams &pir_params)
       key_gsw_(pir_params, pir_params.get_l_key(), pir_params.get_base_log2_key()),
       data_gsw_(pir_params, pir_params.get_l(), pir_params.get_base_log2()) {
   // after NTT, each database polynomial coefficient will be in mod q. Hence,
-  // each pt coefficient will be represented by rns_mod_cnt many uint64_t, same as the ciphertext. 
+  // each pt coefficient will be represented by coeff_mod_cnt many uint64_t, same as the ciphertext. 
   db_aligned_ = make_unique_aligned<db_coeff_t, 64>(num_pt_ * pir_params_.get_coeff_val_cnt());
   fill_inter_res();
 }
@@ -134,7 +134,7 @@ std::vector<RlweCt>
 PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
   const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();  // number of plaintexts in the first dimension
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();  // number of plaintexts in the other dimensions
-  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
   const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt(); // polydegree * RNS moduli count
   const size_t one_ct_sz = 2 * coeff_val_cnt; // Ciphertext has two polynomials
   const auto &coeff_modulus = pir_params_.get_coeff_modulus();
@@ -146,7 +146,7 @@ PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
   // transform the selection vector to ntt form
   for (size_t i = 0; i < fst_dim_query.size(); i++) {
     RlweCt &ct = fst_dim_query[i];
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+    for (size_t mod_id = 0; mod_id < coeff_mod_cnt; mod_id++) {
       utils::ntt_fwd(ct.c0.data() + mod_id * N, N, coeff_modulus[mod_id]);
       utils::ntt_fwd(ct.c1.data() + mod_id * N, N, coeff_modulus[mod_id]);
     }
@@ -186,10 +186,10 @@ PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
 
 void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *__restrict inter_res) {
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
-  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
   constexpr size_t coeff_count = DBConsts::PolyDegree;
   const auto &coeff_modulus = pir_params_.get_coeff_modulus();
-  const size_t coeff_val_cnt = coeff_count * rns_mod_cnt;
+  const size_t coeff_val_cnt = coeff_count * coeff_mod_cnt;
   const size_t inter_padding = other_dim_sz * 2;  // distance between coefficients in inter_res
 
   // We need to unroll the loop to process multiple ciphertexts at once.
@@ -224,7 +224,7 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
     std::array<size_t, unroll_factor> ct_idx1    = {0};  // write index for poly1
 
     // Process each modulus and coefficient.
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+    for (size_t mod_id = 0; mod_id < coeff_mod_cnt; mod_id++) {
       const uint64_t modulus = coeff_modulus[mod_id];
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         #pragma unroll
@@ -246,7 +246,7 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
     // Mark each ciphertext as being in NTT form and then transform back.
     #pragma unroll
     for (size_t idx = 0; idx < unroll_factor; idx++) {
-      for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+      for (size_t mod_id = 0; mod_id < coeff_mod_cnt; mod_id++) {
         utils::ntt_inv(cts[idx].c0.data() + mod_id * coeff_count, coeff_count, coeff_modulus[mod_id]);
         utils::ntt_inv(cts[idx].c1.data() + mod_id * coeff_count, coeff_count, coeff_modulus[mod_id]);
       }
@@ -274,7 +274,7 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
     size_t ct_idx1 = 0;     // write index for poly1
 
     // Process each modulus and coefficient
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+    for (size_t mod_id = 0; mod_id < coeff_mod_cnt; mod_id++) {
       const uint64_t modulus = coeff_modulus[mod_id];
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         // Process polynomial 0
@@ -292,7 +292,7 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
     }
 
     // Mark ciphertext as being in NTT form and then transform back
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+    for (size_t mod_id = 0; mod_id < coeff_mod_cnt; mod_id++) {
       utils::ntt_inv(ct.c0.data() + mod_id * coeff_count, coeff_count, coeff_modulus[mod_id]);
       utils::ntt_inv(ct.c1.data() + mod_id * coeff_count, coeff_count, coeff_modulus[mod_id]);
     }
@@ -562,10 +562,10 @@ void PirServer::fill_inter_res() {
   // However, in the first dimension, we want to store them in uint128_t.
   // So, we need to calculate the number of uint128_t we need to store.
   // number of rns modulus
-  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   // number of uint128_t we need to store in the intermediate result
-  const size_t elem_cnt = other_dim_sz * DBConsts::PolyDegree * rns_mod_cnt * 2;
+  const size_t elem_cnt = other_dim_sz * DBConsts::PolyDegree * coeff_mod_cnt * 2;
   // allocate memory for the intermediate result
   inter_res_.resize(elem_cnt);
 }

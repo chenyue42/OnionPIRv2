@@ -10,15 +10,15 @@
 // ---------------------------------------------------------------------------
 
 struct RlweCt {
-    std::vector<uint64_t> c0; // first polynomial (size = N * rns_mod_cnt)
-    std::vector<uint64_t> c1; // second polynomial (size = N * rns_mod_cnt)
+    std::vector<uint64_t> c0; // first polynomial (size = N * coeff_mod_cnt)
+    std::vector<uint64_t> c1; // second polynomial (size = N * coeff_mod_cnt)
     bool ntt_form = false;
 
     uint64_t       *data(size_t i)       { return i == 0 ? c0.data() : c1.data(); }
     const uint64_t *data(size_t i) const { return i == 0 ? c0.data() : c1.data(); }
     bool &is_ntt_form() { return ntt_form; }
 
-    // Resize both polynomials to n elements (n = N * rns_mod_cnt).
+    // Resize both polynomials to n elements (n = N * coeff_mod_cnt).
     void resize(size_t n) { c0.assign(n, 0); c1.assign(n, 0); }
 
     // Number of elements per polynomial (0 if not yet allocated).
@@ -26,7 +26,7 @@ struct RlweCt {
 };
 
 // Ternary secret key stored in NTT form.
-// data has N * rns_mod_cnt elements: values in {0, 1, q-1} reduced mod each prime.
+// data has N * coeff_mod_cnt elements: values in {0, 1, q-1} reduced mod each prime.
 struct RlweSk {
     std::vector<uint64_t> data;
     size_t poly_size() const { return data.size(); }
@@ -40,7 +40,7 @@ struct RlwePt {
 
 // ---------------------------------------------------------------------------
 // Single-modulus RLWE encryption primitives.
-// All functions operate on a single prime q (rns_mod_cnt == 1).
+// All functions operate on a single prime q (coeff_mod_cnt == 1).
 // Secret keys are always stored in NTT form.
 // ---------------------------------------------------------------------------
 

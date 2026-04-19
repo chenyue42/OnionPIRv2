@@ -5,9 +5,9 @@ if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Benchmark)
 endif()
 
-# ==================== force GCC ====================
-set(CMAKE_C_COMPILER  /usr/bin/gcc)   # adjust paths as needed
-set(CMAKE_CXX_COMPILER /usr/bin/g++)
+# Compiler picked up from PATH. Load the desired toolchain before running
+# cmake (e.g. `module load gcc/13.3.0`). Override with -DCMAKE_CXX_COMPILER=...
+# if you want to pin a specific binary.
 
 # Ask every target in this project to compile as C++20
 set(CMAKE_CXX_STANDARD 20)
