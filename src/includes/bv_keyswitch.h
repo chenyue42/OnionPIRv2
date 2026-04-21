@@ -99,6 +99,24 @@ BvGaloisKeys gen_bv_galois_keys(const PirParams &pir_params,
 void signed_gadget_decompose(uint64_t val, size_t base_log2,
                              uint64_t q, uint64_t *out, size_t num_digits);
 
+// Approximate signed gadget decomposition (TFHE-rs style).
+//
+// Pre-rounds `val` (signed, centered in (-q/2, q/2]) to the nearest multiple
+// of 2^drop where drop = q_bits - num_digits · base_log2 (≥ 0), then emits
+// num_digits signed digits in [-B/2, B/2) for the rounded, down-scaled value.
+//
+// When drop == 0 this reduces exactly to signed_gadget_decompose.
+//
+// Reconstruction (integer, no mod): Σ out[i] · B^i = round(val_signed / 2^drop)
+// so after multiplying by 2^drop we recover val_signed up to error ≤ 2^(drop-1).
+//
+// Callers MUST pair these digits with a gadget scaled by 2^drop (see
+// utils::gsw_gadget_approx); otherwise the external product lands at
+// val · m / 2^drop instead of val · m.
+void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
+                                    uint64_t q, size_t q_bits,
+                                    uint64_t *out, size_t num_digits);
+
 // ============================================================================
 // Key-switching operation (server side)
 // ============================================================================

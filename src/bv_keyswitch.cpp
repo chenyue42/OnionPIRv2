@@ -38,6 +38,38 @@ void signed_gadget_decompose(uint64_t val, size_t base_log2,
   }
 }
 
+void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
+                                    uint64_t q, size_t q_bits,
+                                    uint64_t *out, size_t num_digits) {
+  const size_t rep_bits = num_digits * base_log2;
+  assert(rep_bits <= q_bits);
+  const size_t drop = q_bits - rep_bits;
+
+  // Center to (-q/2, q/2].
+  const uint64_t half_q = q >> 1;
+  int64_t d = (val > half_q)
+      ? static_cast<int64_t>(val) - static_cast<int64_t>(q)
+      : static_cast<int64_t>(val);
+
+  // Round to nearest multiple of 2^drop, then divide by 2^drop (sign-preserving).
+  if (drop > 0) {
+    const int64_t half = int64_t(1) << (drop - 1);
+    d = (d >= 0) ? ((d + half) >> drop)
+                 : -(((-d) + half) >> drop);
+  }
+
+  // Standard signed base-B decomposition on the (now small) rounded value.
+  // |d| ≤ 2^rep_bits / 2, so all digits fit signed in int64.
+  const int64_t nativeSubgBits = 64 - static_cast<int64_t>(base_log2);
+  for (size_t i = 0; i < num_digits; ++i) {
+    int64_t r = (d << nativeSubgBits) >> nativeSubgBits;
+    d -= r;
+    d >>= base_log2;
+    out[i] = (r >= 0) ? static_cast<uint64_t>(r)
+                      : static_cast<uint64_t>(r + static_cast<int64_t>(q));
+  }
+}
+
 // Gadget base log: floor(log_q_data / L_KS) + 1.
 // The +1 guarantees B^L_KS > q, giving the signed-digit decomposition
 // enough headroom to absorb carries without leaving a non-zero residue in

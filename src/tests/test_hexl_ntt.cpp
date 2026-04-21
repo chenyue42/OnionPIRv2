@@ -152,7 +152,29 @@ void PirTest::test_hexl_ntt() {
   double util_us = std::chrono::duration<double, std::micro>(t1 - t0).count() / iters;
   BENCH_PRINT("  utils::ntt_fwd + utils::ntt_inv: " << util_us << " us / iter (" << iters << " iters)");
 
-  // ===================== Summary =====================
+  // ===================== Test 7: composite NTT =====================
+  constexpr uint32_t crtq1 = 268369921; // 2^28 - 2^16 + 1
+  constexpr uint32_t crtq2 = 249561089; // 266334209; // 2^28 - 2^21 - 2^12 + 1
+  constexpr uint64_t crtMod = static_cast<uint64_t>(crtq1) * crtq2;                                                                                                                            
+  constexpr uint64_t root_of_unity_crt = 3375402822066082UL;
+  BENCH_PRINT("\n--- Test 7: Composite NTT with CRTMod=" << crtMod << " ---");
+
+ 
+  std::vector<uint64_t> crt_input(N, 0);
+  utils::sample_uniform_poly(crt_input.data(), N, crtMod, rng);
+
+  std::vector<uint64_t> crt_original = crt_input;
+
+  // uint64_t root_of_unity = 10297991595; //minimum root of unity
+  intel::hexl::NTT composite_ntts(N, crtMod, root_of_unity_crt);
+
+  composite_ntts.ComputeForward(crt_input.data(), crt_input.data(), 1, 1);
+  composite_ntts.ComputeInverse(crt_input.data(), crt_input.data(), 1, 1);
+
+  bool crt_match = (crt_original == crt_input);
+  BENCH_PRINT("Composite NTT round-trip correct: " << (crt_match ? "YES" : "NO"));
+
+ // ===================== Summary =====================
   BENCH_PRINT("\n--- Summary ---");
   int pass = match + mult_ok + add_ok + (m_recovered == m) + wrap_match;
   BENCH_PRINT("Passed " << pass << "/5 correctness tests (Test 6 is perf-only)");

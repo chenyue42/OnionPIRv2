@@ -44,7 +44,7 @@ namespace DBConsts {
   //                      num_other_dims is small (< 2*L_KEY/L_EP).
   enum class GswSource { FromExpansion, FromFreshSend };
 
-  constexpr size_t DB_SIZE_MB = 1024;
+  constexpr size_t DB_SIZE_MB = 128;
 
 #if ACTIVE_CONFIG == CONFIG_SINGLE_MOD_56
   // 256 MB, single ct mod, log q = 56

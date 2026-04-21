@@ -13,12 +13,20 @@ class GSWEval {
     PirParams pir_params_;
     size_t l_;
     size_t base_log2_;
-  
+    // When true, decomp_rlwe_single_mod uses approximate (pre-rounded) gadget
+    // decomposition, and plain_to_gsw builds a 2^drop-scaled gadget. Drop is
+    // inferred from (ct_mod_width - l · base_log2). Caller must pick l and
+    // base_log2 such that l · base_log2 ≤ ct_mod_width.
+    bool use_approx_decomp_ = false;
+
   public:
     GSWEval(const PirParams &pir_params, const size_t l, const size_t base_log2)
         : pir_params_(pir_params), l_(l), base_log2_(base_log2) {}
     ~GSWEval() = default;
     GSWEval(const GSWEval &gsw_eval) = default;
+
+    void set_approx_decomp(bool v) { use_approx_decomp_ = v; }
+    bool approx_decomp() const { return use_approx_decomp_; }
 
     /*!
       Computes the external product between a GSW ciphertext and a decomposed BFV

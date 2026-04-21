@@ -290,10 +290,16 @@ void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<u
     std::vector<std::vector<uint64_t>> digit_matrix(l_, std::vector<uint64_t>(coeff_count));
 
     // signed gadget decomposition
+    const size_t q_bits = pir_params_.get_ct_mod_width();
     for (size_t k = 0; k < coeff_count; k++) {
       // Use a stack buffer; l_ is small (≤12).
-      uint64_t digit_vals[16];  // ! for now we assume l_ <= 16. Reasonable for practical params. 
-      bvks::signed_gadget_decompose(poly_ptr[k], base_log2_, q, digit_vals, l_);
+      uint64_t digit_vals[16];  // ! for now we assume l_ <= 16. Reasonable for practical params.
+      if (use_approx_decomp_) {
+        bvks::approx_signed_gadget_decompose(poly_ptr[k], base_log2_, q, q_bits,
+                                             digit_vals, l_);
+      } else {
+        bvks::signed_gadget_decompose(poly_ptr[k], base_log2_, q, digit_vals, l_);
+      }
       for (size_t p = 0; p < l_; p++) {
         digit_matrix[p][k] = digit_vals[p];
       }
@@ -379,8 +385,14 @@ GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
   const double sigma = pir_params_.get_noise_std_dev();
 
   // Gadget: gadget[k] = B^(l-1-k) mod q, matching utils::gsw_gadget ordering
-  // (large → small, row 0 = B^(l-1), row l-1 = 1).
-  const auto gadget_table = utils::gsw_gadget(l_, base_log2_, 1, pir_params_.get_coeff_modulus());
+  // (large → small, row 0 = B^(l-1), row l-1 = 1). For the approx mode each
+  // entry is further multiplied by 2^drop so the external product recovers
+  // val·m after the decomposition rounds val to 2^drop granularity.
+  const auto gadget_table = use_approx_decomp_
+      ? utils::gsw_gadget_approx(l_, base_log2_,
+                                 pir_params_.get_ct_mod_width(), 1,
+                                 pir_params_.get_coeff_modulus())
+      : utils::gsw_gadget(l_, base_log2_, 1, pir_params_.get_coeff_modulus());
   const std::vector<uint64_t> &gadget = gadget_table[0];
 
   // Output layout: 2*l_ rows, each row = [c0 (N) || c1 (N)] in NTT form.
