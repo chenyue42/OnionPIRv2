@@ -90,6 +90,14 @@ inline void right_shift_uint128(uint64_t *operand, int shift, uint64_t *result) 
 void ntt_fwd(uint64_t *data, size_t N, uint64_t q);
 void ntt_inv(uint64_t *data, size_t N, uint64_t q);
 
+// Register a custom primitive 2N-th root of unity for the (N, q) pair, to be
+// used when the HEXL NTT object is first constructed for that pair in any
+// thread. Required for composite q (q = q1*q2), since HEXL's default ctor
+// assumes q is prime when searching for a root. Must be called before the
+// first ntt_fwd/ntt_inv on that (N, q). Calling twice with the same (N, q)
+// is an error unless the root matches the previously registered value.
+void register_ntt_root(size_t N, uint64_t q, uint64_t root);
+
 void negacyclic_shift_poly_coeffmod(const uint64_t *poly,
                                     size_t coeff_count, size_t shift,
                                     uint64_t modulus,
@@ -125,6 +133,12 @@ std::uint64_t generate_prime(size_t bit_width);
 // returned for the same bit width.  Replaces SEAL's CoeffModulus::Create.
 std::vector<uint64_t> generate_ntt_friendly_primes(const std::vector<int> &bit_widths,
                                                    size_t N);
+
+// CRT-combine two values into a single residue mod q1*q2.
+// Requires gcd(q1, q2) = 1, w1 < q1, w2 < q2, and q1*q2 fits in uint64_t.
+// Returns w ∈ [0, q1*q2) with w ≡ w1 (mod q1), w ≡ w2 (mod q2).
+// Use with HEXL's MinimalPrimitiveRoot(2N, q_i) to build a 2N-th root mod q1*q2.
+uint64_t crt_combine(uint64_t w1, uint64_t q1, uint64_t w2, uint64_t q2);
 
 // New functions for plaintext handling
 void print_plaintext(const RlwePt &plaintext, size_t count = 10);

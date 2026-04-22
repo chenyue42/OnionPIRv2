@@ -13,8 +13,9 @@ typedef unsigned __int128 uint128_t;
 #define CONFIG_TWO_MOD_56     1   // 256 MB, log q = 56, two ct mods
 #define CONFIG_SINGLE_MOD_60  2   // 256 MB, log q = 60, single ct mod
 #define CONFIG_POLY4096       3   // 256 MB, poly degree 4096
+#define CONFIG_COMPOSITE_56   4   // 256 MB, composite q = q1*q2 (28+28), single-mod view
 
-#define ACTIVE_CONFIG  CONFIG_SINGLE_MOD_60
+#define ACTIVE_CONFIG  CONFIG_COMPOSITE_56
 
 // Primes for coeff_modulus, small_q, and plain_modulus are derived at runtime
 // from the bit widths below via utils::generate_ntt_friendly_primes and
@@ -87,6 +88,27 @@ namespace DBConsts {
   constexpr size_t SmallQWidth = 40;
   constexpr std::array<size_t, 1> CoeffMods = {60};
 
+
+#elif ACTIVE_CONFIG == CONFIG_COMPOSITE_56
+  // Composite ciphertext modulus q = q1 * q2, q1 and q2 both 28 bits.
+  // Single-mod everywhere except first-dim matmul, which splits the query
+  // into per-limb uint32_t values to hit the 32x32->64 fast path.
+  // Budget: 56 - PlainMod ≈ 42 bits pre-computation; CONFIG_TWO_MOD_56
+  // chose PlainMod=14 for the same total ct modulus.
+  constexpr size_t PolyDegree = 2048;
+  constexpr size_t L_EP = 5;
+  constexpr size_t L_KEY = 12;
+  constexpr size_t L_KS = 12;
+  constexpr size_t TREE_HEIGHT = 9;
+  constexpr size_t NumQueries = 1;
+  constexpr QueryMode Mode = QueryMode::Stateful;
+  constexpr GswSource GswSrc = GswSource::FromExpansion;
+  constexpr size_t PlainMod = 13;
+  constexpr size_t SmallQWidth = 36;
+  constexpr std::array<size_t, 1> CoeffMods = {56};
+  // First-dim RNS limb widths. Only defined for composite-mod configs; the rest
+  // of the pipeline continues to see a single 56-bit modulus.
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {28, 28};
 
 #elif ACTIVE_CONFIG == CONFIG_POLY4096
   // 256 MB, poly degree 4096

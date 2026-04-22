@@ -4,11 +4,12 @@
 #include <cstring>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 
 namespace {
-// Thread-local cache of HEXL NTT objects keyed by (N << 64) | q-hash.
+// Thread-local cache of HEXL NTT objects keyed by (N, q).
 // Each thread owns its own copy; no locking on the hot path.
 struct NttKey {
   size_t N;
@@ -21,14 +22,51 @@ struct NttKeyHash {
   }
 };
 
+// Process-wide registry of custom 2N-th roots of unity, seeded by
+// utils::register_ntt_root before any thread runs ntt_fwd/ntt_inv on the
+// corresponding (N, q). Required for composite q where HEXL's default ctor
+// cannot search for a root. Written once at startup, then read-only, so a
+// plain mutex on writes is enough — reads on the hot path see a stable map.
+struct RootRegistry {
+  std::mutex mu;
+  std::unordered_map<NttKey, uint64_t, NttKeyHash> map;
+};
+RootRegistry &root_registry() {
+  static RootRegistry r;
+  return r;
+}
+
 intel::hexl::NTT &get_ntt(size_t N, uint64_t q) {
   thread_local std::unordered_map<NttKey, std::unique_ptr<intel::hexl::NTT>, NttKeyHash> cache;
   auto it = cache.find({N, q});
   if (it != cache.end()) return *it->second;
-  auto ins = cache.emplace(NttKey{N, q}, std::make_unique<intel::hexl::NTT>(N, q));
+  uint64_t custom_root = 0;
+  {
+    auto &reg = root_registry();
+    std::lock_guard<std::mutex> lk(reg.mu);
+    auto rit = reg.map.find({N, q});
+    if (rit != reg.map.end()) custom_root = rit->second;
+  }
+  auto ntt = custom_root
+               ? std::make_unique<intel::hexl::NTT>(N, q, custom_root)
+               : std::make_unique<intel::hexl::NTT>(N, q);
+  auto ins = cache.emplace(NttKey{N, q}, std::move(ntt));
   return *ins.first->second;
 }
 } // namespace
+
+void utils::register_ntt_root(size_t N, uint64_t q, uint64_t root) {
+  auto &reg = root_registry();
+  std::lock_guard<std::mutex> lk(reg.mu);
+  auto it = reg.map.find({N, q});
+  if (it != reg.map.end()) {
+    if (it->second != root)
+      throw std::invalid_argument(
+          "register_ntt_root: conflicting root for (N, q) already registered");
+    return;
+  }
+  reg.map.emplace(NttKey{N, q}, root);
+}
 
 void utils::automorphism_coeff(const uint64_t *in, size_t N, uint32_t k,
                                uint64_t q, uint64_t *out) {
@@ -233,6 +271,17 @@ std::uint64_t utils::generate_prime(size_t bit_width) {
       candidate |= 1;
   } while (!utils::is_prime(candidate));
   return candidate;
+}
+
+uint64_t utils::crt_combine(uint64_t w1, uint64_t q1,
+                             uint64_t w2, uint64_t q2) {
+  // Garner: w = w1 + q1 * ((w2 - w1) * q1^{-1} mod q2) ∈ [0, q1*q2).
+  uint64_t q1_inv;
+  if (!try_invert_uint_mod(q1 % q2, q2, q1_inv))
+    throw std::invalid_argument("crt_combine: q1, q2 must be coprime");
+  uint64_t diff = (w2 + q2 - (w1 % q2)) % q2;
+  uint64_t k = mulmod_u64(diff, q1_inv, q2);
+  return static_cast<uint64_t>(static_cast<__uint128_t>(q1) * k + w1);
 }
 
 std::vector<uint64_t> utils::generate_ntt_friendly_primes(

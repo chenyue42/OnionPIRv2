@@ -12,6 +12,19 @@ struct RnsTables {
   std::vector<uint64_t> r64_mod_q; // 2^64 mod q_i, one per limb
 };
 
+// Constants for the composite-mod first-dim split. Only populated when the
+// active config splits the ciphertext modulus q into two CRT limbs (q = q1*q2)
+// for the first-dimension matmul. Empty/zero otherwise.
+struct CompositeRnsTables {
+  bool enabled = false;         // true iff split is active
+  uint64_t q1 = 0;              // first RNS limb (~28 bits)
+  uint64_t q2 = 0;              // second RNS limb (~28 bits)
+  uint64_t w1 = 0;              // primitive 2N-th root mod q1
+  uint64_t w2 = 0;              // primitive 2N-th root mod q2
+  uint64_t w_crt = 0;           // CRT-combined primitive 2N-th root mod q1*q2
+  uint64_t q1_inv_mod_q2 = 0;   // precomputed for CRT-compose hot path
+};
+
 // ================== CLASS DEFINITIONS ==================
 class PirParams {
 public:
@@ -53,6 +66,7 @@ public:
   inline const std::vector<uint64_t> &get_coeff_modulus() const { return coeff_modulus_; }
   inline const std::vector<int> &get_coeff_mod_bits() const { return coeff_mod_bits_; }
   inline const RnsTables &get_rns_tables() const { return rns_tables_; }
+  inline const CompositeRnsTables &get_composite_rns() const { return composite_rns_; }
   inline size_t get_poly_degree() const { return DBConsts::PolyDegree; }
   // The height of the expansion tree during packing unpacking stages
   inline const size_t get_expan_height() const { return DBConsts::TREE_HEIGHT; }
@@ -102,4 +116,5 @@ private:
   std::vector<int> coeff_mod_bits_;     // bit widths of each coeff modulus limb
   std::vector<uint64_t> coeff_modulus_; // NTT-friendly primes for RLWE ciphertexts
   RnsTables rns_tables_;                // precomputed CRT constants (K=2 only)
+  CompositeRnsTables composite_rns_;    // first-dim RNS split constants
 };
