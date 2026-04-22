@@ -104,6 +104,11 @@ public:
   void print_params() const;
 
 private:
+  // Populate coeff_modulus_ and composite_rns_ for the composite-first-dim path.
+  // Registers the CRT-combined 2N-th root with utils so later NTT calls on the
+  // composite modulus pick it up (HEXL's default ctor assumes a prime modulus).
+  void init_composite_rns();
+
   static constexpr size_t l_ep_ = DBConsts::L_EP;                  // l for GSW
   static constexpr size_t l_key_ = DBConsts::L_KEY;          // l for GSW key
   uint64_t small_q_ = 0; // small modulus used for modulus switching. Use only when coeff_mod_cnt == 1

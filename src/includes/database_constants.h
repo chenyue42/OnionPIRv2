@@ -47,6 +47,12 @@ namespace DBConsts {
 
   constexpr size_t DB_SIZE_MB = 128;
 
+  // CompositeFirstDim: when true, the single ct modulus q in `CoeffMods` is
+  // interpreted as q = product(FirstDimRNSMods). The first-dim matmul splits
+  // into per-limb u32 values to hit the 32×32→64 fast path; the rest of the
+  // pipeline still sees a single modulus. When false, `FirstDimRNSMods` is
+  // ignored (present only so `if constexpr` blocks that reference it compile).
+
 #if ACTIVE_CONFIG == CONFIG_SINGLE_MOD_56
   // 256 MB, single ct mod, log q = 56
   constexpr size_t PolyDegree = 2048;
@@ -60,6 +66,8 @@ namespace DBConsts {
   constexpr size_t PlainMod = 15;
   constexpr size_t SmallQWidth = 28;
   constexpr std::array<size_t, 1> CoeffMods = {56};
+  constexpr bool CompositeFirstDim = false;
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {0, 0};
 
 #elif ACTIVE_CONFIG == CONFIG_TWO_MOD_56
   // 256 MB, two ct mods, log q = 56
@@ -74,6 +82,8 @@ namespace DBConsts {
   constexpr size_t PlainMod = 14;
   constexpr size_t SmallQWidth = 27;
   constexpr std::array<size_t, 2> CoeffMods = {28, 28};
+  constexpr bool CompositeFirstDim = false;
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {0, 0};
 
 #elif ACTIVE_CONFIG == CONFIG_SINGLE_MOD_60
   constexpr size_t PolyDegree = 2048;
@@ -87,12 +97,12 @@ namespace DBConsts {
   constexpr size_t PlainMod = 15;
   constexpr size_t SmallQWidth = 40;
   constexpr std::array<size_t, 1> CoeffMods = {60};
+  constexpr bool CompositeFirstDim = false;
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {0, 0};
 
 
 #elif ACTIVE_CONFIG == CONFIG_COMPOSITE_56
-  // Composite ciphertext modulus q = q1 * q2, q1 and q2 both 28 bits.
-  // Single-mod everywhere except first-dim matmul, which splits the query
-  // into per-limb uint32_t values to hit the 32x32->64 fast path.
+  // 256 MB, composite q = q1 * q2 (28+28), single-mod view.
   // Budget: 56 - PlainMod ≈ 42 bits pre-computation; CONFIG_TWO_MOD_56
   // chose PlainMod=14 for the same total ct modulus.
   constexpr size_t PolyDegree = 2048;
@@ -106,9 +116,9 @@ namespace DBConsts {
   constexpr size_t PlainMod = 13;
   constexpr size_t SmallQWidth = 36;
   constexpr std::array<size_t, 1> CoeffMods = {56};
-  // First-dim RNS limb widths. Only defined for composite-mod configs; the rest
-  // of the pipeline continues to see a single 56-bit modulus.
+  constexpr bool CompositeFirstDim = true;
   constexpr std::array<size_t, 2> FirstDimRNSMods = {28, 28};
+
 
 #elif ACTIVE_CONFIG == CONFIG_POLY4096
   // 256 MB, poly degree 4096
@@ -123,9 +133,14 @@ namespace DBConsts {
   constexpr size_t PlainMod = 46;
   constexpr size_t SmallQWidth = 57;
   constexpr std::array<size_t, 2> CoeffMods = {60, 60};
+  constexpr bool CompositeFirstDim = false;
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {0, 0};
 #else
   #error "Unknown ACTIVE_CONFIG value"
 #endif
+
+  static_assert(!CompositeFirstDim || CoeffMods.size() == 1,
+                "CompositeFirstDim requires a single composite ct modulus");
 
   // Max bit-width among ciphertext moduli.
   constexpr size_t max_ct_mod_width() {

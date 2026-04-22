@@ -4,68 +4,47 @@
 #include <cstring>
 #include <fstream>
 #include <memory>
-#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 
 namespace {
-// Thread-local cache of HEXL NTT objects keyed by (N, q).
-// Each thread owns its own copy; no locking on the hot path.
-struct NttKey {
-  size_t N;
-  uint64_t q;
-  bool operator==(const NttKey &o) const noexcept { return N == o.N && q == o.q; }
-};
-struct NttKeyHash {
-  size_t operator()(const NttKey &k) const noexcept {
-    return std::hash<size_t>()(k.N) ^ (std::hash<uint64_t>()(k.q) * 0x9E3779B97F4A7C15ULL);
-  }
-};
-
-// Process-wide registry of custom 2N-th roots of unity, seeded by
-// utils::register_ntt_root before any thread runs ntt_fwd/ntt_inv on the
-// corresponding (N, q). Required for composite q where HEXL's default ctor
-// cannot search for a root. Written once at startup, then read-only, so a
-// plain mutex on writes is enough — reads on the hot path see a stable map.
-struct RootRegistry {
-  std::mutex mu;
-  std::unordered_map<NttKey, uint64_t, NttKeyHash> map;
-};
-RootRegistry &root_registry() {
-  static RootRegistry r;
-  return r;
-}
+// Optional custom 2N-th root for a single (N, q) pair. Set once by
+// utils::register_ntt_root during PirParams construction, then read-only.
+// The only case that needs this is composite q = q1*q2, where HEXL's default
+// ctor can't search for a root. Everything else uses the default ctor.
+size_t g_custom_N = 0;
+uint64_t g_custom_q = 0;
+uint64_t g_custom_root = 0;
 
 intel::hexl::NTT &get_ntt(size_t N, uint64_t q) {
-  thread_local std::unordered_map<NttKey, std::unique_ptr<intel::hexl::NTT>, NttKeyHash> cache;
+  struct Key {
+    size_t N; uint64_t q;
+    bool operator==(const Key &o) const noexcept { return N == o.N && q == o.q; }
+  };
+  struct Hash {
+    size_t operator()(const Key &k) const noexcept {
+      return std::hash<size_t>()(k.N) ^ (std::hash<uint64_t>()(k.q) * 0x9E3779B97F4A7C15ULL);
+    }
+  };
+  thread_local std::unordered_map<Key, std::unique_ptr<intel::hexl::NTT>, Hash> cache;
   auto it = cache.find({N, q});
   if (it != cache.end()) return *it->second;
-  uint64_t custom_root = 0;
-  {
-    auto &reg = root_registry();
-    std::lock_guard<std::mutex> lk(reg.mu);
-    auto rit = reg.map.find({N, q});
-    if (rit != reg.map.end()) custom_root = rit->second;
-  }
-  auto ntt = custom_root
-               ? std::make_unique<intel::hexl::NTT>(N, q, custom_root)
+  auto ntt = (N == g_custom_N && q == g_custom_q)
+               ? std::make_unique<intel::hexl::NTT>(N, q, g_custom_root)
                : std::make_unique<intel::hexl::NTT>(N, q);
-  auto ins = cache.emplace(NttKey{N, q}, std::move(ntt));
+  auto ins = cache.emplace(Key{N, q}, std::move(ntt));
   return *ins.first->second;
 }
 } // namespace
 
 void utils::register_ntt_root(size_t N, uint64_t q, uint64_t root) {
-  auto &reg = root_registry();
-  std::lock_guard<std::mutex> lk(reg.mu);
-  auto it = reg.map.find({N, q});
-  if (it != reg.map.end()) {
-    if (it->second != root)
-      throw std::invalid_argument(
-          "register_ntt_root: conflicting root for (N, q) already registered");
-    return;
+  if (g_custom_N != 0 && (g_custom_N != N || g_custom_q != q || g_custom_root != root)) {
+    throw std::invalid_argument(
+        "register_ntt_root: a different (N, q, root) is already registered");
   }
-  reg.map.emplace(NttKey{N, q}, root);
+  g_custom_N = N;
+  g_custom_q = q;
+  g_custom_root = root;
 }
 
 void utils::automorphism_coeff(const uint64_t *in, size_t N, uint32_t k,

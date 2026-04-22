@@ -1,5 +1,6 @@
 #include "tests.h"
 #include "rlwe.h"
+#include <stdexcept>
 
 // Pretty-print an RlwePt like seal::Plaintext::to_string (hex, high-deg first).
 static std::string pt_to_string(const RlwePt &pt) {
@@ -49,6 +50,10 @@ void PirTest::test_external_product() {
   encrypt_bfv(a, rlwe_sk, coeff_count, q, t,
               pir_params.get_noise_std_dev(), rng, a_encrypted);
 
+  // Expected plaintexts: BFV(a) * RGSW(1) = a, BFV(a) * RGSW(0) = 0.
+  RlwePt expect_a;    expect_a.data = a;
+  RlwePt expect_zero; expect_zero.data = zero;
+
   // ================== Test external product ==================
   RlweCt ext_prod_result;
   ext_prod_result.resize(coeff_count);
@@ -61,6 +66,12 @@ void PirTest::test_external_product() {
     int budget = decrypt_and_budget(ext_prod_result, rlwe_sk, coeff_count, q, t, result);
     BENCH_PRINT("BFV(a) * RGSW(1) = " << pt_to_string(result));
     BENCH_PRINT("Noise budget: " << budget);
+    if (!utils::plaintext_is_equal(result, expect_a)) {
+      throw std::runtime_error("BFV(a) * RGSW(1) != a");
+    }
+    if (budget <= 0) {
+      throw std::runtime_error("BFV(a) * RGSW(1): non-positive noise budget");
+    }
   }
   PRINT_BAR;
 
@@ -71,6 +82,12 @@ void PirTest::test_external_product() {
     int budget = decrypt_and_budget(ext_prod_result, rlwe_sk, coeff_count, q, t, result);
     BENCH_PRINT("BFV(a) * RGSW(0) = " << pt_to_string(result));
     BENCH_PRINT("Noise budget: " << budget);
+    if (!utils::plaintext_is_equal(result, expect_zero)) {
+      throw std::runtime_error("BFV(a) * RGSW(0) != 0");
+    }
+    if (budget <= 0) {
+      throw std::runtime_error("BFV(a) * RGSW(0): non-positive noise budget");
+    }
   }
   PRINT_BAR;
 
@@ -116,6 +133,21 @@ void PirTest::test_external_product() {
                 << "  budget=" << bud_one);
     BENCH_PRINT("  BFV(a) * RGSW_approx(0) = " << pt_to_string(dec_zero)
                 << "  budget=" << bud_zero);
+    // Approximate decomposition introduces rounding error of magnitude
+    // ~2^(drop-1) per coefficient before BFV scale-and-round. As long as the
+    // noise budget stays positive the decrypted plaintext must still be exact.
+    if (!utils::plaintext_is_equal(dec_one, expect_a)) {
+      throw std::runtime_error("BFV(a) * RGSW_approx(1) != a at l'="
+                               + std::to_string(l_approx));
+    }
+    if (!utils::plaintext_is_equal(dec_zero, expect_zero)) {
+      throw std::runtime_error("BFV(a) * RGSW_approx(0) != 0 at l'="
+                               + std::to_string(l_approx));
+    }
+    if (bud_one <= 0 || bud_zero <= 0) {
+      throw std::runtime_error("Approximate decomp l'=" + std::to_string(l_approx)
+                               + " exhausted noise budget");
+    }
   }
 
   END_EXPERIMENT();

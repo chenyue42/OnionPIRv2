@@ -13,8 +13,17 @@ void PirTest::test_hexl_ntt() {
   const uint64_t q = pir_params.get_coeff_modulus()[0];
   BENCH_PRINT("N = " << N << ", q = " << q << " (" << std::ceil(std::log2(q)) << " bits)");
 
-  intel::hexl::NTT ntt(N, q);
-  BENCH_PRINT("HEXL NTT object created.");
+  // When the active config splits q into two CRT limbs, q is composite and
+  // HEXL's default ctor (which searches for a prime-only primitive root) will
+  // fail. PirParams already computed the CRT-combined root w_crt and registered
+  // it with utils::ntt_*; we reuse it here so tests 1/2/4/5 work in both modes.
+  const auto &crt = pir_params.get_composite_rns();
+  std::unique_ptr<intel::hexl::NTT> ntt_ptr = crt.enabled
+      ? std::make_unique<intel::hexl::NTT>(N, q, crt.w_crt)
+      : std::make_unique<intel::hexl::NTT>(N, q);
+  intel::hexl::NTT &ntt = *ntt_ptr;
+  BENCH_PRINT("HEXL NTT object created"
+              << (crt.enabled ? " (composite q, w_crt)" : "") << ".");
 
   std::mt19937_64 rng(42);
 

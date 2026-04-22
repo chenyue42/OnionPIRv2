@@ -8,10 +8,7 @@
 #include <iostream>
 #include <string>
 
-PirParams::PirParams()
-    : coeff_mod_bits_(DBConsts::CoeffMods.begin(), DBConsts::CoeffMods.end()) {
-  // ============ Coefficient modulus (possibly composite q = q1*q2) ============
-#if ACTIVE_CONFIG == CONFIG_COMPOSITE_56
+void PirParams::init_composite_rns() {
   std::vector<int> rns_bits(DBConsts::FirstDimRNSMods.begin(),
                             DBConsts::FirstDimRNSMods.end());
   auto rns_primes = utils::generate_ntt_friendly_primes(rns_bits, DBConsts::PolyDegree);
@@ -21,9 +18,6 @@ PirParams::PirParams()
   const uint64_t w1 = intel::hexl::MinimalPrimitiveRoot(2 * DBConsts::PolyDegree, q1);
   const uint64_t w2 = intel::hexl::MinimalPrimitiveRoot(2 * DBConsts::PolyDegree, q2);
   const uint64_t w_crt = utils::crt_combine(w1, q1, w2, q2);
-  // Seed the NTT cache so every later utils::ntt_fwd/inv on (N, crt_mod) in
-  // any thread uses the CRT-compatible root rather than HEXL's default search
-  // (which assumes a prime modulus and would fail here).
   utils::register_ntt_root(DBConsts::PolyDegree, crt_mod, w_crt);
   coeff_modulus_ = {crt_mod};
   composite_rns_.enabled = true;
@@ -36,10 +30,16 @@ PirParams::PirParams()
   if (!utils::try_invert_uint_mod(q1 % q2, q2, q1_inv))
     throw std::runtime_error("PirParams: q1 and q2 must be coprime");
   composite_rns_.q1_inv_mod_q2 = q1_inv;
-#else
-  coeff_modulus_ = utils::generate_ntt_friendly_primes(coeff_mod_bits_,
-                                                       DBConsts::PolyDegree);
-#endif
+}
+
+PirParams::PirParams()
+    : coeff_mod_bits_(DBConsts::CoeffMods.begin(), DBConsts::CoeffMods.end()) {
+  if constexpr (DBConsts::CompositeFirstDim) {
+    init_composite_rns();
+  } else {
+    coeff_modulus_ = utils::generate_ntt_friendly_primes(coeff_mod_bits_,
+                                                         DBConsts::PolyDegree);
+  }
 
   // =============== Plaintext modulus ===============
   plain_mod_ = utils::generate_prime(DBConsts::PlainMod);

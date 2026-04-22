@@ -27,4 +27,5 @@ seal_install/
 openfhe_install/
 openfhe_test/
 claude_resp/
+codex_resp/
 .*
