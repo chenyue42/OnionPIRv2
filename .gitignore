@@ -26,4 +26,5 @@ seal_install/
 *.sbatch
 openfhe_install/
 openfhe_test/
+claude_resp/
 .*
