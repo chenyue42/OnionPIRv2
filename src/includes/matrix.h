@@ -38,25 +38,8 @@ typedef struct {
     size_t levels;
 } matrix128_t;
 
-// Composite-mod first-dim split: each limb is a uint32 matrix, the
-// per-limb accumulator is uint64 (fst_dim_sz * (q_i - 1)^2 < 2^64 for
-// q_i <= 2^28 and fst_dim_sz <= 256).
-typedef struct {
-    uint32_t *data;
-    size_t rows;
-    size_t cols;
-    size_t levels;
-} db_matrix32_t;
 
-typedef struct {
-    uint64_t *data;
-    size_t rows;
-    size_t cols;
-    size_t levels;
-} inter_matrix64_t;
-
-
-// ! mat_vec functions means matrix-vector multiplication. 
+// ! mat_vec functions means matrix-vector multiplication.
 // It is used for testing the performance of each method. Otherwise,
 // we are doing out = A * B, where A = m * n, B = n * 2, n = DBConsts::MaxFstDimSz
 
@@ -73,19 +56,6 @@ void mat_mat(const db_coeff_t *__restrict A, const db_coeff_t *__restrict B,
 
 // Doing levels of mat_mat, where each level is doing db_coeff_t x db_coeff_t -> inter_coeff_t multiplication.
 void level_mat_mat(db_matrix_t *A, db_matrix_t *B, inter_matrix_t *out);
-
-// uint32_t x uint32_t -> uint64_t multiplication for the composite-mod first-dim split.
-// Each limb (mod q1 or mod q2, both <= 28 bits) is run independently; outputs
-// are in [0, mod) so downstream CRT compose can skip one reduction.
-// When rows * (mod-1)^2 would overflow u64 (e.g. fst_dim_sz=477, mod<2^28),
-// the accumulator is reduced mod `mod` every `chunk = UINT64_MAX / (mod-1)^2`
-// accumulations to keep sums bounded.
-void mat_mat_32(const uint32_t *__restrict A, const uint32_t *__restrict B,
-    uint64_t *__restrict out, const size_t rows,
-    const size_t cols, const uint64_t mod);
-
-void level_mat_mat_32(db_matrix32_t *A, db_matrix32_t *B, inter_matrix64_t *out,
-                       const uint64_t mod);
 
 // ======================== COMPONENT WISE MULTIPLICATION ========================
 

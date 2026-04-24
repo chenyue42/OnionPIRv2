@@ -9,7 +9,7 @@ void PirTest::test_decrypt_mod_q() {
   PirClient client(pir_params);
 
   const size_t coeff_count = DBConsts::PolyDegree;
-  const uint64_t q = pir_params.get_coeff_modulus()[0];
+  const uint64_t q = pir_params.get_rns_mods()[0];
   const uint64_t t = pir_params.get_plain_mod();
   const double sigma = pir_params.get_noise_std_dev();
   std::mt19937_64 rng(std::random_device{}());

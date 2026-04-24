@@ -9,7 +9,7 @@ void PirTest::test_rlwe_enc() {
 
   PirParams pir_params;
   const size_t   N     = DBConsts::PolyDegree;
-  const uint64_t q     = pir_params.get_coeff_modulus()[0];
+  const uint64_t q     = pir_params.get_rns_mods()[0];
   const uint64_t t     = pir_params.get_plain_mod();
   const double   sigma = pir_params.get_noise_std_dev();
 

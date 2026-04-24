@@ -14,7 +14,7 @@ static void test_signed_decompose() {
   const size_t q_bits = pir_params.get_ct_mod_width();
   const size_t base_log2 = (q_bits + bvks::L_KS - 1) / bvks::L_KS;
   const uint64_t B = uint64_t(1) << base_log2;
-  const uint64_t q = pir_params.get_coeff_modulus()[0];
+  const uint64_t q = pir_params.get_rns_mods()[0];
   const uint64_t half_q = q >> 1;
 
   std::mt19937_64 rng(42);
@@ -69,7 +69,7 @@ void PirTest::test_bv_keyswitch() {
 
   PirParams pir_params;
   constexpr size_t N  = DBConsts::PolyDegree;
-  const uint64_t q    = pir_params.get_coeff_modulus()[0];
+  const uint64_t q    = pir_params.get_rns_mods()[0];
   const uint64_t t    = pir_params.get_plain_mod();
   const double sigma  = pir_params.get_noise_std_dev();
   const uint32_t galois_k = 513;

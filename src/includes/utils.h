@@ -90,13 +90,63 @@ inline void right_shift_uint128(uint64_t *operand, int shift, uint64_t *result) 
 void ntt_fwd(uint64_t *data, size_t N, uint64_t q);
 void ntt_inv(uint64_t *data, size_t N, uint64_t q);
 
-// Register a custom primitive 2N-th root of unity for the (N, q) pair, to be
-// used when the HEXL NTT object is first constructed for that pair in any
-// thread. Required for composite q (q = q1*q2), since HEXL's default ctor
-// assumes q is prime when searching for a root. Must be called before the
-// first ntt_fwd/ntt_inv on that (N, q). Calling twice with the same (N, q)
-// is an error unless the root matches the previously registered value.
-void register_ntt_root(size_t N, uint64_t q, uint64_t root);
+// Barrett reduction for 128-bit x mod 64-bit q (SEAL-style).
+//
+// Precompute once per modulus (barrett_u128_setup); call barrett_reduce_u128
+// per coefficient on the hot path. Replaces `x % q` with three full 64×64→128
+// multiplies, one 64×64→64 low multiply, a low-64 multiply-subtract, and one
+// conditional subtract. No 128-bit divide.
+//
+// Precondition: q < 2^63. (Our NTT-friendly primes are at most 60 bits.)
+//
+// How it works: mu = floor(2^128 / q) has up to 65 bits. The full 128×128
+// product x·mu would give a 256-bit result; we want floor(x·mu / 2^128), i.e.
+// the upper 128. But the Barrett subtraction x - q_est·q is immediately reduced
+// mod 2^64 because the true remainder is < 2q < 2^64 — so we only need the low
+// 64 bits of q_est. That lets us drop the x_hi·mu_hi high half and all the high
+// bits of the upper-128 sum. Net result: 4 mults, a handful of adds, one
+// compare-subtract.
+//
+// Error bound: q_est ≤ floor(x/q) ≤ q_est + 1 (tighter than 2 because mu
+// covers the full 2^128 range exactly for odd q), so r = x_lo − q_est·q (mod
+// 2^64) lies in [0, 2q). One conditional subtract suffices.
+struct BarrettU128 {
+  uint64_t q;
+  uint64_t mu_lo;   // low 64 bits of floor(2^128 / q)
+  uint64_t mu_hi;   // high 64 bits; up to ~(64 − log2(q)) bits actually used
+};
+
+inline BarrettU128 barrett_u128_setup(uint64_t q) {
+  const uint128_t mu = (~static_cast<uint128_t>(0)) / q;
+  return BarrettU128{q, static_cast<uint64_t>(mu),
+                     static_cast<uint64_t>(mu >> 64)};
+}
+
+inline uint64_t barrett_reduce_u128(uint128_t x, const BarrettU128 &b) {
+  const uint64_t x_lo = static_cast<uint64_t>(x);
+  const uint64_t x_hi = static_cast<uint64_t>(x >> 64);
+
+  // Round 1: carry = hi(x_lo · mu_lo).
+  const uint64_t carry1 = static_cast<uint64_t>(
+      (static_cast<uint128_t>(x_lo) * b.mu_lo) >> 64);
+
+  // tmp = x_lo · mu_hi + carry1; keep both halves.
+  const uint128_t t1 = static_cast<uint128_t>(x_lo) * b.mu_hi + carry1;
+  const uint64_t t1_lo = static_cast<uint64_t>(t1);
+  const uint64_t t1_hi = static_cast<uint64_t>(t1 >> 64);
+
+  // Round 2: add x_hi · mu_lo into t1_lo, capture its high half.
+  const uint128_t t2 = static_cast<uint128_t>(x_hi) * b.mu_lo + t1_lo;
+  const uint64_t carry2 = static_cast<uint64_t>(t2 >> 64);
+
+  // q_est low 64 bits (we only need these).
+  const uint64_t q_est_lo = x_hi * b.mu_hi + t1_hi + carry2;
+
+  // Barrett subtract, truncated to low 64 since true remainder is < 2^64.
+  uint64_t r = x_lo - q_est_lo * b.q;
+  if (r >= b.q) r -= b.q;
+  return r;
+}
 
 void negacyclic_shift_poly_coeffmod(const uint64_t *poly,
                                     size_t coeff_count, size_t shift,
@@ -111,8 +161,8 @@ std::string uint128_to_string(uint128_t value);
  * small, i.e., the first row is B^(log q / log B -1), the final row is 1.
  */
 std::vector<std::vector<uint64_t>>
-gsw_gadget(size_t l, uint64_t base_log2, size_t coeff_mod_cnt,
-           const std::vector<uint64_t> &coeff_modulus);
+gsw_gadget(size_t l, uint64_t base_log2, size_t rns_mod_cnt,
+           const std::vector<uint64_t> &rns_mods);
 
 // Scaled gadget for approximate decomposition (TFHE-rs style).
 // Entries equal the exact gadget multiplied by 2^drop mod q, where
@@ -122,8 +172,8 @@ gsw_gadget(size_t l, uint64_t base_log2, size_t coeff_mod_cnt,
 // When drop == 0 this returns exactly gsw_gadget(...).
 std::vector<std::vector<uint64_t>>
 gsw_gadget_approx(size_t l, uint64_t base_log2, size_t q_bits,
-                  size_t coeff_mod_cnt,
-                  const std::vector<uint64_t> &coeff_modulus);
+                  size_t rns_mod_cnt,
+                  const std::vector<uint64_t> &rns_mods);
 
 // Generate a prime that is bit_width long
 std::uint64_t generate_prime(size_t bit_width);
@@ -133,12 +183,6 @@ std::uint64_t generate_prime(size_t bit_width);
 // returned for the same bit width.  Replaces SEAL's CoeffModulus::Create.
 std::vector<uint64_t> generate_ntt_friendly_primes(const std::vector<int> &bit_widths,
                                                    size_t N);
-
-// CRT-combine two values into a single residue mod q1*q2.
-// Requires gcd(q1, q2) = 1, w1 < q1, w2 < q2, and q1*q2 fits in uint64_t.
-// Returns w ∈ [0, q1*q2) with w ≡ w1 (mod q1), w ≡ w2 (mod q2).
-// Use with HEXL's MinimalPrimitiveRoot(2N, q_i) to build a 2N-th root mod q1*q2.
-uint64_t crt_combine(uint64_t w1, uint64_t q1, uint64_t w2, uint64_t q2);
 
 // New functions for plaintext handling
 void print_plaintext(const RlwePt &plaintext, size_t count = 10);

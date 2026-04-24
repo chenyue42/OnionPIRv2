@@ -60,14 +60,6 @@ private:
   std::unordered_map<size_t, RlwePt> recorded_pts_; // pre-NTT plaintexts for test verification
   std::unique_ptr<db_coeff_t[], AlignedDeleter<db_coeff_t>> db_aligned_; // aligned database for fast first dim
   std::vector<inter_coeff_t> inter_res_; // intermediate result vector for fst dim
-  // Composite-mod first-dim path (q = q1 * q2, each ~28 bits).
-  // DB is stored as two uint32 limb arrays with the same coefficient-major
-  // layout as db_aligned_; per-limb matmuls accumulate into two u64 buffers,
-  // which are CRT-composed in delay_modulus_composite.
-  std::unique_ptr<uint32_t[], AlignedDeleter<uint32_t>> db_lo_;
-  std::unique_ptr<uint32_t[], AlignedDeleter<uint32_t>> db_hi_;
-  std::vector<uint64_t> inter_res_lo_;
-  std::vector<uint64_t> inter_res_hi_;
   PirParams pir_params_;
   GSWEval key_gsw_;
   GSWEval data_gsw_;
@@ -81,27 +73,15 @@ private:
   // need special permutation for packing when using it.
   std::vector<RlweCt> fast_expand_qry(size_t client_id, RlweCt &ciphertext) const;
 
-  // This is a helper for evaluate the first dimension. 
+  // This is a helper for evaluate the first dimension.
   // Instead of doing a mod operation after every addition and multiplication during the matrix multiplication,
   // we delay the mod operation until the end. We also use barret reduction for the mod operation.
   void delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *__restrict inter_res);
-
-  // Composite-mod variant: reads two per-limb u64 buffers, reduces each
-  // coefficient mod q1/q2, CRT-composes into [0, q1*q2), then applies ntt_inv.
-  void delay_modulus_composite(std::vector<RlweCt> &result,
-                               const uint64_t *__restrict inter_lo,
-                               const uint64_t *__restrict inter_hi);
-
 
   // Fill the intermediate_db_ with some ciphertext. We just need to allocate the memory.
   void fill_inter_res();
 
   void prep_query(const std::vector<RlweCt> &fst_dim_query, std::vector<db_coeff_t>& query_data);
-
-  // Composite-mod variant: splits each NTT query coefficient into (mod q1, mod q2)
-  // u32 limbs with the same interleaved layout as prep_query.
-  void prep_query_composite(const std::vector<RlweCt> &fst_dim_query,
-                            uint32_t *query_lo, uint32_t *query_hi);
 
   // customized modulus switch for single mod RlweCt. (Not RNS modulus)
   // The goal is to halve the size of the ciphertext.

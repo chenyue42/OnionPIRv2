@@ -10,7 +10,7 @@ namespace {
 
 // Native RNS ↔ multi-precision conversions (CRT), replacing
 // seal::util::RNSBase::compose_array / decompose_array. Only K=2 is actually
-// reached by any of our configs (CoeffMods contains at most 3 entries, the
+// reached by any of our configs (RnsMods contains at most 3 entries, the
 // last being the "special" modulus that is excluded from the RNS base).
 // A K=1 call is a no-op since the layout already matches.
 
@@ -94,14 +94,14 @@ void decompose_mp_to_rns(uint64_t *buf, size_t N,
 
 void GSWEval::gsw_ntt_forward(GSWCt &gsw) {
   constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
-  const auto &coeff_mods = pir_params_.get_coeff_modulus();
+  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  const auto &rns_mods = pir_params_.get_rns_mods();
 
-  // Each poly holds c0||c1, each split into coeff_mod_cnt limbs of coeff_count.
+  // Each poly holds c0||c1, each split into rns_mod_cnt limbs of coeff_count.
   for (auto &poly : gsw) {
-    for (size_t i = 0; i < 2 * coeff_mod_cnt; i++) {
+    for (size_t i = 0; i < 2 * rns_mod_cnt; i++) {
       utils::ntt_fwd(poly.data() + coeff_count * i, coeff_count,
-                     coeff_mods[i % coeff_mod_cnt]);
+                     rns_mods[i % rns_mod_cnt]);
     }
   }
 }
@@ -125,15 +125,15 @@ void GSWEval::external_product(GSWCt const &gsw_enc, RlweCt const &bfv,
   }
 
   // ============================ Parameters ============================
-  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
+  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const size_t coeff_val_cnt = DBConsts::PolyDegree * coeff_mod_cnt; // polydegree * RNS moduli count
+  const size_t coeff_val_cnt = DBConsts::PolyDegree * rns_mod_cnt; // polydegree * RNS moduli count
 
   // ============================ Decomposition ============================
   // Decomposing the BFV ciphertext to 2l polynomials. Transform to NTT form.
   std::vector<std::vector<uint64_t>> decomposed_bfv;
   TIME_START(decomp_rlwe_log_key);
-  if (coeff_mod_cnt == 1) {
+  if (rns_mod_cnt == 1) {
     decomp_rlwe_single_mod(bfv, decomposed_bfv, context);
   } else {
     decomp_rlwe(bfv, decomposed_bfv, context);
@@ -163,16 +163,16 @@ void GSWEval::external_product(GSWCt const &gsw_enc, RlweCt const &bfv,
 
   // ============================ Modding ============================
   TIME_START("external mod");
-  const auto coeff_modulus = pir_params_.get_coeff_modulus();
+  const auto rns_mods = pir_params_.get_rns_mods();
   for (size_t poly_id = 0; poly_id < 2; poly_id++) {
     auto ct_ptr = res_ct.data(poly_id);
     auto &pt_ptr = result[poly_id];
 
-    for (size_t mod_id = 0; mod_id < coeff_mod_cnt; mod_id++) {
+    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
       auto mod_idx = (mod_id * coeff_count);
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         auto x = pt_ptr[coeff_id + mod_idx];
-        ct_ptr[coeff_id + mod_idx] = x % coeff_modulus[mod_id];
+        ct_ptr[coeff_id + mod_idx] = x % rns_mods[mod_id];
       }
     }
   }
@@ -206,9 +206,9 @@ void GSWEval::decomp_rlwe(RlweCt const &ct, std::vector<std::vector<uint64_t>> &
   // Setup parameters
   const uint64_t base = uint64_t(1) << base_log2_;
   const uint64_t mask = base - 1;
-  const auto &coeff_modulus = pir_params_.get_coeff_modulus();
+  const auto &rns_mods = pir_params_.get_rns_mods();
   constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
+  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt();
   std::vector<uint64_t> ct_coeffs(coeff_val_cnt);
 
@@ -219,8 +219,8 @@ void GSWEval::decomp_rlwe(RlweCt const &ct, std::vector<std::vector<uint64_t>> &
     TIME_START(extern_compose_log_key);
     // Transform the coefficients from RNS form to multi-precision integer form
     // (little-endian limbs, K limbs per coefficient).
-    // ! compose / decompose are slow when coeff_mod_cnt > 1 because of the per-coeff CRT work.
-    compose_rns_to_mp(ct_coeffs.data(), coeff_count, coeff_modulus, coeff_mod_cnt,
+    // ! compose / decompose are slow when rns_mod_cnt > 1 because of the per-coeff CRT work.
+    compose_rns_to_mp(ct_coeffs.data(), coeff_count, rns_mods, rns_mod_cnt,
                       pir_params_.get_rns_tables());
     TIME_END(extern_compose_log_key);
 
@@ -230,30 +230,30 @@ void GSWEval::decomp_rlwe(RlweCt const &ct, std::vector<std::vector<uint64_t>> &
       const size_t shift_amount = p * base_log2_;
       TIME_START(right_shift_log_key);
       for (size_t k = 0; k < coeff_count; k++) {
-        uint64_t* res_ptr = rshift_res.data() + k * coeff_mod_cnt;
-        if (coeff_mod_cnt == 2) {
+        uint64_t* res_ptr = rshift_res.data() + k * rns_mod_cnt;
+        if (rns_mod_cnt == 2) {
             utils::right_shift_uint128(res_ptr, p * base_log2_, res_ptr);
             res_ptr[0] &= mask;
             res_ptr[1] = 0;
         } else {
-          // Generic n-limb little-endian right shift (only reached for coeff_mod_cnt > 2).
+          // Generic n-limb little-endian right shift (only reached for rns_mod_cnt > 2).
           const size_t shift = p * base_log2_;
           const size_t word_shift = shift / 64;
           const size_t bit_shift  = shift % 64;
-          for (size_t i = 0; i < coeff_mod_cnt; i++) {
-            uint64_t lo = (i + word_shift     < coeff_mod_cnt) ? res_ptr[i + word_shift]     : 0;
-            uint64_t hi = (i + word_shift + 1 < coeff_mod_cnt) ? res_ptr[i + word_shift + 1] : 0;
+          for (size_t i = 0; i < rns_mod_cnt; i++) {
+            uint64_t lo = (i + word_shift     < rns_mod_cnt) ? res_ptr[i + word_shift]     : 0;
+            uint64_t hi = (i + word_shift + 1 < rns_mod_cnt) ? res_ptr[i + word_shift + 1] : 0;
             res_ptr[i] = (bit_shift == 0) ? lo : (lo >> bit_shift) | (hi << (64 - bit_shift));
           }
           res_ptr[0] &= mask;
-          for (size_t i = 1; i < coeff_mod_cnt; i++) {
+          for (size_t i = 1; i < rns_mod_cnt; i++) {
             res_ptr[i] = 0;
           }
         }
       }
       TIME_END(right_shift_log_key);
       TIME_START(extern_decomp_log_key);
-      decompose_mp_to_rns(rshift_res.data(), coeff_count, coeff_modulus, coeff_mod_cnt,
+      decompose_mp_to_rns(rshift_res.data(), coeff_count, rns_mods, rns_mod_cnt,
                           pir_params_.get_rns_tables());
       TIME_END(extern_decomp_log_key);
 
@@ -278,7 +278,7 @@ void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<u
   assert(output.size() == 0);
   output.reserve(2 * l_);
   constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const uint64_t q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t q = pir_params_.get_rns_mods()[0];
 
   // ============================ Signed Decomposition ============================
   // Coefficient-first loop: carry propagates across digits within each coefficient.
@@ -326,15 +326,15 @@ void GSWEval::decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,
 
   // ============================ Parameters ============================
   constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
-  const auto coeff_mods = pir_params_.get_coeff_modulus();
+  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  const auto rns_mods = pir_params_.get_rns_mods();
 
   // ============================ NTT Transformation ============================
   TIME_START(extern_ntt_log_key);
   for (auto &coeffs : decomp_coeffs) {
-    for (size_t i = 0; i < coeff_mod_cnt; i++) {
+    for (size_t i = 0; i < rns_mod_cnt; i++) {
       utils::ntt_fwd(coeffs.data() + coeff_count * i, coeff_count,
-                                    coeff_mods[i]);
+                                    rns_mods[i]);
     }
   }
   TIME_END(extern_ntt_log_key);
@@ -345,14 +345,14 @@ void GSWEval::query_to_gsw(std::vector<RlweCt> query, GSWCt gsw_key,
   const size_t curr_l = query.size();
   output.resize(curr_l);
   constexpr size_t coeff_count = DBConsts::PolyDegree;
-  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
+  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
 
   // We get the first half directly from the query
   for (size_t i = 0; i < curr_l; i++) {
-    for (size_t j = 0; j < coeff_count * coeff_mod_cnt; j++) {
+    for (size_t j = 0; j < coeff_count * rns_mod_cnt; j++) {
       output[i].push_back(query[i].data(0)[j]);
     }
-    for (size_t j = 0; j < coeff_count * coeff_mod_cnt; j++) {
+    for (size_t j = 0; j < coeff_count * rns_mod_cnt; j++) {
       output[i].push_back(query[i].data(1)[j]);
     }
   }
@@ -365,10 +365,10 @@ void GSWEval::query_to_gsw(std::vector<RlweCt> query, GSWCt gsw_key,
     TIME_START(CONVERT_EXTERN);
     external_product(gsw_key, query[i], query[i], LogContext::QUERY_TO_GSW);
     TIME_END(CONVERT_EXTERN);
-    for (size_t j = 0; j < coeff_count * coeff_mod_cnt; j++) {
+    for (size_t j = 0; j < coeff_count * rns_mod_cnt; j++) {
       output[i + curr_l].push_back(query[i].data(0)[j]);
     }
-    for (size_t j = 0; j < coeff_count * coeff_mod_cnt; j++) {
+    for (size_t j = 0; j < coeff_count * rns_mod_cnt; j++) {
       output[i + curr_l].push_back(query[i].data(1)[j]);
     }
   }
@@ -377,11 +377,11 @@ void GSWEval::query_to_gsw(std::vector<RlweCt> query, GSWCt gsw_key,
 GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
                                     const RlweSk &sk, std::mt19937_64 &rng) {
   constexpr size_t N = DBConsts::PolyDegree;
-  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
-  assert(coeff_mod_cnt == 1 && "plain_to_gsw currently supports only single-mod");
+  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  assert(rns_mod_cnt == 1 && "plain_to_gsw currently supports only single-mod");
   assert(plaintext.size() == N);
 
-  const uint64_t q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t q = pir_params_.get_rns_mods()[0];
   const double sigma = pir_params_.get_noise_std_dev();
 
   // Gadget: gadget[k] = B^(l-1-k) mod q, matching utils::gsw_gadget ordering
@@ -391,8 +391,8 @@ GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
   const auto gadget_table = use_approx_decomp_
       ? utils::gsw_gadget_approx(l_, base_log2_,
                                  pir_params_.get_ct_mod_width(), 1,
-                                 pir_params_.get_coeff_modulus())
-      : utils::gsw_gadget(l_, base_log2_, 1, pir_params_.get_coeff_modulus());
+                                 pir_params_.get_rns_mods())
+      : utils::gsw_gadget(l_, base_log2_, 1, pir_params_.get_rns_mods());
   const std::vector<uint64_t> &gadget = gadget_table[0];
 
   // Output layout: 2*l_ rows, each row = [c0 (N) || c1 (N)] in NTT form.

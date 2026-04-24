@@ -76,7 +76,7 @@ class GSWEval {
       Encrypt a plaintext polynomial as a full GSW ciphertext in NTT form.
       Single-mod only. Produces the flat layout consumed by external_product:
       2*l_ rows, each row = [c0 || c1] of size 2*N (NTT form, mod q).
-      @param plaintext - polynomial of length N (or N*coeff_mod_cnt, but
+      @param plaintext - polynomial of length N (or N*rns_mod_cnt, but
                          only the single-mod case is supported).
       @param sk        - NTT-form ternary secret key.
       @param rng       - randomness source for a, e.

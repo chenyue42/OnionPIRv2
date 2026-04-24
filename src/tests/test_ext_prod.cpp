@@ -35,7 +35,7 @@ void PirTest::test_external_product() {
   std::vector<uint64_t> zero(coeff_count);
   one[0] = 1;
 
-  const uint64_t q = pir_params.get_coeff_modulus()[0];
+  const uint64_t q = pir_params.get_rns_mods()[0];
   const uint64_t t = pir_params.get_plain_mod();
   std::mt19937_64 rng(std::random_device{}());
   RlweSk rlwe_sk = gen_secret_key(coeff_count, q, rng);

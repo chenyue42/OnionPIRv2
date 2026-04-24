@@ -5,47 +5,32 @@
 #include <cstdint>
 #include <vector>
 
-// Precomputed constants for K=2 CRT compose/decompose in gsw.cpp. Depends
-// only on coeff_modulus, so computed once in PirParams and reused per call.
+// Precomputed constants used by gsw.cpp's K=2 CRT compose/decompose helpers.
+// In this single-modulus build K is always 1, so the K=2 fields are unused;
+// the struct is still wired through so the gsw helpers keep compiling.
 struct RnsTables {
-  uint64_t q0_inv_mod_q1 = 0; // (q0 mod q1)^{-1} mod q1
-  std::vector<uint64_t> r64_mod_q; // 2^64 mod q_i, one per limb
-};
-
-// Constants for the composite-mod first-dim split. Only populated when the
-// active config splits the ciphertext modulus q into two CRT limbs (q = q1*q2)
-// for the first-dimension matmul. Empty/zero otherwise.
-struct CompositeRnsTables {
-  bool enabled = false;         // true iff split is active
-  uint64_t q1 = 0;              // first RNS limb (~28 bits)
-  uint64_t q2 = 0;              // second RNS limb (~28 bits)
-  uint64_t w1 = 0;              // primitive 2N-th root mod q1
-  uint64_t w2 = 0;              // primitive 2N-th root mod q2
-  uint64_t w_crt = 0;           // CRT-combined primitive 2N-th root mod q1*q2
-  uint64_t q1_inv_mod_q2 = 0;   // precomputed for CRT-compose hot path
+  uint64_t q0_inv_mod_q1 = 0;
+  std::vector<uint64_t> r64_mod_q;
 };
 
 // ================== CLASS DEFINITIONS ==================
 class PirParams {
 public:
   PirParams();
-  // copy constructor
   PirParams(const PirParams &pir_params) = default;
 
   // ================== getters ==================
-  // number of usable bits per coefficient
-
   const size_t get_ct_mod_width() const;
 
-  inline const size_t get_uint_size() const {
-    return sizeof(db_coeff_t);
-  }
+  inline const size_t get_uint_size() const { return sizeof(db_coeff_t); }
   inline const size_t get_num_bits_per_coeff() const { return DBConsts::PlainMod - 1; }
-  // size of each plaintext in bytes
-  inline size_t get_pt_size() const { return get_num_bits_per_coeff() * DBConsts::PolyDegree / 8; }
-  inline double get_DBSize_MB() const { return static_cast<double>(num_pt_) * get_pt_size() / 1024 / 1024; }
+  inline size_t get_pt_size() const {
+    return get_num_bits_per_coeff() * DBConsts::PolyDegree / 8;
+  }
+  inline double get_DBSize_MB() const {
+    return static_cast<double>(num_pt_) * get_pt_size() / 1024 / 1024;
+  }
   inline double get_physical_storage_MB() const {
-    // After NTT, each coefficient fits in db_coeff_t (28-bit moduli).
     return static_cast<double>(get_coeff_val_cnt()) * num_pt_ * sizeof(db_coeff_t) / 1024 / 1024;
   }
   inline size_t get_num_pt() const { return num_pt_; }
@@ -55,37 +40,22 @@ public:
   inline size_t get_small_q() const { return small_q_; }
   inline size_t get_base_log2() const { return base_log2_; }
   inline size_t get_base_log2_key() const { return base_log2_key_; }
-  // In terms of number of plaintexts
   inline size_t get_fst_dim_sz() const { return fst_dim_sz_; }
-  // In terms of number of plaintexts
-  // when other_dim_sz == 1, it means we only use the first dimension.
   inline size_t get_other_dim_sz() const { return num_pt_ / fst_dim_sz_; }
-  inline size_t get_coeff_mod_cnt() const { return coeff_modulus_.size(); }
-  inline size_t get_coeff_val_cnt() const { return DBConsts::PolyDegree * get_coeff_mod_cnt(); }
+  inline size_t get_rns_mod_cnt() const { return rns_mods_.size(); }
+  inline size_t get_coeff_val_cnt() const {
+    return DBConsts::PolyDegree * get_rns_mod_cnt();
+  }
   inline uint64_t get_plain_mod() const { return plain_mod_; }
-  inline const std::vector<uint64_t> &get_coeff_modulus() const { return coeff_modulus_; }
-  inline const std::vector<int> &get_coeff_mod_bits() const { return coeff_mod_bits_; }
+  inline const std::vector<uint64_t> &get_rns_mods() const { return rns_mods_; }
+  inline const std::vector<int> &get_rns_mod_bits() const { return rns_mod_bits_; }
   inline const RnsTables &get_rns_tables() const { return rns_tables_; }
-  inline const CompositeRnsTables &get_composite_rns() const { return composite_rns_; }
   inline size_t get_poly_degree() const { return DBConsts::PolyDegree; }
-  // The height of the expansion tree during packing unpacking stages
   inline const size_t get_expan_height() const { return DBConsts::TREE_HEIGHT; }
-  // Number of independent BFV queries the client sends. Stateful == 1.
-  inline size_t get_num_queries() const { return DBConsts::NumQueries; }
-  // Number of subsequent ("other") dimensions, excluding the first dim.
   inline size_t get_num_other_dims() const { return num_dims_ - 1; }
-  inline DBConsts::QueryMode get_query_mode() const { return DBConsts::Mode; }
-  inline DBConsts::GswSource get_gsw_source() const { return DBConsts::GswSrc; }
 
   // Standard deviation σ of the Gaussian error distribution used during
-  // encryption and key generation.  This is the standard deviation in the
-  // statistical sense: the distribution is N(0, σ²), i.e. samples are
-  // rounded Gaussians with ≈68% of values within ±σ of zero.
-  //
-  // Relationship to the "width parameter" r used in Spiral/Respire:
-  //   σ_std = r / sqrt(2π)  ←→  r = σ_std * sqrt(2π)
-  // For example, SEAL's default σ_std = 3.2 corresponds to r ≈ 8.01.
-  // Defined in DBConsts::NoiseStdDev (database_constants.h).
+  // encryption and key generation. Defined in DBConsts::NoiseStdDev.
   inline double get_noise_std_dev() const { return DBConsts::NoiseStdDev; }
 
   inline const size_t get_BFV_size(bool use_seed = true) const {
@@ -100,26 +70,19 @@ public:
     return 2 * l_key_ * get_BFV_size(use_seed);
   }
 
-  // ================== helper functions ==================
   void print_params() const;
 
 private:
-  // Populate coeff_modulus_ and composite_rns_ for the composite-first-dim path.
-  // Registers the CRT-combined 2N-th root with utils so later NTT calls on the
-  // composite modulus pick it up (HEXL's default ctor assumes a prime modulus).
-  void init_composite_rns();
-
-  static constexpr size_t l_ep_ = DBConsts::L_EP;                  // l for GSW
-  static constexpr size_t l_key_ = DBConsts::L_KEY;          // l for GSW key
-  uint64_t small_q_ = 0; // small modulus used for modulus switching. Use only when coeff_mod_cnt == 1
-  size_t base_log2_;         // log of base for data RGSW
-  size_t base_log2_key_;     // log of base for key RGSW
-  size_t num_pt_;            // number of plaintexts in the database
-  size_t fst_dim_sz_;        // first dimension size (number of plaintexts)
-  size_t num_dims_;          // total number of dimensions
-  uint64_t plain_mod_ = 0;   // plaintext modulus t
-  std::vector<int> coeff_mod_bits_;     // bit widths of each coeff modulus limb
-  std::vector<uint64_t> coeff_modulus_; // NTT-friendly primes for RLWE ciphertexts
-  RnsTables rns_tables_;                // precomputed CRT constants (K=2 only)
-  CompositeRnsTables composite_rns_;    // first-dim RNS split constants
+  static constexpr size_t l_ep_ = DBConsts::L_EP;
+  static constexpr size_t l_key_ = DBConsts::L_KEY;
+  uint64_t small_q_ = 0;
+  size_t base_log2_;
+  size_t base_log2_key_;
+  size_t num_pt_;
+  size_t fst_dim_sz_;
+  size_t num_dims_;
+  uint64_t plain_mod_ = 0;
+  std::vector<int> rns_mod_bits_;
+  std::vector<uint64_t> rns_mods_;
+  RnsTables rns_tables_;
 };

@@ -1,5 +1,6 @@
 #include "utils.h"
 #include "hexl/hexl.hpp"
+#include <bit>
 #include <cassert>
 #include <cstring>
 #include <fstream>
@@ -8,14 +9,9 @@
 #include <unordered_map>
 
 namespace {
-// Optional custom 2N-th root for a single (N, q) pair. Set once by
-// utils::register_ntt_root during PirParams construction, then read-only.
-// The only case that needs this is composite q = q1*q2, where HEXL's default
-// ctor can't search for a root. Everything else uses the default ctor.
-size_t g_custom_N = 0;
-uint64_t g_custom_q = 0;
-uint64_t g_custom_root = 0;
-
+// Thread-local cache of HEXL NTT objects keyed by (N, q). Each thread owns
+// its own copy; no locking needed. Every (N, q) used here is a prime modulus,
+// so HEXL's default ctor can search for a primitive root itself.
 intel::hexl::NTT &get_ntt(size_t N, uint64_t q) {
   struct Key {
     size_t N; uint64_t q;
@@ -29,23 +25,10 @@ intel::hexl::NTT &get_ntt(size_t N, uint64_t q) {
   thread_local std::unordered_map<Key, std::unique_ptr<intel::hexl::NTT>, Hash> cache;
   auto it = cache.find({N, q});
   if (it != cache.end()) return *it->second;
-  auto ntt = (N == g_custom_N && q == g_custom_q)
-               ? std::make_unique<intel::hexl::NTT>(N, q, g_custom_root)
-               : std::make_unique<intel::hexl::NTT>(N, q);
-  auto ins = cache.emplace(Key{N, q}, std::move(ntt));
+  auto ins = cache.emplace(Key{N, q}, std::make_unique<intel::hexl::NTT>(N, q));
   return *ins.first->second;
 }
 } // namespace
-
-void utils::register_ntt_root(size_t N, uint64_t q, uint64_t root) {
-  if (g_custom_N != 0 && (g_custom_N != N || g_custom_q != q || g_custom_root != root)) {
-    throw std::invalid_argument(
-        "register_ntt_root: a different (N, q, root) is already registered");
-  }
-  g_custom_N = N;
-  g_custom_q = q;
-  g_custom_root = root;
-}
 
 void utils::automorphism_coeff(const uint64_t *in, size_t N, uint32_t k,
                                uint64_t q, uint64_t *out) {
@@ -191,12 +174,12 @@ std::string utils::uint128_to_string(uint128_t value) {
 
 
 
-std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log2, size_t coeff_mod_cnt,
-                const std::vector<uint64_t> &coeff_modulus) {
+std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log2, size_t rns_mod_cnt,
+                const std::vector<uint64_t> &rns_mods) {
   // Create RGSW gadget.
-  std::vector<std::vector<uint64_t>> gadget(coeff_mod_cnt, std::vector<uint64_t>(l));
-  for (size_t i = 0; i < coeff_mod_cnt; i++) {
-    const uint64_t mod = coeff_modulus[i];
+  std::vector<std::vector<uint64_t>> gadget(rns_mod_cnt, std::vector<uint64_t>(l));
+  for (size_t i = 0; i < rns_mod_cnt; i++) {
+    const uint64_t mod = rns_mods[i];
     uint64_t pow = 1;
     for (int j = l - 1; j >= 0; j--) {
       gadget[i][j] = pow;
@@ -208,15 +191,15 @@ std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log
 
 std::vector<std::vector<uint64_t>>
 utils::gsw_gadget_approx(size_t l, uint64_t base_log2, size_t q_bits,
-                         size_t coeff_mod_cnt,
-                         const std::vector<uint64_t> &coeff_modulus) {
+                         size_t rns_mod_cnt,
+                         const std::vector<uint64_t> &rns_mods) {
   const size_t rep_bits = l * base_log2;
   assert(rep_bits <= q_bits);
   const size_t drop = q_bits - rep_bits;
 
-  std::vector<std::vector<uint64_t>> gadget(coeff_mod_cnt, std::vector<uint64_t>(l));
-  for (size_t i = 0; i < coeff_mod_cnt; i++) {
-    const uint64_t mod = coeff_modulus[i];
+  std::vector<std::vector<uint64_t>> gadget(rns_mod_cnt, std::vector<uint64_t>(l));
+  for (size_t i = 0; i < rns_mod_cnt; i++) {
+    const uint64_t mod = rns_mods[i];
     // Seed gadget[l-1] = 2^drop mod q (bottom row is B^0 · 2^drop).
     uint64_t pow = 1 % mod;
     for (size_t b = 0; b < drop; ++b) {
@@ -250,17 +233,6 @@ std::uint64_t utils::generate_prime(size_t bit_width) {
       candidate |= 1;
   } while (!utils::is_prime(candidate));
   return candidate;
-}
-
-uint64_t utils::crt_combine(uint64_t w1, uint64_t q1,
-                             uint64_t w2, uint64_t q2) {
-  // Garner: w = w1 + q1 * ((w2 - w1) * q1^{-1} mod q2) ∈ [0, q1*q2).
-  uint64_t q1_inv;
-  if (!try_invert_uint_mod(q1 % q2, q2, q1_inv))
-    throw std::invalid_argument("crt_combine: q1, q2 must be coprime");
-  uint64_t diff = (w2 + q2 - (w1 % q2)) % q2;
-  uint64_t k = mulmod_u64(diff, q1_inv, q2);
-  return static_cast<uint64_t>(static_cast<__uint128_t>(q1) * k + w1);
 }
 
 std::vector<uint64_t> utils::generate_ntt_friendly_primes(
@@ -370,10 +342,17 @@ void utils::fill_rand_arr(uint64_t *arr, size_t size) {
 }
 
 std::pair<size_t, size_t> utils::calculate_db_shape(size_t target_num_pt, size_t l, size_t h) {
-  size_t max_num_dims = 1 + ((1 << h) - 1) / l;
+  // OnionPIRv1-style hypercube: fst_dim_sz is a power of two. The expansion
+  // tree of height h yields 2^h BFV ciphertexts; (num_dims - 1) * l of those
+  // slots are consumed by RGSW reconstruction for the other dims, leaving the
+  // rest for the first dimension. We floor that remainder to a power of two.
+  const size_t capacity = size_t{1} << h;
+  size_t max_num_dims = 1 + (capacity - 1) / l;
   for (size_t num_dims = 1; num_dims <= max_num_dims + 1; num_dims++) {
-    size_t fst_dim_sz = (1 << h) - l * (num_dims - 1);
-    if (fst_dim_sz * (1 << (num_dims - 1)) >= target_num_pt) {
+    const size_t slack = capacity - l * (num_dims - 1);
+    if (slack == 0) break;
+    const size_t fst_dim_sz = size_t{1} << (std::bit_width(slack) - 1);
+    if (fst_dim_sz * (size_t{1} << (num_dims - 1)) >= target_num_pt) {
       return {fst_dim_sz, num_dims};
     }
   }

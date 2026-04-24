@@ -13,7 +13,7 @@ void PirTest::test_ext_prod_mux() {
   a[0] = 508; a[1] = 509; a[2] = 510;
   b[0] = 511; b[1] = 512; b[2] = 513;
 
-  const uint64_t q = pir_params.get_coeff_modulus()[0];
+  const uint64_t q = pir_params.get_rns_mods()[0];
   const uint64_t t = pir_params.get_plain_mod();
   const double sigma = pir_params.get_noise_std_dev();
 

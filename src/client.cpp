@@ -13,13 +13,13 @@ PirClient::PirClient(const PirParams &pir_params)
     : client_id_(rand()), pir_params_(pir_params),
       rng_(std::random_device{}()),
       rlwe_sk_(gen_secret_key(DBConsts::PolyDegree,
-                              pir_params.get_coeff_modulus()[0], rng_)) {
+                              pir_params.get_rns_mods()[0], rng_)) {
   init_sk_small_q();
 }
 
 GSWCt PirClient::generate_gsw_from_key() {
   constexpr size_t N = DBConsts::PolyDegree;
-  const uint64_t q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t q = pir_params_.get_rns_mods()[0];
 
   // Pull sk into coefficient form (it is stored in NTT form under q).
   std::vector<uint64_t> sk_coef(rlwe_sk_.data.begin(), rlwe_sk_.data.end());
@@ -83,7 +83,7 @@ std::vector<size_t> PirClient::get_query_indices(size_t pt_idx) {
 
 RlweCt PirClient::fast_generate_query(const size_t pt_idx) {
   constexpr size_t N = DBConsts::PolyDegree;
-  const uint64_t Q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t Q = pir_params_.get_rns_mods()[0];
   const uint64_t t = pir_params_.get_plain_mod();
   const double sigma = pir_params_.get_noise_std_dev();
 
@@ -117,20 +117,20 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
   const size_t bits_per_ciphertext = 1 << expan_height; // padding msg_size to the next power of 2
   const size_t l = pir_params_.get_l();
   const size_t base_log2 = pir_params_.get_base_log2();
-  const auto coeff_modulus = pir_params_.get_coeff_modulus();
-  const size_t coeff_mod_cnt = pir_params_.get_coeff_mod_cnt();
+  const auto rns_mods = pir_params_.get_rns_mods();
+  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
   const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
 
   // The following two for-loops calculates the powers for GSW gadgets.
-  std::vector<uint64_t> inv(coeff_mod_cnt);
-  for (size_t k = 0; k < coeff_mod_cnt; k++) {
+  std::vector<uint64_t> inv(rns_mod_cnt);
+  for (size_t k = 0; k < rns_mod_cnt; k++) {
     uint64_t result;
-    utils::try_invert_uint_mod(bits_per_ciphertext, coeff_modulus[k], result);
+    utils::try_invert_uint_mod(bits_per_ciphertext, rns_mods[k], result);
     inv[k] = result;
   }
 
-  // coeff_mod_cnt many rows, each row is B^{l-1},, ..., B^0 under different moduli
-  std::vector<std::vector<uint64_t>> gadget = utils::gsw_gadget(l, base_log2, coeff_mod_cnt, coeff_modulus);
+  // rns_mod_cnt many rows, each row is B^{l-1},, ..., B^0 under different moduli
+  std::vector<std::vector<uint64_t>> gadget = utils::gsw_gadget(l, base_log2, rns_mod_cnt, rns_mods);
 
   // This for-loop corresponds to the for-loop in Algorithm 1 from the OnionPIR paper
   auto q_head = query.data(0); // points to the first coefficient of the first ciphertext(c0) 
@@ -142,9 +142,9 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
       for (size_t k = 0; k < l; k++) {
         const size_t coef_pos = fst_dim_sz + (i-1) * l + k;  // the position of the coefficient in the resulting query
         const size_t reversed_idx = utils::bit_reverse(coef_pos, expan_height);  // the position of the coefficient in the query
-        for (size_t mod_id = 0; mod_id < coeff_mod_cnt; mod_id++) {
+        for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
           const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
-          inter_coeff_t mod = coeff_modulus[mod_id];
+          inter_coeff_t mod = rns_mods[mod_id];
           // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
           uint64_t coef = (inter_coeff_t)gadget[mod_id][k] * inv[mod_id] % mod;
           q_head[reversed_idx + pad] = (q_head[reversed_idx + pad] + coef) % mod;
@@ -226,7 +226,7 @@ static void decrypt_phase_single_mod(const RlweCt &ct,
 }
 
 RlwePt PirClient::decrypt_ct(const RlweCt &ct) {
-  const uint64_t q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t q = pir_params_.get_rns_mods()[0];
   const uint64_t t = pir_params_.get_plain_mod();
   RlwePt result;
   int budget = 0;
@@ -235,7 +235,7 @@ RlwePt PirClient::decrypt_ct(const RlweCt &ct) {
 }
 
 int PirClient::noise_budget(const RlweCt &ct) {
-  const uint64_t q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t q = pir_params_.get_rns_mods()[0];
   const uint64_t t = pir_params_.get_plain_mod();
   RlwePt tmp;
   int budget = 0;
@@ -332,7 +332,7 @@ RlwePt PirClient::decrypt_mod_q(const RlweCt &ct) const {
 
 void PirClient::init_sk_small_q() {
   constexpr size_t N = DBConsts::PolyDegree;
-  const uint64_t old_q = pir_params_.get_coeff_modulus()[0];
+  const uint64_t old_q = pir_params_.get_rns_mods()[0];
   const uint64_t small_q = pir_params_.get_small_q();
 
   // Convert rlwe_sk_ (NTT form under old_q) to coefficient form.

@@ -6,7 +6,7 @@ void PirTest::test_noise_sampling() {
 
   constexpr size_t N = 10000; // large N for reliable statistics
   PirParams pir_params;
-  const uint64_t q = pir_params.get_coeff_modulus()[0];
+  const uint64_t q = pir_params.get_rns_mods()[0];
   std::mt19937_64 rng(12345);
 
   // ---------------------------------------------------------------------------

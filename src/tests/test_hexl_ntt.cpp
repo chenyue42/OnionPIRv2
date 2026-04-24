@@ -10,20 +10,11 @@ void PirTest::test_hexl_ntt() {
   // ===================== Parameters =====================
   constexpr size_t N = DBConsts::PolyDegree;
   PirParams pir_params;
-  const uint64_t q = pir_params.get_coeff_modulus()[0];
+  const uint64_t q = pir_params.get_rns_mods()[0];
   BENCH_PRINT("N = " << N << ", q = " << q << " (" << std::ceil(std::log2(q)) << " bits)");
 
-  // When the active config splits q into two CRT limbs, q is composite and
-  // HEXL's default ctor (which searches for a prime-only primitive root) will
-  // fail. PirParams already computed the CRT-combined root w_crt and registered
-  // it with utils::ntt_*; we reuse it here so tests 1/2/4/5 work in both modes.
-  const auto &crt = pir_params.get_composite_rns();
-  std::unique_ptr<intel::hexl::NTT> ntt_ptr = crt.enabled
-      ? std::make_unique<intel::hexl::NTT>(N, q, crt.w_crt)
-      : std::make_unique<intel::hexl::NTT>(N, q);
-  intel::hexl::NTT &ntt = *ntt_ptr;
-  BENCH_PRINT("HEXL NTT object created"
-              << (crt.enabled ? " (composite q, w_crt)" : "") << ".");
+  intel::hexl::NTT ntt(N, q);
+  BENCH_PRINT("HEXL NTT object created.");
 
   std::mt19937_64 rng(42);
 
@@ -161,78 +152,8 @@ void PirTest::test_hexl_ntt() {
   double util_us = std::chrono::duration<double, std::micro>(t1 - t0).count() / iters;
   BENCH_PRINT("  utils::ntt_fwd + utils::ntt_inv: " << util_us << " us / iter (" << iters << " iters)");
 
-  // ===================== Test 7: composite NTT (q = q1*q2) =====================
-  // Pick two 28-bit NTT-friendly primes, derive per-limb 2N-th roots via HEXL,
-  // CRT-combine them into a 2N-th root mod q1*q2, and verify:
-  //   (a) real round-trip under the composite NTT,
-  //   (b) negacyclic polynomial multiplication under the composite NTT,
-  //   (c) coefficient-wise reduction of the composite NTT matches independent
-  //       per-limb NTTs (the property that makes the composite↔RNS split at
-  //       the first-dim matmul boundary free of extra NTT calls).
-  BENCH_PRINT("\n--- Test 7: Composite NTT with q = q1*q2 (28+28 bits) ---");
-  const auto rns_primes = utils::generate_ntt_friendly_primes({28, 28}, N);
-  const uint64_t q1 = rns_primes[0];
-  const uint64_t q2 = rns_primes[1];
-  const uint64_t crt_mod = static_cast<uint64_t>(q1) * q2;   // ~56 bits
-  const uint64_t w1 = intel::hexl::MinimalPrimitiveRoot(2 * N, q1);
-  const uint64_t w2 = intel::hexl::MinimalPrimitiveRoot(2 * N, q2);
-  const uint64_t w_crt = utils::crt_combine(w1, q1, w2, q2);
-  BENCH_PRINT("q1=" << q1 << ", q2=" << q2 << ", q1*q2=" << crt_mod
-              << " (" << std::ceil(std::log2(crt_mod)) << " bits)");
-  BENCH_PRINT("w1=" << w1 << ", w2=" << w2 << ", w_crt=" << w_crt);
-
-  const bool root_ok = intel::hexl::IsPrimitiveRoot(w_crt, 2 * N, crt_mod);
-  BENCH_PRINT("w_crt is primitive 2N-th root mod q1*q2: " << (root_ok ? "YES" : "NO"));
-
-  intel::hexl::NTT composite_ntt(N, crt_mod, w_crt);
-
-  // (a) true round-trip.
-  std::vector<uint64_t> orig(N), buf(N);
-  utils::sample_uniform_poly(orig.data(), N, crt_mod, rng);
-  std::memcpy(buf.data(), orig.data(), N * sizeof(uint64_t));
-  composite_ntt.ComputeForward(buf.data(), buf.data(), 1, 1);
-  composite_ntt.ComputeInverse(buf.data(), buf.data(), 1, 1);
-  bool round_trip_ok = (buf == orig);
-  BENCH_PRINT("Round-trip NTT(INTT(x)) == x: " << (round_trip_ok ? "YES" : "NO"));
-
-  // (b) polynomial multiplication under the composite NTT.
-  //     a(x) = 1 + 2x + 3x^2, b(x) = 4 + 5x → a*b = 4 + 13x + 22x^2 + 15x^3.
-  std::vector<uint64_t> ca(N, 0), cb(N, 0), cc(N);
-  ca[0] = 1; ca[1] = 2; ca[2] = 3;
-  cb[0] = 4; cb[1] = 5;
-  std::vector<uint64_t> ca_ntt(N), cb_ntt(N), cc_ntt(N);
-  composite_ntt.ComputeForward(ca_ntt.data(), ca.data(), 1, 1);
-  composite_ntt.ComputeForward(cb_ntt.data(), cb.data(), 1, 1);
-  intel::hexl::EltwiseMultMod(cc_ntt.data(), ca_ntt.data(), cb_ntt.data(), N, crt_mod, 1);
-  composite_ntt.ComputeInverse(cc.data(), cc_ntt.data(), 1, 1);
-  bool crt_mult_ok = (cc[0] == 4 && cc[1] == 13 && cc[2] == 22 && cc[3] == 15 && cc[4] == 0);
-  BENCH_PRINT("Composite NTT multiplication correct: " << (crt_mult_ok ? "YES" : "NO"));
-
-  // (c) composite NTT coefficients reduce coefficient-wise to per-limb NTT
-  //     coefficients (the split invariant needed at the first-dim boundary).
-  intel::hexl::NTT ntt_q1(N, q1, w1);
-  intel::hexl::NTT ntt_q2(N, q2, w2);
-  std::vector<uint64_t> ref(N);
-  utils::sample_uniform_poly(ref.data(), N, crt_mod, rng);
-  std::vector<uint64_t> ref_crt(N), ref_q1(N), ref_q2(N);
-  composite_ntt.ComputeForward(ref_crt.data(), ref.data(), 1, 1);
-  for (size_t i = 0; i < N; i++) {
-    ref_q1[i] = ref[i] % q1;
-    ref_q2[i] = ref[i] % q2;
-  }
-  ntt_q1.ComputeForward(ref_q1.data(), ref_q1.data(), 1, 1);
-  ntt_q2.ComputeForward(ref_q2.data(), ref_q2.data(), 1, 1);
-  bool split_ok = true;
-  for (size_t i = 0; i < N; i++) {
-    if (ref_crt[i] % q1 != ref_q1[i] || ref_crt[i] % q2 != ref_q2[i]) {
-      split_ok = false; break;
-    }
-  }
-  BENCH_PRINT("Composite-NTT coeffs ≡ per-limb NTT coeffs: " << (split_ok ? "YES" : "NO"));
-
  // ===================== Summary =====================
   BENCH_PRINT("\n--- Summary ---");
-  int pass = match + mult_ok + add_ok + (m_recovered == m) + wrap_match
-             + root_ok + round_trip_ok + crt_mult_ok + split_ok;
-  BENCH_PRINT("Passed " << pass << "/9 correctness tests (Test 6 is perf-only)");
+  int pass = match + mult_ok + add_ok + (m_recovered == m) + wrap_match;
+  BENCH_PRINT("Passed " << pass << "/5 correctness tests (Test 6 is perf-only)");
 }

@@ -8,7 +8,7 @@ void PirTest::test_mod_switch() {
   PirServer server(pir_params);
   PirClient client(pir_params);
   const size_t coeff_count = DBConsts::PolyDegree;
-  const uint64_t old_q = pir_params.get_coeff_modulus()[0];
+  const uint64_t old_q = pir_params.get_rns_mods()[0];
   const uint64_t small_q = pir_params.get_small_q();
   const uint64_t t = pir_params.get_plain_mod();
   const double sigma = pir_params.get_noise_std_dev();
