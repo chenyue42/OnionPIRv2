@@ -43,11 +43,6 @@ typedef struct {
 // It is used for testing the performance of each method. Otherwise,
 // we are doing out = A * B, where A = m * n, B = n * 2, n = DBConsts::MaxFstDimSz
 
-void mat_mat_64(const uint64_t *__restrict A, const uint64_t *__restrict B,
-    uint64_t *__restrict out, const size_t rows,
-    const size_t cols);
-    
-void level_mat_mat_64(matrix_t *A, matrix_t *B, matrix_t *out);
 
 // db_coeff_t x db_coeff_t -> inter_coeff_t multiplication
 void mat_mat(const db_coeff_t *__restrict A, const db_coeff_t *__restrict B,

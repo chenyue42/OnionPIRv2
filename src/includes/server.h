@@ -81,7 +81,7 @@ private:
   // Fill the intermediate_db_ with some ciphertext. We just need to allocate the memory.
   void fill_inter_res();
 
-  void prep_query(const std::vector<RlweCt> &fst_dim_query, std::vector<db_coeff_t>& query_data);
+  void prep_query(std::vector<RlweCt> &fst_dim_query, std::vector<db_coeff_t>& query_data);
 
   // customized modulus switch for single mod RlweCt. (Not RNS modulus)
   // The goal is to halve the size of the ciphertext.

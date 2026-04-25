@@ -3,66 +3,93 @@
 void PirTest::test_fst_dim_mult() {
   print_func_name(__FUNCTION__);
   CLEAN_TIMER();
-  // for this test, I want to know if the matrix multiplication is memory bound
-  // or compute bound. If possible, please re-write this test case for GPU as
-  // well as it indicates the limit of the first dimension.
+  // Small correctness check against a direct reference implementation.
+  constexpr size_t ref_m = 4;
+  constexpr size_t ref_n = 8;
+  constexpr size_t ref_p = 2;
+  constexpr size_t ref_levels = 3;
+  std::vector<db_coeff_t> A_ref(ref_m * ref_n * ref_levels);
+  std::vector<db_coeff_t> B_ref(ref_n * ref_p * ref_levels);
+  std::vector<inter_coeff_t> C_ref(ref_m * ref_p * ref_levels, 0);
+  std::vector<inter_coeff_t> C_got(ref_m * ref_p * ref_levels, 0);
+  utils::fill_rand_arr(A_ref.data(), A_ref.size());
+  utils::fill_rand_arr(B_ref.data(), B_ref.size());
 
-  // Let's write the best code we can to compute (m x n) x (n x p) matrix
-  // multiplication for k times.
-  constexpr size_t m = 1 << 5; // the other_dim_sz
-  constexpr size_t n = 512;
-  constexpr size_t p = 2; // coz we have only 2 polynomials in the ciphertext.
-  constexpr size_t k = DBConsts::PolyDegree;
-  constexpr size_t db_size = m * n * k * sizeof(uint64_t);  // we only care the big matrix
+  db_matrix_t A_ref_mat{A_ref.data(), ref_m, ref_n, ref_levels};
+  db_matrix_t B_ref_mat{B_ref.data(), ref_n, ref_p, ref_levels};
+  inter_matrix_t C_got_mat{C_got.data(), ref_m, ref_p, ref_levels};
+  level_mat_mat(&A_ref_mat, &B_ref_mat, &C_got_mat);
+
+  for (size_t level = 0; level < ref_levels; ++level) {
+    const size_t a_off = level * ref_m * ref_n;
+    const size_t b_off = level * ref_n * ref_p;
+    const size_t c_off = level * ref_m * ref_p;
+    for (size_t i = 0; i < ref_m; ++i) {
+      inter_coeff_t t0 = 0;
+      inter_coeff_t t1 = 0;
+      for (size_t k = 0; k < ref_n; ++k) {
+        const inter_coeff_t a = A_ref[a_off + i * ref_n + k];
+        t0 += a * B_ref[b_off + 2 * k];
+        t1 += a * B_ref[b_off + 2 * k + 1];
+      }
+      C_ref[c_off + 2 * i] = t0;
+      C_ref[c_off + 2 * i + 1] = t1;
+    }
+  }
+
+  for (size_t i = 0; i < C_ref.size(); ++i) {
+    if (C_ref[i] != C_got[i]) {
+      throw std::runtime_error("level_mat_mat mismatch at index " + std::to_string(i));
+    }
+  }
+  BENCH_PRINT("Correctness check: PASS");
+
+  // Throughput benchmark.
+  // Set USE_PIR_SHAPE=true to mirror the active PirParams first-dim shape
+  // (m=other_dim_sz, n=fst_dim_sz, levels=coeff_val_cnt). Set false to use
+  // the custom (m, n, levels) below — handy for sweeping shapes independently.
+  constexpr bool USE_PIR_SHAPE = true;
+  constexpr size_t custom_m = 1 << 5;
+  constexpr size_t custom_n = 512;
+  constexpr size_t custom_levels = DBConsts::PolyDegree;
+
   PirParams pir_params;
+  const size_t m = USE_PIR_SHAPE ? pir_params.get_other_dim_sz() : custom_m;
+  const size_t n = USE_PIR_SHAPE ? pir_params.get_fst_dim_sz()   : custom_n;
+  constexpr size_t p = 2;
+  const size_t levels = USE_PIR_SHAPE ? pir_params.get_coeff_val_cnt() : custom_levels;
+  const size_t db_size = m * n * levels * sizeof(db_coeff_t);
+  BENCH_PRINT("Shape: m=" << m << " n=" << n << " p=" << p << " levels=" << levels
+              << (USE_PIR_SHAPE ? " (PIR)" : " (custom)"));
   BENCH_PRINT("Matrix size: " << db_size / 1024 / 1024 << " MB");
 
-  // Allocate memory for A, B, out.
-  // We interpret these as stacked (k) matrices.
-  std::vector<uint64_t> A_data(m * n * k);
-  std::vector<uint64_t> B_data(n * p * k);
-  std::vector<uint64_t> C_data(m * p * k);
-  std::vector<uint128_t> C_data_128(m * p * k);
-  // Fill A and B with random data
-  utils::fill_rand_arr(A_data.data(), m * n * k);
-  utils::fill_rand_arr(B_data.data(), n * p * k);
-  // Wrap them in our matrix_t structures
-  matrix_t A_mat { A_data.data(), m, n, k };
-  matrix_t B_mat { B_data.data(), n, p, k };
-  matrix_t C_mat { C_data.data(), m, p, k };
-  matrix128_t C_mat_128 { C_data_128.data(), m, p, k };
-  size_t sum = 0;
-  uint128_t sum128 = 0;
+  std::vector<db_coeff_t> A_data(m * n * levels);
+  std::vector<db_coeff_t> B_data(n * p * levels);
+  std::vector<inter_coeff_t> C_data(m * p * levels);
+  utils::fill_rand_arr(A_data.data(), A_data.size());
+  utils::fill_rand_arr(B_data.data(), B_data.size());
 
+  db_matrix_t A_mat{A_data.data(), m, n, levels};
+  db_matrix_t B_mat{B_data.data(), n, p, levels};
+  inter_matrix_t C_mat{C_data.data(), m, p, levels};
 
-  // ============= Naive level mat mat 128bits ==============
-  const std::string NAIVE_MAT_MULT_128 = "Naive level mat mat 128 bits";
-  TIME_START(NAIVE_MAT_MULT_128);
-  // level_mat_mat_64_128(&A_mat, &B_mat, &C_mat_128);
-  level_mat_mat_64(&A_mat, &B_mat, &C_mat);
-  TIME_END(NAIVE_MAT_MULT_128);
+  const std::string MAT_MULT_128 = "level mat mat 128 bits";
+  TIME_START(MAT_MULT_128);
+  level_mat_mat(&A_mat, &B_mat, &C_mat);
+  TIME_END(MAT_MULT_128);
 
-  // some simple code to make sure it is not optimized out
-  sum = 0;
-  for (size_t i = 0; i < m * p * k; i++) { sum += C_data[i]; }
-  BENCH_PRINT("Sum: " << sum);
-  sum128 = 0;
-  for (size_t i = 0; i < m * p * k; i++) { sum128 += C_data_128[i]; }
-  BENCH_PRINT("Sum: " << utils::uint128_to_string(sum128));
+  inter_coeff_t checksum = 0;
+  for (size_t i = 0; i < C_data.size(); ++i) {
+    checksum += C_data[i];
+  }
+  BENCH_PRINT("Checksum: " << utils::uint128_to_string(checksum));
 
-
-  // ============= Profiling the matrix multiplication ==============
   END_EXPERIMENT();
-  // PRINT_RESULTS(); // uncomment this line to see the actual time elapsed in each function.
   PRINT_BAR;
 
-  // Let's calculate the throughput of the matrix multiplication, express in MB/s
-  double naive_mat_mult_128_time = GET_LAST_TIME(NAIVE_MAT_MULT_128);
-  std::cout << "Naive level mat mat 128 bits time: " << naive_mat_mult_128_time << " ms" << std::endl;
+  const double mat_mult_time = GET_LAST_TIME(MAT_MULT_128);
+  const double throughput = db_size / (mat_mult_time * 1000);
 
-  double naive_throughput_128 = db_size / (naive_mat_mult_128_time * 1000);
-
-  BENCH_PRINT("Matrix size: " << db_size / 1024 / 1024 << " MB");
-  BENCH_PRINT("Naive level mat mat 128 throughput: \t" << (size_t)naive_throughput_128 << " MB/s");
-
+  BENCH_PRINT("level_mat_mat time: " << mat_mult_time << " ms");
+  BENCH_PRINT("level_mat_mat throughput: \t" << static_cast<size_t>(throughput) << " MB/s");
 }

@@ -24,7 +24,6 @@ void PirTest::test_pir() {
 
   // some global results
   size_t galois_key_size = 0;
-  // size_t gsw_key_size = 0;
   size_t query_size = 0;
   size_t resp_size = 0;
 

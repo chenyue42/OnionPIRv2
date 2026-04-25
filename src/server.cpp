@@ -88,12 +88,25 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
   PRINT_ONCE("DB NTT + realign");
 }
 
-void PirServer::prep_query(const std::vector<RlweCt> &fst_dim_query,
+void PirServer::prep_query(std::vector<RlweCt> &fst_dim_query,
                            std::vector<db_coeff_t> &query_data) {
   const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();       // 256
   const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt(); // 4096
   const size_t slice_sz = fst_dim_sz * 2;
-
+  const auto &rns_mods = pir_params_.get_rns_mods();
+  const size_t rns_mod_cnt = rns_mods.size();
+  constexpr size_t N = DBConsts::PolyDegree;
+ 
+  // transform the selection vector to ntt form
+  for (size_t i = 0; i < fst_dim_query.size(); i++) {
+    RlweCt &ct = fst_dim_query[i];
+    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+      utils::ntt_fwd(ct.c0.data() + mod_id * N, N, rns_mods[mod_id]);
+      utils::ntt_fwd(ct.c1.data() + mod_id * N, N, rns_mods[mod_id]);
+    }
+    ct.ntt_form = true;
+  }
+ 
   // Pre-fetch the data pointers to avoid repeated indirect access
   std::vector<const uint64_t *> data0_ptrs(fst_dim_sz);
   std::vector<const uint64_t *> data1_ptrs(fst_dim_sz);
@@ -141,16 +154,6 @@ PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
   const auto &rns_mods = pir_params_.get_rns_mods();
   constexpr size_t N = DBConsts::PolyDegree;
 
-  // transform the selection vector to ntt form
-  for (size_t i = 0; i < fst_dim_query.size(); i++) {
-    RlweCt &ct = fst_dim_query[i];
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
-      utils::ntt_fwd(ct.c0.data() + mod_id * N, N, rns_mods[mod_id]);
-      utils::ntt_fwd(ct.c1.data() + mod_id * N, N, rns_mods[mod_id]);
-    }
-    ct.ntt_form = true;
-  }
-
   // fill the intermediate result with zeros
   std::fill(inter_res_.begin(), inter_res_.end(), 0);
 
@@ -171,7 +174,6 @@ PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
   inter_matrix_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
   TIME_START(CORE_TIME);
   level_mat_mat(&db_mat, &query_mat, &inter_res_mat);
-  // level_mat_mat_64_128(&db_mat, &query_mat, &inter_res_mat);
   TIME_END(CORE_TIME);
 
   // ========== transform the intermediate to coefficient form. Delay the modulus operation ==========

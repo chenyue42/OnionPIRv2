@@ -12,7 +12,7 @@ typedef unsigned __int128 uint128_t;
 
 namespace DBConsts {
 
-  constexpr size_t DB_SIZE_MB   = 1024;
+  constexpr size_t DB_SIZE_MB   = 128;
   constexpr size_t PolyDegree   = 2048;
   constexpr size_t L_EP         = 4;   // gadget length for RGSW(data)
   constexpr size_t L_KEY        = 12;  // gadget length for RGSW(sk)
