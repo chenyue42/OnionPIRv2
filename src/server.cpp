@@ -73,14 +73,30 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
   }
   TIME_ONCE_END("DB random fill");
 
-  // Pass 2: NTT-transform and scatter into db_aligned_. Plaintext values are
-  // in [0, t) with t < q, so they lift into [0, q) directly.
+  // Pass 2: NTT-transform and tile-transpose into db_aligned_. Plaintext values
+  // are in [0, t) with t < q, so they lift into [0, q) directly.
+  //
+  // Naive: for each poly, write coeffs[c] to db_aligned_[c * num_pt_ + poly_id].
+  // The store stride is num_pt_*8 bytes — every store hits a cold cache line and
+  // wastes 56/64 bytes of bandwidth. We process TILE polys at a time so the
+  // inner write of TILE consecutive uint64_t (= 1 cache line) is contiguous.
   TIME_ONCE_START("DB NTT + realign");
-  for (size_t poly_id = 0; poly_id < num_pt_; ++poly_id) {
-    uint64_t* coeffs = plaintexts[poly_id].data.data();
-    utils::ntt_fwd(coeffs, coeff_count, q);
+  constexpr size_t TILE = 8;  // 8 × uint64_t = 64 B = one cache line
+  std::vector<uint64_t> stage(TILE * coeff_count);
+  for (size_t pb = 0; pb < num_pt_; pb += TILE) {
+    const size_t bs = std::min(TILE, num_pt_ - pb);
+    // NTT each poly into the contiguous stage buffer.
+    for (size_t p = 0; p < bs; ++p) {
+      uint64_t *dst = stage.data() + p * coeff_count;
+      std::memcpy(dst, plaintexts[pb + p].data.data(), coeff_count * sizeof(uint64_t));
+      utils::ntt_fwd(dst, coeff_count, q);
+    }
+    // Transpose-write the tile: for each coeff, scatter TILE contiguous values.
     for (size_t coeff_idx = 0; coeff_idx < coeff_val_cnt; ++coeff_idx) {
-      db_aligned_[coeff_idx * num_pt_ + poly_id] = static_cast<db_coeff_t>(coeffs[coeff_idx]);
+      db_coeff_t *out = db_aligned_.get() + coeff_idx * num_pt_ + pb;
+      for (size_t p = 0; p < bs; ++p) {
+        out[p] = static_cast<db_coeff_t>(stage[p * coeff_count + coeff_idx]);
+      }
     }
   }
   TIME_ONCE_END("DB NTT + realign");

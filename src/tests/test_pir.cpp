@@ -31,7 +31,7 @@ void PirTest::test_pir() {
   for (size_t i = 0; i < num_experiments; i++) {
     BENCH_PRINT("======================== Experiment " << i + 1 << " ========================");
 
-    // ============= OFFLINE PHASE ==============
+    // ============= OFFLINE PHASE: key materials ==============
     // Initialize the client
     PirClient client(pir_params);
     const size_t client_id = client.get_client_id();
@@ -39,9 +39,7 @@ void PirTest::test_pir() {
 
     // Client create BV galois keys and gsw(sk)
     auto bv_galois_keys = client.create_bv_galois_keys();
-    galois_key_size = bvks::BvGaloisKeys::compute_size_bytes(
-        bv_galois_keys.keys.size(), DBConsts::PolyDegree,
-        pir_params.get_ct_mod_width(), /*use_seed=*/true);
+    galois_key_size = pir_params.get_bv_galois_key_size();
     //--------------------------------------------------------------------------------
     // Server receives the BV galois keys and gsw keys
     server.set_client_bv_galois_key(client_id, std::move(bv_galois_keys));
@@ -59,7 +57,6 @@ void PirTest::test_pir() {
     RlweCt response = server.make_query(client_id, query);
     TIME_END(SERVER_TOT_TIME);
 
-
     // ---------- server send the response to the client -----------
     resp_size = server.save_resp_to_stream(response, resp_stream);
 
@@ -67,7 +64,7 @@ void PirTest::test_pir() {
     // client gets result from the server and decrypts it
     RlweCt reconstructed_result = client.load_resp_from_stream(resp_stream);
     TIME_START(CLIENT_TOT_TIME);
-    RlwePt decrypted_result = client.decrypt_reply(reconstructed_result);
+    RlwePt decrypted_result = client.decrypt_mod_q(reconstructed_result);
     TIME_END(CLIENT_TOT_TIME);
 
     // ============= Directly get the plaintext from server. Not part of PIR.
@@ -76,9 +73,6 @@ void PirTest::test_pir() {
     END_EXPERIMENT();
     // ============= PRINTING RESULTS ===============
     // DEBUG_PRINT("\t\tquery / resp / actual idx:\t" << query_pt_idx << " / " << resp_plaintext_idx << " / " << actual_plaintext_idx);
-    #ifdef _DEBUG
-    // PRINT_RESULTS(i+1);
-    #endif
 
     if (utils::plaintext_is_equal(decrypted_result, actual_plaintext)) {
       // print a green success message

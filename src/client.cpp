@@ -90,7 +90,7 @@ RlweCt PirClient::fast_generate_query(const size_t pt_idx) {
   std::vector<size_t> query_indices = get_query_indices(pt_idx);
   PRINT_INT_ARRAY("\t\tquery_indices", query_indices.data(), query_indices.size());
   const size_t expan_height = pir_params_.get_expan_height();
-  const size_t bits_per_ciphertext = 1 << expan_height;
+  const size_t bits_per_ciphertext = 1 << expan_height; // total available slots after expanding.
 
   // plaintext has one nonzero coefficient = inv(bits_per_ciphertext) mod t
   uint64_t inverse = 0;
@@ -101,8 +101,7 @@ RlweCt PirClient::fast_generate_query(const size_t pt_idx) {
   // BFV encrypt under sk: c0 = -(a*s+e) + round(Q*m/t),  c1 = a  (coefficient form)
   RlweCt query;
   encrypt_zero(rlwe_sk_, N, Q, sigma, rng_, query, /*ntt_form=*/false);
-  const uint64_t scaled = static_cast<uint64_t>(
-      ((__uint128_t)Q * inverse + (t >> 1)) / t % Q);
+  const uint64_t scaled = utils::round_div_u128((uint128_t)Q * inverse, t) % Q;
   query.c0[reversed_index] = (query.c0[reversed_index] + scaled) % Q;
 
   add_gsw_to_query(query, query_indices);
@@ -155,27 +154,6 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
 }
 
 
-// size_t PirClient::write_query_to_stream(const seal::Ciphertext &query, std::stringstream &data_stream) {
-//   return query.save(data_stream);
-// }
-
-// size_t PirClient::write_gsw_to_stream(const std::vector<Ciphertext> &gsw, std::stringstream &gsw_stream) {
-//   size_t total_size = 0;
-//   for (auto &ct : gsw) {
-//     size_t size = ct.save(gsw_stream);
-//     total_size += size;
-//   }
-//   return total_size;
-// }
-
-bvks::BvGaloisKeys PirClient::create_bv_galois_keys() {
-  return bvks::gen_bv_galois_keys(pir_params_, rlwe_sk_);
-}
-
-RlwePt PirClient::decrypt_reply(const RlweCt& reply) {
-  return decrypt_mod_q(reply);
-}
-
 // Shared single-mod decryption under modulus `q` using the matching sk.
 // Computes phase = c0 + c1*s (mod q), recovers m = round(phase * t / q),
 // and returns (plaintext, noise_budget).
@@ -193,6 +171,7 @@ static void decrypt_phase_single_mod(const RlweCt &ct,
     c1[i] = ct.c1[i] % q;
   }
 
+  // Compute a * s (mod q) in NTT.
   if (ct.ntt_form) {
     intel::hexl::EltwiseMultMod(phase.data(), c1.data(), sk_ntt, N, q, 1);
     utils::ntt_inv(phase.data(), N, q);
@@ -202,6 +181,7 @@ static void decrypt_phase_single_mod(const RlweCt &ct,
     intel::hexl::EltwiseMultMod(phase.data(), c1.data(), sk_ntt, N, q, 1);
     utils::ntt_inv(phase.data(), N, q);
   }
+  // Add c0 in coefficient form (mod q).
   intel::hexl::EltwiseAddMod(phase.data(), phase.data(), c0.data(), N, q);
 
   out_pt.data.assign(N, 0);
@@ -210,11 +190,12 @@ static void decrypt_phase_single_mod(const RlweCt &ct,
   uint64_t max_noise = 0;
 
   for (size_t i = 0; i < N; i++) {
-    uint128_t numerator = (uint128_t)phase[i] * t + half_q;
-    uint64_t m = static_cast<uint64_t>(numerator / q) % t;
+    uint64_t m = utils::round_div_u128((uint128_t)phase[i] * t, q) % t;
     out_pt.data[i] = m;
 
-    uint64_t approx = static_cast<uint64_t>((uint128_t)delta * m % q);
+    // Compare against round(q*m/t), not floor(q/t)*m: when q is not a multiple
+    // of t, the latter undercounts by m*(q mod t)/t and inflates the residue.
+    uint64_t approx = utils::round_div_u128((uint128_t)q * m, t) % q;
     uint64_t noise_pos = (phase[i] >= approx) ? (phase[i] - approx) : (q - approx + phase[i]);
     uint64_t noise_abs = (noise_pos > half_q) ? (q - noise_pos) : noise_pos;
     if (noise_abs > max_noise) max_noise = noise_abs;
@@ -232,6 +213,16 @@ RlwePt PirClient::decrypt_ct(const RlweCt &ct) {
   int budget = 0;
   decrypt_phase_single_mod(ct, rlwe_sk_.data.data(), q, t, result, budget);
   return result;
+}
+
+RlweCt PirClient::fresh_zero_ct() {
+  // Testing only.
+  constexpr size_t N = DBConsts::PolyDegree;
+  const uint64_t Q = pir_params_.get_rns_mods()[0];
+  const double sigma = pir_params_.get_noise_std_dev();
+  RlweCt ct;
+  encrypt_zero(rlwe_sk_, N, Q, sigma, rng_, ct, /*ntt_form=*/false);
+  return ct;
 }
 
 int PirClient::noise_budget(const RlweCt &ct) {
@@ -310,11 +301,10 @@ RlwePt PirClient::decrypt_mod_q(const RlweCt &ct) const {
   uint64_t max_noise = 0;
 
   for (size_t i = 0; i < N; i++) {
-    uint128_t numerator = (uint128_t)phase[i] * t + half_q;
-    uint64_t m = static_cast<uint64_t>(numerator / q) % t;
+    uint64_t m = utils::round_div_u128((uint128_t)phase[i] * t, q) % t;
     result.data[i] = m;
 
-    uint64_t approx = static_cast<uint64_t>((uint128_t)delta * m % q);
+    uint64_t approx = utils::round_div_u128((uint128_t)q * m, t) % q;
     uint64_t noise_pos = (phase[i] >= approx) ? (phase[i] - approx) : (q - approx + phase[i]);
     uint64_t noise_abs = (noise_pos > half_q) ? (q - noise_pos) : noise_pos;
     if (noise_abs > max_noise) max_noise = noise_abs;

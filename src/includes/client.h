@@ -21,9 +21,10 @@ public:
   void add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_indices);
 
   // Create custom BV-style Galois keys (no special prime).
-  bvks::BvGaloisKeys create_bv_galois_keys();
-  // decrypt the result returned from PIR. Assume modulus switching is applied.
-  RlwePt decrypt_reply(const RlweCt& reply);
+  inline bvks::BvGaloisKeys create_bv_galois_keys() {
+    return bvks::gen_bv_galois_keys(pir_params_, rlwe_sk_);
+  }
+
   RlwePt decrypt_ct(const RlweCt &ct);
   // Produce the per-client GSW key (encryption of -s under the data modulus) in
   // its final flat NTT layout, ready to hand to PirServer::set_client_gsw_key.
@@ -34,8 +35,17 @@ public:
   // Noise budget via a bridge to SEAL's invariant_noise_budget (debug/test only).
   int noise_budget(const RlweCt &ct);
 
+
+  // Fresh encryption of zero under the data modulus Q. Testing only:
+  // used to measure the baseline initial noise budget without the
+  // gadget-injection artifacts of fast_generate_query.
+  RlweCt fresh_zero_ct();
+
   // load the response from the stream and recover the ciphertext
   RlweCt load_resp_from_stream(std::stringstream &resp_stream);
+
+  // decrypt the result returned from PIR. Assume modulus switching is applied.
+  RlwePt decrypt_reply(const RlweCt& reply);
 
   // Decrypt a single-mod RlweCt under small_q using our custom decryptor.
   RlwePt decrypt_mod_q(const RlweCt &ciphertext) const;

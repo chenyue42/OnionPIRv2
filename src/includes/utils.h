@@ -71,6 +71,13 @@ void automorphism_coeff(const uint64_t *in, size_t N, uint32_t k, uint64_t q, ui
 // Internally converts coeff ↔ NTT; 2 extra NTTs but only used in keygen.
 void automorphism_ntt(const uint64_t *in, size_t N, uint32_t k, uint64_t q, uint64_t *out);
 
+// Compute round(num / den) for non-negative integers via integer arithmetic.
+// Adds den/2 before the division to round to nearest. Caller ensures num + den/2
+// does not overflow uint128_t.
+inline uint64_t round_div_u128(uint128_t num, uint64_t den) {
+  return static_cast<uint64_t>((num + (den >> 1)) / den);
+}
+
 // 128-bit right shift of a little-endian 2-uint64 integer (in-place safe).
 inline void right_shift_uint128(uint64_t *operand, int shift, uint64_t *result) {
   if (shift == 0) {

@@ -53,16 +53,20 @@ public:
   std::vector<BvKeySwitchKey> keys;
 
   const BvKeySwitchKey &get(uint32_t galois_k) const;
-  bool has(uint32_t galois_k) const;
 
-  // Serialize all keys to a stream.
-  // If use_seed is true, store a 32-byte seed per KSK ciphertext instead of
-  // the full `a` polynomial (which must then be regenerated on load).
-  // Returns the total number of bytes written.
-  size_t save(std::ostream &stream, bool use_seed = false) const;
+  // TODO: we are not implementing this save and load function now.
+  // Just note that it is possible to save space by by storing the seed for the
+  // `a` polynomial instead of the full polynomial, since it can be regenerated
+  // on load.
 
-  // Deserialize keys from a stream.
-  void load(std::istream &stream);
+  // // Serialize all keys to a stream.
+  // // If use_seed is true, store a 32-byte seed per KSK ciphertext instead of
+  // // the full `a` polynomial (which must then be regenerated on load).
+  // // Returns the total number of bytes written.
+  // size_t save(std::ostream &stream, bool use_seed = false) const;
+
+  // // Deserialize keys from a stream.
+  // void load(std::istream &stream);
 
   // Compute the hand-calculated serialized size (bit-packed coefficients).
   //   raw:  num_keys * L_KS * 2 * N * ceil(log2(q_data)) / 8

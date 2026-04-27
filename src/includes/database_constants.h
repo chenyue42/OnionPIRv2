@@ -14,12 +14,12 @@ namespace DBConsts {
 
   constexpr size_t DB_SIZE_MB   = 128;
   constexpr size_t PolyDegree   = 2048;
-  constexpr size_t L_EP         = 4;   // gadget length for RGSW(data)
-  constexpr size_t L_KEY        = 12;  // gadget length for RGSW(sk)
-  constexpr size_t L_KS         = 12;  // gadget length for BV key-switching
+  constexpr size_t L_EP         = 5;   // gadget length for RGSW(data)
+  constexpr size_t L_KEY        = 8;  // gadget length for RGSW(sk)
+  constexpr size_t L_KS         = 8;  // gadget length for BV key-switching
   constexpr size_t TREE_HEIGHT  = 10;
   constexpr size_t PlainMod     = 13;
-  constexpr size_t SmallQWidth  = 40;
+  constexpr size_t SmallQWidth  = 25;
   constexpr std::array<size_t, 1> RnsMods = {60};
 
   // Standard deviation σ of the Gaussian error distribution.

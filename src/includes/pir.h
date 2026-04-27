@@ -62,12 +62,20 @@ public:
     if (use_seed) {
       return (get_ct_mod_width() * get_coeff_val_cnt() + 32) / 8;
     } else {
-      return (get_ct_mod_width() * get_coeff_val_cnt() * 2) / 8;
+      return (get_ct_mod_width() * get_coeff_val_cnt() * 2) / 8; // two polynomials per ciphertext
     }
   }
 
   inline const size_t get_gsw_key_size(bool use_seed = true) const {
     return 2 * l_key_ * get_BFV_size(use_seed);
+  }
+
+  inline const size_t get_bv_galois_key_size(bool use_seed = true) const {
+    const size_t per_poly_bytes = (DBConsts::PolyDegree * get_ct_mod_width() + 7) / 8;
+    const size_t num_keys = get_expan_height();
+    return use_seed
+      ? num_keys * DBConsts::L_KS * (per_poly_bytes + 32)
+      : num_keys * DBConsts::L_KS * 2 * per_poly_bytes;
   }
 
   void print_params() const;

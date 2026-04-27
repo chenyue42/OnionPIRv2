@@ -29,13 +29,18 @@ void PirTest::test_fast_expand_query() {
   server.set_client_bv_galois_key(client_id, client.create_bv_galois_keys());
   server.set_client_gsw_key(client_id, client.generate_gsw_from_key());
 
+  // ============ test initial noise ==============
+  {
+    RlweCt zero_ct = client.fresh_zero_ct();
+    BENCH_PRINT("fresh zero noise budget: " << client.noise_budget(zero_ct) << " bits");
+  }
+
   // ============= Generate the query ==============
-  const size_t query_idx = 253;
+  const size_t query_idx = std::rand() % pir_params.get_num_pt();
   RlweCt fast_query = client.fast_generate_query(query_idx);
-  BENCH_PRINT("fast_query initial noise budget: " << client.noise_budget(fast_query) << " bits");
 
   {
-    auto fast_decrypted = client.decrypt_ct(fast_query);
+    auto fast_decrypted = client.decrypt_mod_q(fast_query);
     BENCH_PRINT("fast packed query coeff[0]: " << fast_decrypted.data[0]);
   }
   PRINT_BAR;

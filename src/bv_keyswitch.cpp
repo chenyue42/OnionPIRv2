@@ -104,13 +104,13 @@ const BvKeySwitchKey &BvGaloisKeys::get(uint32_t galois_k) const {
   throw std::out_of_range("BvGaloisKeys::get: galois_k not found");
 }
 
-bool BvGaloisKeys::has(uint32_t galois_k) const {
-  for (auto &k : keys) {
-    if (k.galois_k == galois_k)
-      return true;
-  }
-  return false;
-}
+// bool BvGaloisKeys::has(uint32_t galois_k) const {
+//   for (auto &k : keys) {
+//     if (k.galois_k == galois_k)
+//       return true;
+//   }
+//   return false;
+// }
 
 size_t BvGaloisKeys::compute_size_bytes(size_t num_keys, size_t poly_degree,
                                         size_t log_q_data, bool use_seed) {
@@ -124,53 +124,53 @@ size_t BvGaloisKeys::compute_size_bytes(size_t num_keys, size_t poly_degree,
   return num_keys * L_KS * 2 * per_poly_bytes;
 }
 
-size_t BvGaloisKeys::save(std::ostream &stream, bool /*use_seed*/) const {
-  // Simple uint64 dump — not bit-packed. Use compute_size_bytes for the
-  // theoretical bit-packed size that we care about in measurements.
-  size_t written = 0;
-  auto wr = [&](const void *p, size_t n) {
-    stream.write(reinterpret_cast<const char *>(p), n);
-    written += n;
-  };
-  uint32_t num = static_cast<uint32_t>(keys.size());
-  wr(&num, sizeof(num));
-  for (auto &k : keys) {
-    wr(&k.galois_k, sizeof(k.galois_k));
-    uint32_t t = static_cast<uint32_t>(k.cts.size());
-    wr(&t, sizeof(t));
-    for (auto &ct : k.cts) {
-      uint32_t n = static_cast<uint32_t>(ct.a.size());
-      wr(&n, sizeof(n));
-      wr(ct.a.data(), n * sizeof(uint64_t));
-      wr(ct.b.data(), n * sizeof(uint64_t));
-    }
-  }
-  return written;
-}
+// size_t BvGaloisKeys::save(std::ostream &stream, bool /*use_seed*/) const {
+//   // Simple uint64 dump — not bit-packed. Use compute_size_bytes for the
+//   // theoretical bit-packed size that we care about in measurements.
+//   size_t written = 0;
+//   auto wr = [&](const void *p, size_t n) {
+//     stream.write(reinterpret_cast<const char *>(p), n);
+//     written += n;
+//   };
+//   uint32_t num = static_cast<uint32_t>(keys.size());
+//   wr(&num, sizeof(num));
+//   for (auto &k : keys) {
+//     wr(&k.galois_k, sizeof(k.galois_k));
+//     uint32_t t = static_cast<uint32_t>(k.cts.size());
+//     wr(&t, sizeof(t));
+//     for (auto &ct : k.cts) {
+//       uint32_t n = static_cast<uint32_t>(ct.a.size());
+//       wr(&n, sizeof(n));
+//       wr(ct.a.data(), n * sizeof(uint64_t));
+//       wr(ct.b.data(), n * sizeof(uint64_t));
+//     }
+//   }
+//   return written;
+// }
 
-void BvGaloisKeys::load(std::istream &stream) {
-  auto rd = [&](void *p, size_t n) {
-    stream.read(reinterpret_cast<char *>(p), n);
-  };
-  uint32_t num;
-  rd(&num, sizeof(num));
-  keys.clear();
-  keys.resize(num);
-  for (auto &k : keys) {
-    rd(&k.galois_k, sizeof(k.galois_k));
-    uint32_t t;
-    rd(&t, sizeof(t));
-    k.cts.resize(t);
-    for (auto &ct : k.cts) {
-      uint32_t n;
-      rd(&n, sizeof(n));
-      ct.a.resize(n);
-      ct.b.resize(n);
-      rd(ct.a.data(), n * sizeof(uint64_t));
-      rd(ct.b.data(), n * sizeof(uint64_t));
-    }
-  }
-}
+// void BvGaloisKeys::load(std::istream &stream) {
+//   auto rd = [&](void *p, size_t n) {
+//     stream.read(reinterpret_cast<char *>(p), n);
+//   };
+//   uint32_t num;
+//   rd(&num, sizeof(num));
+//   keys.clear();
+//   keys.resize(num);
+//   for (auto &k : keys) {
+//     rd(&k.galois_k, sizeof(k.galois_k));
+//     uint32_t t;
+//     rd(&t, sizeof(t));
+//     k.cts.resize(t);
+//     for (auto &ct : k.cts) {
+//       uint32_t n;
+//       rd(&n, sizeof(n));
+//       ct.a.resize(n);
+//       ct.b.resize(n);
+//       rd(ct.a.data(), n * sizeof(uint64_t));
+//       rd(ct.b.data(), n * sizeof(uint64_t));
+//     }
+//   }
+// }
 
 // ----------------------------------------------------------------------------
 // Key generation (client side)
@@ -250,6 +250,15 @@ BvGaloisKeys gen_bv_galois_keys(const PirParams &pir_params,
 // Server-side apply
 // ----------------------------------------------------------------------------
 
+// scratch reused across calls to bv_apply_galois_inplace.
+namespace {
+struct GaloisScratch {
+  std::vector<uint64_t> c0_perm, c1_perm, delta_a, delta_b, tmp;
+  std::vector<uint64_t> digits;  // L_KS contiguous N-blocks (row-major)
+};
+static GaloisScratch g_scratch;
+}  // namespace
+
 void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
                              const BvKeySwitchKey &key,
                              const PirParams &pir_params) {
@@ -264,51 +273,66 @@ void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
   const uint64_t q_val = pir_params.get_rns_mods()[0];
   const size_t base_log2 = bv_base_log2(pir_params);
 
-  // Step 1: apply automorphism to (c0, c1) in coefficient form.
-  std::vector<uint64_t> c0_perm(N), c1_perm(N);
-  utils::automorphism_coeff(ct.data(0), N, galois_k, q_val, c0_perm.data());
-  utils::automorphism_coeff(ct.data(1), N, galois_k, q_val, c1_perm.data());
+  // Use a shared scratch struct to amortize heap allocations across calls.
+  GaloisScratch &s = g_scratch;
+  if (s.c0_perm.size() != N) {
+    s.c0_perm.resize(N);
+    s.c1_perm.resize(N);
+    s.delta_a.resize(N);
+    s.delta_b.resize(N);
+    s.tmp.resize(N);
+    s.digits.resize(L_KS * N);
+  }
+  uint64_t *const c0_perm = s.c0_perm.data();
+  uint64_t *const c1_perm = s.c1_perm.data();
+  uint64_t *const delta_b = s.delta_b.data();
+  uint64_t *const delta_a = s.delta_a.data();
+  uint64_t *const tmp = s.tmp.data();
+  uint64_t *const digits = s.digits.data();
 
-  // Step 2: signed gadget-decompose σ(c1). Coefficient-first loop for carry propagation.
-  std::vector<std::vector<uint64_t>> digits(L_KS, std::vector<uint64_t>(N));
+  // Step 1: apply automorphism to (c0, c1) in coefficient form.
+  utils::automorphism_coeff(ct.data(0), N, galois_k, q_val, c0_perm);
+  utils::automorphism_coeff(ct.data(1), N, galois_k, q_val, c1_perm);
+
+  // Step 2: signed gadget-decompose σ(c1) into a row-major L_KS×N buffer.
+  // Ultimately, we want decomp(a) \cdot ks_keys using inner product. NTT is used to speed up.
   for (size_t k = 0; k < N; ++k) {
     uint64_t digit_vals[L_KS];
     signed_gadget_decompose(c1_perm[k], base_log2, q_val, digit_vals, L_KS);
     for (size_t i = 0; i < L_KS; ++i) {
-      digits[i][k] = digit_vals[i];
+      digits[i * N + k] = digit_vals[i];
     }
   }
-  // NTT each digit for the inner product with NTT-form KSK.
-  for (size_t i = 0; i < L_KS; ++i) {
-    utils::ntt_fwd(digits[i].data(), N, q_val);
+
+  // Steps 3-fused: for each digit, NTT it then multiply-accumulate into Δb, Δa.
+  // Keeping the digit polynomial hot in cache between NTT and the two MultMods.
+  // First iteration writes (instead of accumulating) to skip a zero-init pass.
+  {
+    uint64_t *digit0 = digits;
+    utils::ntt_fwd(digit0, N, q_val);
+    intel::hexl::EltwiseMultMod(delta_b, digit0, key.cts[0].b.data(), N, q_val, 1);
+    intel::hexl::EltwiseMultMod(delta_a, digit0, key.cts[0].a.data(), N, q_val, 1);
   }
-
-  // Step 3: inner product with KSK (NTT form).
-  //   Δb = Σ digit_i · ksk.b[i]   (NTT)
-  //   Δa = Σ digit_i · ksk.a[i]   (NTT)
-  std::vector<uint64_t> delta_b(N, 0);
-  std::vector<uint64_t> delta_a(N, 0);
-  std::vector<uint64_t> tmp(N);
-
-  for (size_t i = 0; i < L_KS; ++i) {
+  for (size_t i = 1; i < L_KS; ++i) {
+    uint64_t *digit_i = digits + i * N;
+    utils::ntt_fwd(digit_i, N, q_val);
     const auto &ksk_ct = key.cts[i];
-    intel::hexl::EltwiseMultMod(tmp.data(), digits[i].data(), ksk_ct.b.data(), N, q_val, 1);
-    intel::hexl::EltwiseAddMod(delta_b.data(), delta_b.data(), tmp.data(), N, q_val);
-
-    intel::hexl::EltwiseMultMod(tmp.data(), digits[i].data(), ksk_ct.a.data(), N, q_val, 1);
-    intel::hexl::EltwiseAddMod(delta_a.data(), delta_a.data(), tmp.data(), N, q_val);
+    intel::hexl::EltwiseMultMod(tmp, digit_i, ksk_ct.b.data(), N, q_val, 1);
+    intel::hexl::EltwiseAddMod(delta_b, delta_b, tmp, N, q_val);
+    intel::hexl::EltwiseMultMod(tmp, digit_i, ksk_ct.a.data(), N, q_val, 1);
+    intel::hexl::EltwiseAddMod(delta_a, delta_a, tmp, N, q_val);
   }
 
   // Step 4: INTT the inner product results back to coefficient form.
-  utils::ntt_inv(delta_b.data(), N, q_val);
-  utils::ntt_inv(delta_a.data(), N, q_val);
+  utils::ntt_inv(delta_b, N, q_val);
+  utils::ntt_inv(delta_a, N, q_val);
 
   // Step 5: new_c0 = σ(c0) + Δb,  new_c1 = Δa   (coefficient form)
-  intel::hexl::EltwiseAddMod(c0_perm.data(), c0_perm.data(), delta_b.data(), N, q_val);
+  intel::hexl::EltwiseAddMod(c0_perm, c0_perm, delta_b, N, q_val);
 
   // Write back into ct's first RNS limb. Higher limbs left untouched.
-  std::memcpy(ct.data(0), c0_perm.data(), N * sizeof(uint64_t));
-  std::memcpy(ct.data(1), delta_a.data(), N * sizeof(uint64_t));
+  std::memcpy(ct.data(0), c0_perm, N * sizeof(uint64_t));
+  std::memcpy(ct.data(1), delta_a, N * sizeof(uint64_t));
   // ct stays in coefficient form (is_ntt_form = false).
 }
 
