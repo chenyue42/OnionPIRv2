@@ -112,18 +112,6 @@ const BvKeySwitchKey &BvGaloisKeys::get(uint32_t galois_k) const {
 //   return false;
 // }
 
-size_t BvGaloisKeys::compute_size_bytes(size_t num_keys, size_t poly_degree,
-                                        size_t log_q_data, bool use_seed) {
-  // Bit-packed polynomial size: ceil(N * log_q / 8).
-  const size_t per_poly_bytes = (poly_degree * log_q_data + 7) / 8;
-  if (use_seed) {
-    // 1 poly (b) + 32-byte seed for a.
-    return num_keys * L_KS * (per_poly_bytes + 32);
-  }
-  // Both a and b stored.
-  return num_keys * L_KS * 2 * per_poly_bytes;
-}
-
 // size_t BvGaloisKeys::save(std::ostream &stream, bool /*use_seed*/) const {
 //   // Simple uint64 dump — not bit-packed. Use compute_size_bytes for the
 //   // theoretical bit-packed size that we care about in measurements.

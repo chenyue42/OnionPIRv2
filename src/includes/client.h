@@ -44,9 +44,6 @@ public:
   // load the response from the stream and recover the ciphertext
   RlweCt load_resp_from_stream(std::stringstream &resp_stream);
 
-  // decrypt the result returned from PIR. Assume modulus switching is applied.
-  RlwePt decrypt_reply(const RlweCt& reply);
-
   // Decrypt a single-mod RlweCt under small_q using our custom decryptor.
   RlwePt decrypt_mod_q(const RlweCt &ciphertext) const;
 

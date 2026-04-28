@@ -68,11 +68,6 @@ public:
   // // Deserialize keys from a stream.
   // void load(std::istream &stream);
 
-  // Compute the hand-calculated serialized size (bit-packed coefficients).
-  //   raw:  num_keys * L_KS * 2 * N * ceil(log2(q_data)) / 8
-  //   seed: num_keys * L_KS * (N * ceil(log2(q_data)) / 8 + 32)
-  static size_t compute_size_bytes(size_t num_keys, size_t poly_degree,
-                                   size_t log_q_data, bool use_seed);
 };
 
 // ============================================================================

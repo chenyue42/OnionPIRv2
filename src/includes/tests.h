@@ -53,6 +53,7 @@ class PirTest {
     void test_noise_sampling();
     void test_rlwe_enc();
     void test_barrett();
+    void test_rns_decomp();
 
     // Search (tree_height, num_queries, num_other_dims) for minimum total
     // communication in each (QueryMode, GswSource) combination, given the
