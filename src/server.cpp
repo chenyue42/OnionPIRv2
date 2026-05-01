@@ -3,6 +3,7 @@
 #include "rlwe.h"
 #include "utils.h"
 #include "matrix.h"
+#include "hexl/hexl.hpp"
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
@@ -59,7 +60,8 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
 
   // Pass 1: fill random coefficients and record requested entries
   TIME_ONCE_START("DB random fill");
-  const uint64_t q = pir_params_.get_rns_mods()[0];
+  const auto &rns_mods = pir_params_.get_rns_mods();
+  const size_t rns_mod_cnt = rns_mods.size();
   std::vector<RlwePt> plaintexts(num_pt_);
   for (size_t poly_id = 0; poly_id < num_pt_; ++poly_id) {
     plaintexts[poly_id].data.resize(coeff_count);
@@ -73,29 +75,37 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
   }
   TIME_ONCE_END("DB random fill");
 
-  // Pass 2: NTT-transform and tile-transpose into db_aligned_. Plaintext values
-  // are in [0, t) with t < q, so they lift into [0, q) directly.
-  //
-  // Naive: for each poly, write coeffs[c] to db_aligned_[c * num_pt_ + poly_id].
-  // The store stride is num_pt_*8 bytes — every store hits a cold cache line and
-  // wastes 56/64 bytes of bandwidth. We process TILE polys at a time so the
-  // inner write of TILE consecutive uint64_t (= 1 cache line) is contiguous.
+  // Pass 2: NTT-transform under each q_k and tile-transpose into db_aligned_.
+  // Layout: db_aligned_[coeff_idx * num_pt_ + poly_id] where coeff_idx ranges
+  // over [0, coeff_val_cnt) = K * coeff_count limbs. Limb k occupies coeff_idx
+  // in [k*N, (k+1)*N).
   TIME_ONCE_START("DB NTT + realign");
-  constexpr size_t TILE = 8;  // 8 × uint64_t = 64 B = one cache line
-  std::vector<uint64_t> stage(TILE * coeff_count);
+  constexpr size_t TILE = 8;
+  // K limbs interleaved per tile: stage[k][p] of length coeff_count.
+  std::vector<uint64_t> stage(rns_mod_cnt * TILE * coeff_count);
   for (size_t pb = 0; pb < num_pt_; pb += TILE) {
     const size_t bs = std::min(TILE, num_pt_ - pb);
-    // NTT each poly into the contiguous stage buffer.
-    for (size_t p = 0; p < bs; ++p) {
-      uint64_t *dst = stage.data() + p * coeff_count;
-      std::memcpy(dst, plaintexts[pb + p].data.data(), coeff_count * sizeof(uint64_t));
-      utils::ntt_fwd(dst, coeff_count, q);
-    }
-    // Transpose-write the tile: for each coeff, scatter TILE contiguous values.
-    for (size_t coeff_idx = 0; coeff_idx < coeff_val_cnt; ++coeff_idx) {
-      db_coeff_t *out = db_aligned_.get() + coeff_idx * num_pt_ + pb;
+    for (size_t k = 0; k < rns_mod_cnt; ++k) {
+      const uint64_t qk = rns_mods[k];
+      uint64_t *limb_base = stage.data() + k * TILE * coeff_count;
       for (size_t p = 0; p < bs; ++p) {
-        out[p] = static_cast<db_coeff_t>(stage[p * coeff_count + coeff_idx]);
+        uint64_t *dst = limb_base + p * coeff_count;
+        const uint64_t *src = plaintexts[pb + p].data.data();
+        for (size_t i = 0; i < coeff_count; ++i) {
+          dst[i] = src[i] % qk;  // plaintext < t < q_k
+        }
+        utils::ntt_fwd(dst, coeff_count, qk);
+      }
+    }
+    // Transpose-write each limb to its slot in db_aligned_.
+    for (size_t k = 0; k < rns_mod_cnt; ++k) {
+      uint64_t *limb_base = stage.data() + k * TILE * coeff_count;
+      for (size_t coeff_idx = 0; coeff_idx < coeff_count; ++coeff_idx) {
+        db_coeff_t *out = db_aligned_.get() +
+                          (k * coeff_count + coeff_idx) * num_pt_ + pb;
+        for (size_t p = 0; p < bs; ++p) {
+          out[p] = static_cast<db_coeff_t>(limb_base[p * coeff_count + coeff_idx]);
+        }
       }
     }
   }
@@ -357,22 +367,48 @@ RlweCt PirServer::evaluate_other_dim(std::vector<RlweCt> &mid_db, std::vector<GS
 
 
 void PirServer::ext_prod_mux(RlweCt &x, RlweCt &y, GSWCt &selection_cipher, RlweCt &result) {
-    /**
-   * Note that we only have a single GSWCiphertext for this selection.
-   * Here is the logic:
-   * We want to select the correct half of the "result" vector.
-   * Suppose result = [x || y], where x and y are of the same size(block_size).
-   * If we have RGSW(0), then we want to set result = x,
-   * If we have RGSW(1), then we want to set result = y.
-   * The simple formula is:
-   * result = RGSW(b) * (y - x) + x, where "*" is the external product, "+" and "-" are homomorphic operations.
-   */
-    const uint64_t q = pir_params_.get_rns_mods()[0];
     constexpr size_t N = DBConsts::PolyDegree;
+    const auto &qs = pir_params_.get_rns_mods();
+    const size_t K = qs.size();
+
+    auto sub_k = [&](RlweCt &a, const RlweCt &b) {
+      for (size_t k = 0; k < K; ++k) {
+        intel::hexl::EltwiseSubMod(a.c0.data() + k * N, a.c0.data() + k * N,
+                                   b.c0.data() + k * N, N, qs[k]);
+        intel::hexl::EltwiseSubMod(a.c1.data() + k * N, a.c1.data() + k * N,
+                                   b.c1.data() + k * N, N, qs[k]);
+      }
+    };
+    auto add_inplace_k = [&](RlweCt &a, const RlweCt &b) {
+      for (size_t k = 0; k < K; ++k) {
+        intel::hexl::EltwiseAddMod(a.c0.data() + k * N, a.c0.data() + k * N,
+                                   b.c0.data() + k * N, N, qs[k]);
+        intel::hexl::EltwiseAddMod(a.c1.data() + k * N, a.c1.data() + k * N,
+                                   b.c1.data() + k * N, N, qs[k]);
+      }
+    };
+    auto add_k = [&](const RlweCt &a, const RlweCt &b, RlweCt &c) {
+      c.c0.resize(K * N);
+      c.c1.resize(K * N);
+      c.ntt_form = a.ntt_form;
+      for (size_t k = 0; k < K; ++k) {
+        intel::hexl::EltwiseAddMod(c.c0.data() + k * N, a.c0.data() + k * N,
+                                   b.c0.data() + k * N, N, qs[k]);
+        intel::hexl::EltwiseAddMod(c.c1.data() + k * N, a.c1.data() + k * N,
+                                   b.c1.data() + k * N, N, qs[k]);
+      }
+    };
+    auto intt_k = [&](RlweCt &ct) {
+      for (size_t k = 0; k < K; ++k) {
+        utils::ntt_inv(ct.c0.data() + k * N, N, qs[k]);
+        utils::ntt_inv(ct.c1.data() + k * N, N, qs[k]);
+      }
+      ct.ntt_form = false;
+    };
 
     // ========== y = y - x ==========
     TIME_START(OTHER_DIM_ADD_SUB);
-    rlwe_sub_inplace(y, x, q);
+    sub_k(y, x);
     TIME_END(OTHER_DIM_ADD_SUB);
 
     // ========== y = b * (y - x) ========== output will be in NTT form
@@ -380,18 +416,17 @@ void PirServer::ext_prod_mux(RlweCt &x, RlweCt &y, GSWCt &selection_cipher, Rlwe
     data_gsw_.external_product(selection_cipher, y, y, LogContext::OTHER_DIM_MUX);
     TIME_END(OTHER_DIM_MUX_EXTERN);
 
-    // ========== y = INTT(y) ==========, INTT stands for inverse NTT
+    // ========== y = INTT(y) ==========
     TIME_START(OTHER_DIM_INTT);
-    rlwe_ntt_inv_inplace(y, q, N);
+    intt_k(y);
     TIME_END(OTHER_DIM_INTT);
 
     // ========== result = y + x ==========
     TIME_START(OTHER_DIM_ADD_SUB);
-    // If result aliases x, we can add in-place to avoid an extra copy
     if (&result == &x) {
-      rlwe_add_inplace(x, y, q);  // x = x + y = x + b*(y - x)
+      add_inplace_k(x, y);
     } else {
-      rlwe_add(x, y, result, q);
+      add_k(x, y, result);
     }
     TIME_END(OTHER_DIM_ADD_SUB);
 }
@@ -406,7 +441,41 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
   const size_t w = size_t{1} << expan_height;                 // 2^h
   const auto &bv_galois_key = client_bv_galois_keys_.at(client_id);
   constexpr size_t N = DBConsts::PolyDegree;
-  const uint64_t q = pir_params_.get_rns_mods()[0];
+  const auto &qs = pir_params_.get_rns_mods();
+  const size_t K = qs.size();
+
+  // K-aware per-limb helpers. All ciphertexts in this routine are coefficient
+  // form, K-limb, with c0/c1 each holding K*N uint64_t.
+  auto rlwe_add_k = [&](const RlweCt &a, const RlweCt &b, RlweCt &c) {
+    c.c0.resize(K * N);
+    c.c1.resize(K * N);
+    c.ntt_form = a.ntt_form;
+    for (size_t k = 0; k < K; ++k) {
+      intel::hexl::EltwiseAddMod(c.c0.data() + k * N, a.c0.data() + k * N,
+                                 b.c0.data() + k * N, N, qs[k]);
+      intel::hexl::EltwiseAddMod(c.c1.data() + k * N, a.c1.data() + k * N,
+                                 b.c1.data() + k * N, N, qs[k]);
+    }
+  };
+  auto rlwe_sub_inplace_k = [&](RlweCt &a, const RlweCt &b) {
+    for (size_t k = 0; k < K; ++k) {
+      intel::hexl::EltwiseSubMod(a.c0.data() + k * N, a.c0.data() + k * N,
+                                 b.c0.data() + k * N, N, qs[k]);
+      intel::hexl::EltwiseSubMod(a.c1.data() + k * N, a.c1.data() + k * N,
+                                 b.c1.data() + k * N, N, qs[k]);
+    }
+  };
+  auto rlwe_shift_k = [&](const RlweCt &src, RlweCt &dst, size_t index) {
+    dst.c0.resize(K * N);
+    dst.c1.resize(K * N);
+    dst.ntt_form = src.ntt_form;
+    for (size_t k = 0; k < K; ++k) {
+      utils::negacyclic_shift_poly_coeffmod(src.c0.data() + k * N, N, index,
+                                            qs[k], dst.c0.data() + k * N);
+      utils::negacyclic_shift_poly_coeffmod(src.c1.data() + k * N, N, index,
+                                            qs[k], dst.c1.data() + k * N);
+    }
+  };
 
   // ============== storage   – index 0 is *unused*, root is slot 1
   std::vector<RlweCt> cts(2 * w); // slots 0 … 2w-1
@@ -416,13 +485,10 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
   for (size_t i = 1; i < w; ++i) { // internal nodes only
     const int k = int{1} << (std::bit_width(i) - 1); // k = 2^{⌊log i⌋}   (span of this sub-tree)
 
-    // left-most leaf index of this sub-tree
-    const size_t left_leaf = i * w / k - w; // exact integer
+    const size_t left_leaf = i * w / k - w;
     if (left_leaf >= useful_cnt)
-      continue; // skip whole sub-tree
+      continue;
 
-    // ============== split   c[i] ->  c[2i] , c[2i+1]
-    // c' = Subs(c_i, w/k+1)
     RlweCt c_prime = cts[i];
     const uint32_t galois_k = DBConsts::PolyDegree / k + 1;
     TIME_START(APPLY_GALOIS);
@@ -431,15 +497,12 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
                                   pir_params_);
     TIME_END(APPLY_GALOIS);
     TIME_START("add_sub");
-    // c_{2i}   =  c_i + c'
-    rlwe_add(cts[i], c_prime, cts[2 * i], q);
-
-    // c_{2i+1} = (c_i − c') * x^{−k}
-    rlwe_sub_inplace(cts[i], c_prime, q);
+    rlwe_add_k(cts[i], c_prime, cts[2 * i]);
+    rlwe_sub_inplace_k(cts[i], c_prime);
     TIME_END("add_sub");
 
     TIME_START("shift polynomial");
-    rlwe_shift(cts[i], cts[2 * i + 1], static_cast<size_t>(-k), q, N);
+    rlwe_shift_k(cts[i], cts[2 * i + 1], static_cast<size_t>(-k));
     TIME_END("shift polynomial");
   }
 
@@ -585,20 +648,48 @@ void PirServer::fill_inter_res() {
 
 void PirServer::mod_switch_inplace(RlweCt &ciphertext, const uint64_t q) {
   constexpr size_t coeff_count = DBConsts::PolyDegree;
+  constexpr size_t K = DBConsts::RnsMods.size();
+  const auto &qs = pir_params_.get_rns_mods();
 
-  // current ciphertext modulus
-  const uint64_t Q = pir_params_.get_rns_mods()[0];
+  if constexpr (K == 1) {
+    const uint64_t Q = qs[0];
+    uint64_t *data0 = ciphertext.c0.data();
+    uint64_t *data1 = ciphertext.c1.data();
+    for (size_t i = 0; i < coeff_count; i++) {
+      data0[i] = utils::rescale(data0[i], Q, q);
+      data1[i] = utils::rescale(data1[i], Q, q);
+    }
+  } else {
+    // K=2: CRT-compose each coefficient, drop q1 with rounding, then reuse the
+    // single-limb centered rescale q0 -> q. This avoids a 120-bit by 50-bit
+    // product in the 60+60-bit config.
+    const uint64_t q0 = qs[0];
+    const uint64_t q1 = qs[1];
+    const uint64_t q0_inv_mod_q1 = pir_params_.get_rns_tables().q0_inv_mod_q1;
 
-  // mod switch: round( (ct * q) / Q) ) (mod q)
-  uint64_t *data0 = ciphertext.c0.data();
-  uint64_t *data1 = ciphertext.c1.data();
+    auto drop_q1 = [&](uint64_t r0, uint64_t r1) -> uint64_t {
+      const uint64_t r0_mod_q1 = r0 % q1;
+      const uint64_t diff = (r1 + q1 - r0_mod_q1) % q1;
+      const uint64_t s = static_cast<uint64_t>(
+          (static_cast<uint128_t>(diff) * q0_inv_mod_q1) % q1);
+      const uint128_t x = static_cast<uint128_t>(q0) * s + r0;
+      uint64_t out = static_cast<uint64_t>((x + (static_cast<uint128_t>(q1) >> 1)) / q1);
+      return (out >= q0) ? (out - q0) : out;
+    };
 
-  for (size_t i = 0; i < coeff_count; i++) {
-    data0[i] = utils::rescale(data0[i], Q, q);
-    data1[i] = utils::rescale(data1[i], Q, q);
+    uint64_t *c0_lo = ciphertext.c0.data();
+    uint64_t *c0_hi = ciphertext.c0.data() + coeff_count;
+    uint64_t *c1_lo = ciphertext.c1.data();
+    uint64_t *c1_hi = ciphertext.c1.data() + coeff_count;
+    for (size_t i = 0; i < coeff_count; ++i) {
+      c0_lo[i] = utils::rescale(drop_q1(c0_lo[i], c0_hi[i]), q0, q);
+      c1_lo[i] = utils::rescale(drop_q1(c1_lo[i], c1_hi[i]), q0, q);
+    }
+    // Output is single-limb under modulus q.
+    ciphertext.c0.resize(coeff_count);
+    ciphertext.c1.resize(coeff_count);
   }
 }
-
 
 
 

@@ -12,9 +12,14 @@ void PirTest::test_fst_dim_mult() {
   std::vector<db_coeff_t> B_ref(ref_n * ref_p * ref_levels);
   std::vector<inter_coeff_t> C_ref(ref_m * ref_p * ref_levels, 0);
   std::vector<inter_coeff_t> C_got(ref_m * ref_p * ref_levels, 0);
-  utils::fill_rand_arr(A_ref.data(), A_ref.size());
-  utils::fill_rand_arr(B_ref.data(), B_ref.size());
 
+  // fill random data for A and B
+  for (size_t i = 0; i < A_ref.size(); ++i) {
+    A_ref[i] = static_cast<db_coeff_t>(rand());
+  }
+  for (size_t i = 0; i < B_ref.size(); ++i) {
+    B_ref[i] = static_cast<db_coeff_t>(rand());
+  }
   db_matrix_t A_ref_mat{A_ref.data(), ref_m, ref_n, ref_levels};
   db_matrix_t B_ref_mat{B_ref.data(), ref_n, ref_p, ref_levels};
   inter_matrix_t C_got_mat{C_got.data(), ref_m, ref_p, ref_levels};
@@ -66,8 +71,12 @@ void PirTest::test_fst_dim_mult() {
   std::vector<db_coeff_t> A_data(m * n * levels);
   std::vector<db_coeff_t> B_data(n * p * levels);
   std::vector<inter_coeff_t> C_data(m * p * levels);
-  utils::fill_rand_arr(A_data.data(), A_data.size());
-  utils::fill_rand_arr(B_data.data(), B_data.size());
+
+  // fill randome data for A and B
+  for (size_t i = 0; i < A_data.size(); ++i)
+    A_data[i] = static_cast<db_coeff_t>(rand());
+  for (size_t i = 0; i < B_data.size(); ++i)
+    B_data[i] = static_cast<db_coeff_t>(rand());
 
   db_matrix_t A_mat{A_data.data(), m, n, levels};
   db_matrix_t B_mat{B_data.data(), n, p, levels};

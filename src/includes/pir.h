@@ -5,9 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-// Precomputed constants used by gsw.cpp's K=2 CRT compose/decompose helpers.
-// In this single-modulus build K is always 1, so the K=2 fields are unused;
-// the struct is still wired through so the gsw helpers keep compiling.
+// Precomputed constants used by the K=2 CRT compose/decompose helpers.
 struct RnsTables {
   uint64_t q0_inv_mod_q1 = 0;
   std::vector<uint64_t> r64_mod_q;
@@ -59,8 +57,9 @@ public:
   inline double get_noise_std_dev() const { return DBConsts::NoiseStdDev; }
 
   inline const size_t get_BFV_size(bool use_seed = true) const {
+    const size_t per_poly_bits = DBConsts::PolyDegree * get_ct_mod_width();
     if (use_seed) {
-      return (get_ct_mod_width() * get_coeff_val_cnt() + 32) / 8;
+      return 32 + (get_ct_mod_width() * get_coeff_val_cnt()) / 8; // assuming 32 bytes for the seed
     } else {
       return (get_ct_mod_width() * get_coeff_val_cnt() * 2) / 8; // two polynomials per ciphertext
     }

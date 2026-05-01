@@ -334,12 +334,6 @@ size_t utils::roundup_div(const size_t numerator, const size_t denominator) {
   return (numerator + denominator - 1) / denominator;
 }
 
-void utils::fill_rand_arr(uint64_t *arr, size_t size) {
-  std::mt19937_64 rng(std::random_device{}());
-    for (size_t i = 0; i < size; i++) {
-      arr[i] = rng();
-    }
-}
 
 std::pair<size_t, size_t> utils::calculate_db_shape(size_t target_num_pt, size_t l, size_t h) {
   // OnionPIRv1-style hypercube: fst_dim_sz is a power of two. The expansion

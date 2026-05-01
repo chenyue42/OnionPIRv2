@@ -8,22 +8,28 @@
 #include <random>
 
 
-// constructor
+// Build the K-limb sk lazily because its construction depends on PirParams.
+static RlweSk make_client_sk(const PirParams &pir_params, std::mt19937_64 &rng) {
+  const auto &qs_arr = pir_params.get_rns_mods();
+  const std::vector<uint64_t> qs(qs_arr.begin(), qs_arr.end());
+  return gen_secret_key_rns(DBConsts::PolyDegree, qs, rng);
+}
+
 PirClient::PirClient(const PirParams &pir_params)
     : client_id_(rand()), pir_params_(pir_params),
       rng_(std::random_device{}()),
-      rlwe_sk_(gen_secret_key(DBConsts::PolyDegree,
-                              pir_params.get_rns_mods()[0], rng_)) {
-  init_sk_small_q();
-}
+      rlwe_sk_(make_client_sk(pir_params, rng_)) {}
 
 GSWCt PirClient::generate_gsw_from_key() {
   constexpr size_t N = DBConsts::PolyDegree;
-  const uint64_t q = pir_params_.get_rns_mods()[0];
 
-  // Pull sk into coefficient form (it is stored in NTT form under q).
-  std::vector<uint64_t> sk_coef(rlwe_sk_.data.begin(), rlwe_sk_.data.end());
-  utils::ntt_inv(sk_coef.data(), N, q);
+  // Recover ternary sk in coefficient form under q_0, then re-canonicalise
+  // {-1 ↔ q_0-1} → {-1 ↔ q_k-1} for each limb. We pass the q_0 form to
+  // plain_to_gsw, which re-encodes -1 per limb as the matching q_k-1.
+  const uint64_t q0 = pir_params_.get_rns_mods()[0];
+  std::vector<uint64_t> sk_coef(rlwe_sk_.data.begin(),
+                                rlwe_sk_.data.begin() + N);
+  utils::ntt_inv(sk_coef.data(), N, q0);
 
   GSWEval key_gsw(pir_params_, pir_params_.get_l_key(), pir_params_.get_base_log2_key());
   return key_gsw.plain_to_gsw(sk_coef, rlwe_sk_, rng_);
@@ -83,26 +89,45 @@ std::vector<size_t> PirClient::get_query_indices(size_t pt_idx) {
 
 RlweCt PirClient::fast_generate_query(const size_t pt_idx) {
   constexpr size_t N = DBConsts::PolyDegree;
-  const uint64_t Q = pir_params_.get_rns_mods()[0];
+  constexpr size_t K = DBConsts::RnsMods.size();
+  const auto &qs_arr = pir_params_.get_rns_mods();
+  const std::vector<uint64_t> qs(qs_arr.begin(), qs_arr.end());
   const uint64_t t = pir_params_.get_plain_mod();
   const double sigma = pir_params_.get_noise_std_dev();
 
   std::vector<size_t> query_indices = get_query_indices(pt_idx);
   PRINT_INT_ARRAY("\t\tquery_indices", query_indices.data(), query_indices.size());
   const size_t expan_height = pir_params_.get_expan_height();
-  const size_t bits_per_ciphertext = 1 << expan_height; // total available slots after expanding.
+  const size_t bits_per_ciphertext = 1 << expan_height;
 
-  // plaintext has one nonzero coefficient = inv(bits_per_ciphertext) mod t
   uint64_t inverse = 0;
   utils::try_invert_uint_mod(bits_per_ciphertext, t, inverse);
   const size_t reversed_index = utils::bit_reverse(query_indices[0], expan_height);
   DEBUG_PRINT("reversed_index: " << reversed_index << ", query_indices[0]: " << query_indices[0]);
 
-  // BFV encrypt under sk: c0 = -(a*s+e) + round(Q*m/t),  c1 = a  (coefficient form)
+  // BFV encrypt under sk: c0 = -(a*s+e) + round(Q*m/t), c1 = a (coeff form).
+  // Per-limb gadget injection: scaled mod q_k for each k.
   RlweCt query;
-  encrypt_zero(rlwe_sk_, N, Q, sigma, rng_, query, /*ntt_form=*/false);
-  const uint64_t scaled = utils::round_div_u128((uint128_t)Q * inverse, t) % Q;
-  query.c0[reversed_index] = (query.c0[reversed_index] + scaled) % Q;
+  encrypt_zero_rns(rlwe_sk_, N, qs, sigma, rng_, query, /*ntt_form=*/false);
+
+  // Adding 1^{-1} as a message to the query so that after expansion, the query will have 1's in the correct positions.
+  if constexpr (K == 1) {
+    const uint64_t Q = qs[0];
+    const uint64_t scaled = utils::round_div_u128((uint128_t)Q * inverse, t) % Q;
+    query.c0[reversed_index] = (query.c0[reversed_index] + scaled) % Q;
+  } else {
+    const uint128_t Q = static_cast<uint128_t>(qs[0]) * qs[1];
+    const uint128_t Delta = Q / t;
+    const uint64_t r = static_cast<uint64_t>(Q - Delta * t);
+    const uint64_t r_inverse_round =
+        static_cast<uint64_t>((static_cast<uint128_t>(r) * inverse + (t >> 1)) / t);
+    const uint128_t scaled_mp = Delta * inverse + r_inverse_round;
+    for (size_t k = 0; k < K; ++k) {
+      const uint64_t scaled_k = static_cast<uint64_t>(scaled_mp % qs[k]);
+      const size_t idx = k * N + reversed_index;
+      query.c0[idx] = (query.c0[idx] + scaled_k) % qs[k];
+    }
+  }
 
   add_gsw_to_query(query, query_indices);
   return query;
@@ -207,25 +232,30 @@ static void decrypt_phase_single_mod(const RlweCt &ct,
 }
 
 RlwePt PirClient::decrypt_ct(const RlweCt &ct) {
-  const uint64_t q = pir_params_.get_rns_mods()[0];
+  constexpr size_t N = DBConsts::PolyDegree;
+  const auto &qs_arr = pir_params_.get_rns_mods();
+  const std::vector<uint64_t> qs(qs_arr.begin(), qs_arr.end());
   const uint64_t t = pir_params_.get_plain_mod();
   RlwePt result;
-  int budget = 0;
-  decrypt_phase_single_mod(ct, rlwe_sk_.data.data(), q, t, result, budget);
+  decrypt_rns(ct, rlwe_sk_, N, qs, t, pir_params_.get_rns_tables(), result);
   return result;
 }
 
 RlweCt PirClient::fresh_zero_ct() {
   // Testing only.
   constexpr size_t N = DBConsts::PolyDegree;
-  const uint64_t Q = pir_params_.get_rns_mods()[0];
+  const auto &qs_arr = pir_params_.get_rns_mods();
+  const std::vector<uint64_t> qs(qs_arr.begin(), qs_arr.end());
   const double sigma = pir_params_.get_noise_std_dev();
   RlweCt ct;
-  encrypt_zero(rlwe_sk_, N, Q, sigma, rng_, ct, /*ntt_form=*/false);
+  encrypt_zero_rns(rlwe_sk_, N, qs, sigma, rng_, ct, /*ntt_form=*/false);
   return ct;
 }
 
 int PirClient::noise_budget(const RlweCt &ct) {
+  // Single-mod budget under the first limb. Used as a pre-mod-switch indicator
+  // (the K-aware decrypt_rns path does not expose noise; this matches the K=1
+  // historical behaviour and is good enough as a debug signal).
   const uint64_t q = pir_params_.get_rns_mods()[0];
   const uint64_t t = pir_params_.get_plain_mod();
   RlwePt tmp;
@@ -289,8 +319,9 @@ RlwePt PirClient::decrypt_mod_q(const RlweCt &ct) const {
     c0[i] = ct.c0[i] % q;
     c1_ntt[i] = ct.c1[i] % q;
   }
+  std::vector<uint64_t> sk_ntt_small_q = get_sk_ntt_small_q(pir_params_.get_rns_mods()[0], q);
   utils::ntt_fwd(c1_ntt.data(), N, q);
-  intel::hexl::EltwiseMultMod(phase.data(), c1_ntt.data(), sk_ntt_small_q_.data(), N, q, 1);
+  intel::hexl::EltwiseMultMod(phase.data(), c1_ntt.data(), sk_ntt_small_q.data(), N, q, 1);
   utils::ntt_inv(phase.data(), N, q);
   intel::hexl::EltwiseAddMod(phase.data(), phase.data(), c0.data(), N, q);
 
@@ -320,19 +351,21 @@ RlwePt PirClient::decrypt_mod_q(const RlweCt &ct) const {
 }
 
 
-void PirClient::init_sk_small_q() {
+std::vector<uint64_t> PirClient::get_sk_ntt_small_q(uint64_t old_q, uint64_t small_q) const {
   constexpr size_t N = DBConsts::PolyDegree;
-  const uint64_t old_q = pir_params_.get_rns_mods()[0];
-  const uint64_t small_q = pir_params_.get_small_q();
 
-  // Convert rlwe_sk_ (NTT form under old_q) to coefficient form.
-  std::vector<uint64_t> sk_coef(rlwe_sk_.data.begin(), rlwe_sk_.data.end());
+  // rlwe_sk_ is K-limb in NTT form (limb k under q_k). The first limb under
+  // q_0 = old_q is what we need; ternary coefficients reduce identically across
+  // limbs so the first limb's coefficient form recovers {-1, 0, 1}.
+  std::vector<uint64_t> sk_coef(rlwe_sk_.data.begin(),
+                                rlwe_sk_.data.begin() + N);
   utils::ntt_inv(sk_coef.data(), N, old_q);
 
   // Rewrite -1 mod old_q as -1 mod small_q (sk is ternary: {0, 1, -1}).
-  sk_ntt_small_q_.resize(N);
+  std::vector<uint64_t> sk_ntt_small_q_(N);
   for (size_t i = 0; i < N; i++) {
     sk_ntt_small_q_[i] = (sk_coef[i] > 1) ? (small_q - 1) : sk_coef[i];
   }
   utils::ntt_fwd(sk_ntt_small_q_.data(), N, small_q);
+  return sk_ntt_small_q_;
 }

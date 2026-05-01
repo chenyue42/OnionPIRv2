@@ -40,8 +40,11 @@ void PirTest::test_fast_expand_query() {
   RlweCt fast_query = client.fast_generate_query(query_idx);
 
   {
-    auto fast_decrypted = client.decrypt_mod_q(fast_query);
-    BENCH_PRINT("fast packed query coeff[0]: " << fast_decrypted.data[0]);
+    auto fast_decrypted = client.decrypt_ct(fast_query);
+    const size_t expan_height = pir_params.get_expan_height();
+    const size_t reversed = utils::bit_reverse(query_idx % fst_dim_sz, expan_height);
+    BENCH_PRINT("fast query: expected nonzero at reversed=" << reversed
+                 << ", got coeff[" << reversed << "]=" << fast_decrypted.data[reversed]);
   }
   PRINT_BAR;
 

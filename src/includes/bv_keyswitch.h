@@ -121,8 +121,8 @@ void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
 // ============================================================================
 
 // Apply automorphism σ_k to `ct` and key-switch back to the original secret key
-// using BV. Modifies `ct` in place. `ct` must be in NTT form on entry and will
-// be in NTT form on return.
+// using BV. Modifies `ct` in place. `ct` must be in coefficient form on entry
+// and remains in coefficient form on return.
 //
 // Operates on all rns_mod_cnt limbs.
 void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,

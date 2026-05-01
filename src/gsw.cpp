@@ -378,47 +378,64 @@ GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
                                     const RlweSk &sk, std::mt19937_64 &rng) {
   constexpr size_t N = DBConsts::PolyDegree;
   const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
-  assert(rns_mod_cnt == 1 && "plain_to_gsw currently supports only single-mod");
+  const auto &rns_mods_arr = pir_params_.get_rns_mods();
+  const std::vector<uint64_t> qs(rns_mods_arr.begin(), rns_mods_arr.end());
   assert(plaintext.size() == N);
 
-  const uint64_t q = pir_params_.get_rns_mods()[0];
   const double sigma = pir_params_.get_noise_std_dev();
 
-  // Gadget: gadget[k] = B^(l-1-k) mod q, matching utils::gsw_gadget ordering
-  // (large → small, row 0 = B^(l-1), row l-1 = 1). For the approx mode each
-  // entry is further multiplied by 2^drop so the external product recovers
-  // val·m after the decomposition rounds val to 2^drop granularity.
+  // gadget_table[k] holds K = rns_mod_cnt rows, each of length l_, with
+  // gadget_table[k][p] = B^(l_-1-p) mod q_k (or scaled by 2^drop in approx mode).
   const auto gadget_table = use_approx_decomp_
       ? utils::gsw_gadget_approx(l_, base_log2_,
-                                 pir_params_.get_ct_mod_width(), 1,
-                                 pir_params_.get_rns_mods())
-      : utils::gsw_gadget(l_, base_log2_, 1, pir_params_.get_rns_mods());
-  const std::vector<uint64_t> &gadget = gadget_table[0];
+                                 pir_params_.get_ct_mod_width(), rns_mod_cnt,
+                                 rns_mods_arr)
+      : utils::gsw_gadget(l_, base_log2_, rns_mod_cnt, rns_mods_arr);
 
-  // Output layout: 2*l_ rows, each row = [c0 (N) || c1 (N)] in NTT form.
-  GSWCt output(2 * l_, std::vector<uint64_t>(2 * N));
+  // Output layout: 2*l_ rows, each row = [c0 (K*N) || c1 (K*N)] in NTT form.
+  GSWCt output(2 * l_, std::vector<uint64_t>(2 * rns_mod_cnt * N));
 
   RlweCt ct;
   for (size_t half = 0; half < 2; half++) {
-    for (size_t k = 0; k < l_; k++) {
-      // Fresh (c0, c1) = Enc_sk(0) in coefficient form.
-      encrypt_zero(sk, N, q, sigma, rng, ct, /*ntt_form=*/false);
+    for (size_t p = 0; p < l_; p++) {
+      // Fresh K-limb Enc_sk(0) in coefficient form.
+      encrypt_zero_rns(sk, N, qs, sigma, rng, ct, /*ntt_form=*/false);
 
-      // Add gadget[k] * plaintext to c_{half}.
-      uint64_t *target = ct.data(half);
-      const uint64_t g = gadget[k];
-      for (size_t j = 0; j < N; j++) {
-        const uint64_t val =
-            static_cast<uint64_t>(static_cast<inter_coeff_t>(plaintext[j]) * g % q);
-        target[j] = (target[j] + val) % q;
+      // Per limb: add gadget_table[k][p] * plaintext (mod q_k) to c_{half}_k.
+      // `plaintext` is supplied as values in [0, q_0). For K > 1 we must
+      // re-canonicalise the signed value: `q_0 - 1` (≡ -1) maps to `q_k - 1`,
+      // not `(q_0-1) mod q_k`. Treat coefficients > q_0/2 as negatives.
+      const uint64_t q0 = qs[0];
+      const uint64_t half_q0 = q0 >> 1;
+      for (size_t k = 0; k < rns_mod_cnt; ++k) {
+        const uint64_t qk = qs[k];
+        const uint64_t g  = gadget_table[k][p];
+        uint64_t *target = ct.data(half) + k * N;
+        for (size_t j = 0; j < N; j++) {
+          uint64_t mj;
+          if (rns_mod_cnt == 1 || plaintext[j] <= half_q0) {
+            mj = plaintext[j] % qk;
+          } else {
+            // Negative value: -|x| where |x| = q_0 - plaintext[j] (assumed < q_k).
+            const uint64_t abs_v = q0 - plaintext[j];
+            mj = (abs_v >= qk) ? (qk - (abs_v % qk)) % qk : (qk - abs_v);
+          }
+          const uint64_t val =
+              static_cast<uint64_t>(static_cast<inter_coeff_t>(mj) * g % qk);
+          target[j] = (target[j] + val) % qk;
+        }
       }
 
-      // NTT both halves and write into the flat output row.
-      utils::ntt_fwd(ct.c0.data(), N, q);
-      utils::ntt_fwd(ct.c1.data(), N, q);
-      const size_t row = half * l_ + k;
-      std::memcpy(output[row].data(),     ct.c0.data(), N * sizeof(uint64_t));
-      std::memcpy(output[row].data() + N, ct.c1.data(), N * sizeof(uint64_t));
+      // NTT each limb in place, then concatenate into the row.
+      for (size_t k = 0; k < rns_mod_cnt; ++k) {
+        utils::ntt_fwd(ct.c0.data() + k * N, N, qs[k]);
+        utils::ntt_fwd(ct.c1.data() + k * N, N, qs[k]);
+      }
+      const size_t row = half * l_ + p;
+      std::memcpy(output[row].data(),               ct.c0.data(),
+                  rns_mod_cnt * N * sizeof(uint64_t));
+      std::memcpy(output[row].data() + rns_mod_cnt * N, ct.c1.data(),
+                  rns_mod_cnt * N * sizeof(uint64_t));
     }
   }
 

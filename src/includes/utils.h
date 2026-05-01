@@ -202,7 +202,6 @@ size_t next_pow_of_2(const size_t n);
 
 size_t roundup_div(const size_t numerator, const size_t denominator);
 
-void fill_rand_arr(uint64_t *arr, size_t size);
 
 // ---------------------------------------------------------------------------
 // Polynomial noise / randomness samplers

@@ -63,6 +63,17 @@ endif ()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(Onion-PIR)
 
+# Build-time selectors for K-RNS variant testing. Override on the cmake line:
+#   cmake -DACTIVE_CONFIG=CONFIG_N2048_M28_28 -DKS_VARIANT=KS_BV -DEP_VARIANT=EP_VARIANT ..
+# Defaults are picked up from src/includes/database_constants.h when unset.
+foreach(opt ACTIVE_CONFIG KS_VARIANT EP_VARIANT)
+    if (DEFINED ${opt})
+        message(STATUS "${opt} = ${${opt}}")
+        add_compile_definitions(${opt}=${${opt}})
+    endif()
+endforeach()
+
+
 # Automatically find all source files in src/
 file(GLOB_RECURSE SRC_FILES src/*.cpp)
 add_executable(Onion-PIR ${SRC_FILES})

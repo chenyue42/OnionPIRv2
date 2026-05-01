@@ -73,6 +73,8 @@ private:
   // need special permutation for packing when using it.
   std::vector<RlweCt> fast_expand_qry(size_t client_id, RlweCt &ciphertext) const;
 
+  std::vector<RlweCt> full_expand_qry(size_t client_id, RlweCt &ciphertext) const;
+
   // This is a helper for evaluate the first dimension.
   // Instead of doing a mod operation after every addition and multiplication during the matrix multiplication,
   // we delay the mod operation until the end. We also use barret reduction for the mod operation.

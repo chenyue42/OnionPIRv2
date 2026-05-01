@@ -164,54 +164,89 @@ const BvKeySwitchKey &BvGaloisKeys::get(uint32_t galois_k) const {
 // Key generation (client side)
 // ----------------------------------------------------------------------------
 
+// ----------------------------------------------------------------------------
+// K-aware helpers shared between K=1 and K=2 paths.
+// ----------------------------------------------------------------------------
+
+// Sample shared signed Gaussian e (one int64 per coefficient), reduced into
+// [0, q_k) for each limb. out has size N * K.
+static void sample_gaussian_shared_rns(uint64_t *out, size_t N,
+                                       const std::vector<uint64_t> &qs,
+                                       double sigma, std::mt19937_64 &rng) {
+  std::normal_distribution<double> dist(0.0, sigma);
+  std::vector<int64_t> e(N);
+  for (size_t i = 0; i < N; ++i) e[i] = std::llround(dist(rng));
+  for (size_t k = 0; k < qs.size(); ++k) {
+    const uint64_t qk = qs[k];
+    uint64_t *out_k = out + k * N;
+    for (size_t i = 0; i < N; ++i) {
+      const int64_t v = e[i];
+      if (v >= 0) {
+        out_k[i] = static_cast<uint64_t>(v) % qk;
+      } else {
+        const uint64_t abs_v = static_cast<uint64_t>(-v) % qk;
+        out_k[i] = (abs_v == 0) ? 0 : qk - abs_v;
+      }
+    }
+  }
+}
+
 BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
                              const RlweSk &sk, uint32_t galois_k,
                              std::mt19937_64 &rng) {
   const double sigma = pir_params.get_noise_std_dev();
-  const size_t rns_mod_cnt = pir_params.get_rns_mod_cnt();
   constexpr size_t N = DBConsts::PolyDegree;
+  constexpr size_t K = DBConsts::RnsMods.size();
+  static_assert(K <= 2, "BV keyswitch (MP-gadget) supports K <= 2 only");
+  static_assert(DBConsts::Ks == DBConsts::KsVariant::BV,
+                "KS_RNS_HYBRID not yet implemented; set KS_VARIANT=KS_BV");
 
-  assert(rns_mod_cnt == 1 &&
-         "BV key-switch currently supports only single RNS limb (rns_mod_cnt == 1)");
-  const uint64_t q_val = pir_params.get_rns_mods()[0];
+  const auto &qs = pir_params.get_rns_mods();
   const size_t base_log2 = bv_base_log2(pir_params);
 
-  // sk is stored in NTT form across all primes. First N coeffs = first limb.
-  const uint64_t *sk_ptr = sk.data.data();
-
-  // Compute sigma_k(s) = s(x^k) in NTT form under the data modulus.
-  std::vector<uint64_t> sigma_s(N);
-  utils::automorphism_ntt(sk_ptr, N, galois_k, q_val, sigma_s.data());
+  // σ_k(s) per limb, in NTT form.
+  std::vector<uint64_t> sigma_s(N * K);
+  for (size_t k = 0; k < K; ++k) {
+    utils::automorphism_ntt(sk.data.data() + k * N, N, galois_k, qs[k],
+                            sigma_s.data() + k * N);
+  }
 
   BvKeySwitchKey ksk;
   ksk.galois_k = galois_k;
   ksk.cts.resize(L_KS);
 
-  std::vector<uint64_t> as(N), msg(N), e(N);
+  std::vector<uint64_t> e(N * K);
+  std::vector<uint64_t> as(N), msg(N);
 
   for (size_t i = 0; i < L_KS; ++i) {
     BvRlweCt &ct = ksk.cts[i];
-    ct.a.assign(N, 0);
-    ct.b.assign(N, 0);
+    ct.a.assign(N * K, 0);
+    ct.b.assign(N * K, 0);
 
-    // a ← uniform [0, q),  e ← Gaussian(0, sigma)
-    utils::sample_uniform_poly(ct.a.data(), N, q_val, rng);
-    utils::sample_gaussian(e.data(), N, q_val, sigma, rng);
+    // Per-limb a uniform mod q_k.
+    for (size_t k = 0; k < K; ++k) {
+      utils::sample_uniform_poly(ct.a.data() + k * N, N, qs[k], rng);
+    }
+    // Shared signed e, reduced per limb.
+    sample_gaussian_shared_rns(e.data(), N, qs, sigma, rng);
 
-    // NTT(a), NTT(e) under the data modulus.
-    utils::ntt_fwd(ct.a.data(), N, q_val);
-    utils::ntt_fwd(e.data(), N, q_val);
+    // Per-limb: b_k = σ(s)_k · (B^i mod q_k) − (a_k · sk_k) + e_k.
+    for (size_t k = 0; k < K; ++k) {
+      const uint64_t qk = qs[k];
+      const uint64_t Bi = power_of_two_mod(i * base_log2, qk);
+      uint64_t *a_k = ct.a.data() + k * N;
+      uint64_t *b_k = ct.b.data() + k * N;
+      uint64_t *e_k = e.data() + k * N;
 
-    // a * s (pointwise in NTT form)
-    intel::hexl::EltwiseMultMod(as.data(), ct.a.data(), sk_ptr, N, q_val, 1);
-
-    // Message: sigma_k(s) * B^i (scalar multiply in NTT form)
-    const uint64_t Bi = power_of_two_mod(i * base_log2, q_val);
-    intel::hexl::EltwiseFMAMod(msg.data(), sigma_s.data(), Bi, nullptr, N, q_val, 1);
-
-    // b = msg - a*s + e
-    intel::hexl::EltwiseSubMod(ct.b.data(), msg.data(), as.data(), N, q_val);
-    intel::hexl::EltwiseAddMod(ct.b.data(), ct.b.data(), e.data(), N, q_val);
+      utils::ntt_fwd(a_k, N, qk);
+      utils::ntt_fwd(e_k, N, qk);
+      intel::hexl::EltwiseMultMod(as.data(), a_k, sk.data.data() + k * N,
+                                  N, qk, 1);
+      intel::hexl::EltwiseFMAMod(msg.data(), sigma_s.data() + k * N, Bi,
+                                 nullptr, N, qk, 1);
+      intel::hexl::EltwiseSubMod(b_k, msg.data(), as.data(), N, qk);
+      intel::hexl::EltwiseAddMod(b_k, b_k, e_k, N, qk);
+    }
   }
 
   return ksk;
@@ -247,21 +282,14 @@ struct GaloisScratch {
 static GaloisScratch g_scratch;
 }  // namespace
 
-void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
-                             const BvKeySwitchKey &key,
-                             const PirParams &pir_params) {
-  assert(key.galois_k == galois_k);
-  // BFV ciphertexts are in coefficient form (is_ntt_form = false).
-  assert(!ct.ntt_form);
-
+// K=1: signed gadget decomposition (existing path, tighter noise).
+static void bv_apply_galois_inplace_k1(RlweCt &ct, uint32_t galois_k,
+                                       const BvKeySwitchKey &key,
+                                       const PirParams &pir_params) {
   constexpr size_t N = DBConsts::PolyDegree;
-  const size_t rns_mod_cnt = pir_params.get_rns_mod_cnt();
-  assert(rns_mod_cnt == 1 &&
-         "bv_apply_galois_inplace currently supports only single RNS limb");
   const uint64_t q_val = pir_params.get_rns_mods()[0];
   const size_t base_log2 = bv_base_log2(pir_params);
 
-  // Use a shared scratch struct to amortize heap allocations across calls.
   GaloisScratch &s = g_scratch;
   if (s.c0_perm.size() != N) {
     s.c0_perm.resize(N);
@@ -278,12 +306,9 @@ void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
   uint64_t *const tmp = s.tmp.data();
   uint64_t *const digits = s.digits.data();
 
-  // Step 1: apply automorphism to (c0, c1) in coefficient form.
   utils::automorphism_coeff(ct.data(0), N, galois_k, q_val, c0_perm);
   utils::automorphism_coeff(ct.data(1), N, galois_k, q_val, c1_perm);
 
-  // Step 2: signed gadget-decompose σ(c1) into a row-major L_KS×N buffer.
-  // Ultimately, we want decomp(a) \cdot ks_keys using inner product. NTT is used to speed up.
   for (size_t k = 0; k < N; ++k) {
     uint64_t digit_vals[L_KS];
     signed_gadget_decompose(c1_perm[k], base_log2, q_val, digit_vals, L_KS);
@@ -292,9 +317,6 @@ void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
     }
   }
 
-  // Steps 3-fused: for each digit, NTT it then multiply-accumulate into Δb, Δa.
-  // Keeping the digit polynomial hot in cache between NTT and the two MultMods.
-  // First iteration writes (instead of accumulating) to skip a zero-init pass.
   {
     uint64_t *digit0 = digits;
     utils::ntt_fwd(digit0, N, q_val);
@@ -311,17 +333,146 @@ void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
     intel::hexl::EltwiseAddMod(delta_a, delta_a, tmp, N, q_val);
   }
 
-  // Step 4: INTT the inner product results back to coefficient form.
   utils::ntt_inv(delta_b, N, q_val);
   utils::ntt_inv(delta_a, N, q_val);
 
-  // Step 5: new_c0 = σ(c0) + Δb,  new_c1 = Δa   (coefficient form)
   intel::hexl::EltwiseAddMod(c0_perm, c0_perm, delta_b, N, q_val);
 
-  // Write back into ct's first RNS limb. Higher limbs left untouched.
   std::memcpy(ct.data(0), c0_perm, N * sizeof(uint64_t));
   std::memcpy(ct.data(1), delta_a, N * sizeof(uint64_t));
-  // ct stays in coefficient form (is_ntt_form = false).
+}
+
+// K=2: unsigned MP-gadget decomposition. Composes σ(c1) per coefficient to a
+// 128-bit MP integer, extracts L_KS digits in [0, B), then for each limb NTTs
+// each digit independently and accumulates the inner product against the KSK.
+static void bv_apply_galois_inplace_k2(RlweCt &ct, uint32_t galois_k,
+                                       const BvKeySwitchKey &key,
+                                       const PirParams &pir_params) {
+  constexpr size_t N = DBConsts::PolyDegree;
+  const auto &qs = pir_params.get_rns_mods();
+  const RnsTables &tables = pir_params.get_rns_tables();
+  const uint64_t q0 = qs[0], q1 = qs[1];
+  const uint64_t q0_inv_mod_q1 = tables.q0_inv_mod_q1;
+  const size_t base_log2 = bv_base_log2(pir_params);
+  const uint64_t B_mask = (uint64_t(1) << base_log2) - 1;
+
+  // Step 1: per-limb σ on (c0, c1).
+  std::vector<uint64_t> c0_perm(2 * N), c1_perm(2 * N);
+  for (size_t k = 0; k < 2; ++k) {
+    utils::automorphism_coeff(ct.data(0) + k * N, N, galois_k, qs[k],
+                              c0_perm.data() + k * N);
+    utils::automorphism_coeff(ct.data(1) + k * N, N, galois_k, qs[k],
+                              c1_perm.data() + k * N);
+  }
+
+  // Step 2: per-coef CRT compose σ(c1) → 128-bit MP integer.
+  std::vector<uint128_t> c1_mp(N);
+  for (size_t j = 0; j < N; ++j) {
+    const uint64_t r0 = c1_perm[0 * N + j];
+    const uint64_t r1 = c1_perm[1 * N + j];
+    const uint64_t r0_mod_q1 = r0 % q1;
+    const uint64_t diff = (r1 + q1 - r0_mod_q1) % q1;
+    const uint64_t s = static_cast<uint64_t>(
+        (static_cast<uint128_t>(diff) * q0_inv_mod_q1) % q1);
+    c1_mp[j] = static_cast<uint128_t>(q0) * s + r0;
+  }
+
+  // Step 3: extract L_KS *signed* digits per coefficient. Center the MP value
+  // to (-Q/2, Q/2], then signed base-B decomposition with carry. Storing the
+  // signed digit (as int64) means each limb later renders it as
+  //   digit_k = (s >= 0) ? s : (qk - (-s))
+  // which halves the per-step keyswitch noise compared to unsigned digits.
+  using i128 = __int128_t;
+  const uint128_t Q_total = static_cast<uint128_t>(q0) * q1;
+  const uint128_t half_Q  = Q_total >> 1;
+  const uint64_t  B       = uint64_t(1) << base_log2;
+  const uint64_t  half_B  = B >> 1;
+
+  std::vector<int64_t> sdigits(L_KS * N);
+  for (size_t j = 0; j < N; ++j) {
+    i128 d = (c1_mp[j] > half_Q)
+        ? static_cast<i128>(c1_mp[j]) - static_cast<i128>(Q_total)
+        : static_cast<i128>(c1_mp[j]);
+    for (size_t i = 0; i < L_KS; ++i) {
+      const uint64_t low = static_cast<uint64_t>(d) & B_mask;
+      int64_t r;
+      if (low > half_B) {
+        r = static_cast<int64_t>(low) - static_cast<int64_t>(B);
+        d = (d >> base_log2) + 1;  // arithmetic shift on i128, then carry
+      } else {
+        r = static_cast<int64_t>(low);
+        d >>= base_log2;
+      }
+      sdigits[i * N + j] = r;
+    }
+  }
+
+  // Step 4: for each limb, NTT each digit (rendered into uint64 mod qk) and
+  // accumulate inner products against the KSK.
+  std::vector<uint64_t> delta_a(2 * N, 0), delta_b(2 * N, 0);
+  std::vector<uint64_t> digit_buf(N), prod(N);
+
+  auto render_digits_for_limb = [&](size_t i, uint64_t qk) {
+    const int64_t *src = sdigits.data() + i * N;
+    for (size_t j = 0; j < N; ++j) {
+      const int64_t s = src[j];
+      digit_buf[j] = (s >= 0) ? static_cast<uint64_t>(s)
+                              : qk - static_cast<uint64_t>(-s);
+    }
+  };
+
+  for (size_t k = 0; k < 2; ++k) {
+    const uint64_t qk = qs[k];
+    uint64_t *db_k = delta_b.data() + k * N;
+    uint64_t *da_k = delta_a.data() + k * N;
+
+    // First iteration: write instead of accumulate.
+    render_digits_for_limb(0, qk);
+    utils::ntt_fwd(digit_buf.data(), N, qk);
+    intel::hexl::EltwiseMultMod(db_k, digit_buf.data(),
+                                key.cts[0].b.data() + k * N, N, qk, 1);
+    intel::hexl::EltwiseMultMod(da_k, digit_buf.data(),
+                                key.cts[0].a.data() + k * N, N, qk, 1);
+
+    for (size_t i = 1; i < L_KS; ++i) {
+      render_digits_for_limb(i, qk);
+      utils::ntt_fwd(digit_buf.data(), N, qk);
+      intel::hexl::EltwiseMultMod(prod.data(), digit_buf.data(),
+                                  key.cts[i].b.data() + k * N, N, qk, 1);
+      intel::hexl::EltwiseAddMod(db_k, db_k, prod.data(), N, qk);
+      intel::hexl::EltwiseMultMod(prod.data(), digit_buf.data(),
+                                  key.cts[i].a.data() + k * N, N, qk, 1);
+      intel::hexl::EltwiseAddMod(da_k, da_k, prod.data(), N, qk);
+    }
+
+    utils::ntt_inv(db_k, N, qk);
+    utils::ntt_inv(da_k, N, qk);
+
+    // c0_perm_k += delta_b_k
+    intel::hexl::EltwiseAddMod(c0_perm.data() + k * N, c0_perm.data() + k * N,
+                               db_k, N, qk);
+  }
+
+  std::memcpy(ct.data(0), c0_perm.data(), 2 * N * sizeof(uint64_t));
+  std::memcpy(ct.data(1), delta_a.data(), 2 * N * sizeof(uint64_t));
+}
+
+void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
+                             const BvKeySwitchKey &key,
+                             const PirParams &pir_params) {
+  assert(key.galois_k == galois_k);
+  assert(!ct.ntt_form);
+
+  constexpr size_t K = DBConsts::RnsMods.size();
+  static_assert(K <= 2, "BV keyswitch (MP-gadget) supports K <= 2 only");
+  static_assert(DBConsts::Ks == DBConsts::KsVariant::BV,
+                "KS_RNS_HYBRID not yet implemented; set KS_VARIANT=KS_BV");
+
+  if constexpr (K == 1) {
+    bv_apply_galois_inplace_k1(ct, galois_k, key, pir_params);
+  } else {
+    bv_apply_galois_inplace_k2(ct, galois_k, key, pir_params);
+  }
 }
 
 } // namespace bvks

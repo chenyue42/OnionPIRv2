@@ -69,13 +69,17 @@ void PirTest::test_bv_keyswitch() {
 
   PirParams pir_params;
   constexpr size_t N  = DBConsts::PolyDegree;
-  const uint64_t q    = pir_params.get_rns_mods()[0];
+  const std::vector<uint64_t> qs(pir_params.get_rns_mods().begin(),
+                                 pir_params.get_rns_mods().end());
   const uint64_t t    = pir_params.get_plain_mod();
   const double sigma  = pir_params.get_noise_std_dev();
-  const uint32_t galois_k = 513;
+  const RnsTables &tables = pir_params.get_rns_tables();
+  const uint32_t galois_k = 257; // 2^8 + 1
+
+  BENCH_PRINT("K=" << qs.size() << " N=" << N << " t=" << t);
 
   std::mt19937_64 rng(std::random_device{}());
-  RlweSk sk = gen_secret_key(N, q, rng);
+  RlweSk sk = gen_secret_key_rns(N, qs, rng);
 
   // Build a plaintext with a few distinctive coefficients.
   std::vector<uint64_t> pt(N, 0);
@@ -84,12 +88,11 @@ void PirTest::test_bv_keyswitch() {
 
   // Encrypt (coeff form).
   RlweCt ct;
-  encrypt_bfv(pt, sk, N, q, t, sigma, rng, ct);
+  encrypt_bfv_rns(pt, sk, N, qs, t, sigma, rng, ct);
 
   {
     RlwePt dec;
-    int budget = decrypt_and_budget(ct, sk, N, q, t, dec);
-    std::cout << "fresh noise budget: " << budget << " bits\n" << std::flush;
+    decrypt_rns(ct, sk, N, qs, t, tables, dec);
     BENCH_PRINT("fresh decrypt[0..2]: " << dec.data[0] << ", " << dec.data[1] << ", " << dec.data[2]);
   }
 
@@ -102,9 +105,23 @@ void PirTest::test_bv_keyswitch() {
   bvks::bv_apply_galois_inplace(ct, galois_k, bv_ksk, pir_params);
 
   RlwePt dec_bv;
-  int bv_budget = decrypt_and_budget(ct, sk, N, q, t, dec_bv);
-  std::cout << "BV galois noise budget: " << bv_budget << " bits\n" << std::flush;
-  BENCH_PRINT("BV galois decrypt[0..2]: " << dec_bv.data[0] << ", " << dec_bv.data[1] << ", " << dec_bv.data[2]);
+  decrypt_rns(ct, sk, N, qs, t, tables, dec_bv);
+  // BENCH_PRINT("BV galois decrypt[0..2]: " << dec_bv.data[0] << ", " << dec_bv.data[1] << ", " << dec_bv.data[2]);
+  // BENCH_PRINT("coeff at idx " << 1 << " maps to: " << galois_k << " got=" << dec_bv.data[galois_k] << " expected: " << pt_auto[galois_k]);
+  // BENCH_PRINT("coeff at idx " << 2 << " maps to: " << galois_k * 2 << " got=" << dec_bv.data[galois_k * 2] << " expected: " << pt_auto[galois_k * 2]);
+  // BENCH_PRINT("coeff at idx " << 3 << " maps to: " << galois_k * 3 << " got=" << dec_bv.data[galois_k * 3] << " expected: " << pt_auto[galois_k * 3]);
+  // print all the non-zero coeffs.
+  for (size_t i = 0; i < N; i++) {
+    if (dec_bv.data[i] != 0) {
+      std::cout << "coeff[" << i << "] = " << dec_bv.data[i] << "\n";
+    }
+  }
+  
+  for (size_t i = 0; i < N; i++) {
+    if (pt_auto[i] != 0) {
+      std::cout << "coeff[" << i << "] = " << pt_auto[i] << "\n";
+    }
+  }
 
   // Compare against expected automorphism of the plaintext.
   size_t diffs = 0;

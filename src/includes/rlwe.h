@@ -92,3 +92,36 @@ void rlwe_ntt_inv_inplace(RlweCt &ct, uint64_t q, size_t N);
 // Negacyclic shift by `index` of each polynomial (coefficient form only).
 // dst may alias src.
 void rlwe_shift(const RlweCt &src, RlweCt &dst, size_t index, uint64_t q, size_t N);
+
+// ---------------------------------------------------------------------------
+// K-limb (RNS) RLWE primitives.
+// All functions operate on K = qs.size() limbs concatenated in mod0 || mod1 || ...
+// order. The single-modulus helpers above are the K=1 specialisation.
+// Currently supports K = 1 or K = 2 (matching compose_rns_to_mp's range).
+// ---------------------------------------------------------------------------
+
+struct RnsTables;  // defined in pir.h; only K=2 fields are used here
+
+// One ternary polynomial reduced and NTT'd per limb. data layout: limb k at
+// offset k*N. The same ternary coefficients are used across all limbs.
+RlweSk gen_secret_key_rns(size_t N, const std::vector<uint64_t> &qs,
+                          std::mt19937_64 &rng);
+
+// Encryption of zero under sk:
+//   c1_k = a_k                     (uniform in [0, q_k))
+//   c0_k = -(a_k*sk_k + e_k) mod q_k  with shared signed Gaussian e
+void encrypt_zero_rns(const RlweSk &sk, size_t N,
+                      const std::vector<uint64_t> &qs,
+                      double sigma, std::mt19937_64 &rng,
+                      RlweCt &ct, bool ntt_form = false);
+
+// BFV encryption: encrypt_zero + add round(Q*m[i]/t) to c0[i] (per-limb).
+void encrypt_bfv_rns(const std::vector<uint64_t> &m, const RlweSk &sk,
+                     size_t N, const std::vector<uint64_t> &qs, uint64_t t,
+                     double sigma, std::mt19937_64 &rng, RlweCt &ct);
+
+// Decrypt: per-limb phase, CRT-compose to MP, mod-switch q1 → drop, then
+// rescale q0 → t. tables.q0_inv_mod_q1 must be set when K >= 2.
+void decrypt_rns(const RlweCt &ct, const RlweSk &sk, size_t N,
+                 const std::vector<uint64_t> &qs, uint64_t t,
+                 const RnsTables &tables, RlwePt &pt);

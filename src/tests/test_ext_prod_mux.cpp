@@ -7,50 +7,34 @@ void PirTest::test_ext_prod_mux() {
   PirServer server(pir_params);
   PirClient client(pir_params);
   const size_t coeff_count = DBConsts::PolyDegree;
-
-  // create two ciphertexts
-  std::vector<uint64_t> a(coeff_count), b(coeff_count);
-  a[0] = 508; a[1] = 509; a[2] = 510;
-  b[0] = 511; b[1] = 512; b[2] = 513;
-
-  const uint64_t q = pir_params.get_rns_mods()[0];
+  const std::vector<uint64_t> qs(pir_params.get_rns_mods().begin(),
+                                 pir_params.get_rns_mods().end());
+  const RnsTables &tables = pir_params.get_rns_tables();
   const uint64_t t = pir_params.get_plain_mod();
   const double sigma = pir_params.get_noise_std_dev();
+  std::mt19937_64 rng(0x1234ULL);
 
-  RlweSk rlwe_sk = client.rlwe_sk_;
-  std::mt19937_64 rng(std::random_device{}());
+  std::vector<uint64_t> a(coeff_count, 0), b(coeff_count, 0);
+  a[0] = 5; a[1] = 7;
+  b[0] = 3; b[1] = 9;
 
-  RlweCt a_encrypted, b_encrypted;
-  encrypt_bfv(a, rlwe_sk, coeff_count, q, t, sigma, rng, a_encrypted);
-  encrypt_bfv(b, rlwe_sk, coeff_count, q, t, sigma, rng, b_encrypted);
+  RlweCt a_ct, b_ct;
+  encrypt_bfv_rns(a, client.rlwe_sk_, coeff_count, qs, t, sigma, rng, a_ct);
+  encrypt_bfv_rns(b, client.rlwe_sk_, coeff_count, qs, t, sigma, rng, b_ct);
 
-  // create a GSW ciphertext of 1
-  const size_t gsw_l = pir_params.get_l();
-  const size_t base_log2 = pir_params.get_base_log2();
-  GSWEval data_gsw(pir_params, gsw_l, base_log2);
-  std::vector<uint64_t> one(coeff_count);
-  std::vector<uint64_t> zero(coeff_count);
-  one[0] = 1;
-  GSWCt one_gsw  = data_gsw.plain_to_gsw(one,  rlwe_sk, rng);
-  GSWCt zero_gsw = data_gsw.plain_to_gsw(zero, rlwe_sk, rng);
+  std::vector<uint64_t> one(coeff_count, 0); one[0] = 1;
+  GSWEval data_gsw(pir_params, pir_params.get_l(), pir_params.get_base_log2());
+  GSWCt one_gsw = data_gsw.plain_to_gsw(one, client.rlwe_sk_, rng);
 
-  // test the mux
   RlweCt result;
-  result.resize(coeff_count);
-  RlwePt result_pt;
-  server.ext_prod_mux(a_encrypted, b_encrypted, one_gsw, result);
-  {
-    decrypt(result, rlwe_sk, coeff_count, q, t, result_pt);
-    BENCH_PRINT("Mux result: " << result_pt.data[0] << " " << result_pt.data[1] << " " << result_pt.data[2]);
-  }
+  result.c0.assign(coeff_count * qs.size(), 0);
+  result.c1.assign(coeff_count * qs.size(), 0);
+  server.ext_prod_mux(a_ct, b_ct, one_gsw, result);
 
-  // Re-encrypt a/b — ext_prod_mux mutates in place
-  encrypt_bfv(a, rlwe_sk, coeff_count, q, t, sigma, rng, a_encrypted);
-  encrypt_bfv(b, rlwe_sk, coeff_count, q, t, sigma, rng, b_encrypted);
-  server.ext_prod_mux(a_encrypted, b_encrypted, zero_gsw, result);
-  {
-    decrypt(result, rlwe_sk, coeff_count, q, t, result_pt);
-    BENCH_PRINT("Mux result: " << result_pt.data[0] << " " << result_pt.data[1] << " " << result_pt.data[2]);
-  }
+  RlwePt pt;
+  decrypt_rns(result, client.rlwe_sk_, coeff_count, qs, t, tables, pt);
+  BENCH_PRINT("K=" << qs.size() << " mux(RGSW(1), a, b) = b expected; got[0,1,2] = "
+                   << pt.data[0] << " " << pt.data[1] << " " << pt.data[2]);
+  BENCH_PRINT("expected b[0..2] = " << b[0] << " " << b[1] << " " << b[2]);
   PRINT_BAR;
 }

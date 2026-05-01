@@ -26,7 +26,7 @@ public:
   }
 
   RlwePt decrypt_ct(const RlweCt &ct);
-  // Produce the per-client GSW key (encryption of -s under the data modulus) in
+  // Produce the per-client GSW key (encryption of s under the data modulus) in
   // its final flat NTT layout, ready to hand to PirServer::set_client_gsw_key.
   GSWCt generate_gsw_from_key();
 
@@ -55,17 +55,15 @@ private:
   PirParams pir_params_;
   std::mt19937_64 rng_;       // per-client PRNG for noise sampling
   RlweSk rlwe_sk_;            // ternary sk, NTT form under q
-  std::vector<uint64_t> sk_ntt_small_q_; // secret key in NTT form under small_q
 
   // Gets the query indices for a given plaintext
   std::vector<size_t> get_query_indices(size_t pt_idx);
 
   // Populate sk_ntt_small_q_ by rewriting rlwe_sk_ from old_q to small_q
   // (ternary sk has -1 ≡ q-1; we need -1 ≡ small_q-1).
-  void init_sk_small_q();
+  std::vector<uint64_t> get_sk_ntt_small_q(uint64_t old_q, uint64_t small_q) const;
 
 };
-
 
 
 
