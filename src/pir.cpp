@@ -42,7 +42,10 @@ PirParams::PirParams()
   // =============== Database shape calculation ===============
   size_t target_num_pt = DBConsts::DB_SIZE_MB * 1024 * 1024 / get_pt_size();
   DEBUG_PRINT("target_num_pt: " << target_num_pt);
-  auto [fst_dim_sz, num_dims] = utils::calculate_db_shape(target_num_pt, l_ep_, DBConsts::TREE_HEIGHT);
+  // Per-dim query slot count: l_ep_ for MP, K*l_ep_ for RNS-hybrid. The
+  // variant decision is constexpr; use the helper that already encodes it.
+  auto [fst_dim_sz, num_dims] = utils::calculate_db_shape(
+      target_num_pt, get_query_per_dim(), DBConsts::TREE_HEIGHT);
   fst_dim_sz_ = fst_dim_sz;
   num_dims_ = num_dims;
   DEBUG_PRINT("fst_dim_sz: " << fst_dim_sz_ << ", num_dims: " << num_dims_);
@@ -52,7 +55,7 @@ PirParams::PirParams()
 
 const size_t PirParams::get_ct_mod_width() const {
   size_t ct_mod_width = 0;
-  for (size_t i = 0; i < get_rns_mod_cnt(); ++i) {
+  for (size_t i = 0; i < K(); ++i) {
     ct_mod_width += rns_mod_bits_[i];
   }
   return ct_mod_width;
@@ -109,7 +112,7 @@ void PirParams::print_params() const {
   print_field_num("log(q)", get_ct_mod_width());
   print_field_num("log(t)", static_cast<int>(std::ceil(std::log2(plain_mod_))));
 
-  if (get_rns_mod_cnt() == 1) {
+  if (K() == 1) {
     print_field_num("log(small_q)", static_cast<int>(std::ceil(std::log2(small_q_))));
   }
 

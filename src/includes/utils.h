@@ -168,7 +168,7 @@ std::string uint128_to_string(uint128_t value);
  * small, i.e., the first row is B^(log q / log B -1), the final row is 1.
  */
 std::vector<std::vector<uint64_t>>
-gsw_gadget(size_t l, uint64_t base_log2, size_t rns_mod_cnt,
+gsw_gadget(size_t l, uint64_t base_log2, size_t K,
            const std::vector<uint64_t> &rns_mods);
 
 // Scaled gadget for approximate decomposition (TFHE-rs style).
@@ -179,7 +179,7 @@ gsw_gadget(size_t l, uint64_t base_log2, size_t rns_mod_cnt,
 // When drop == 0 this returns exactly gsw_gadget(...).
 std::vector<std::vector<uint64_t>>
 gsw_gadget_approx(size_t l, uint64_t base_log2, size_t q_bits,
-                  size_t rns_mod_cnt,
+                  size_t K,
                   const std::vector<uint64_t> &rns_mods);
 
 // Generate a prime that is bit_width long
@@ -188,7 +188,7 @@ std::uint64_t generate_prime(size_t bit_width);
 // Generate one NTT-friendly prime per bit width.  Each returned prime p satisfies
 //   p < 2^bit_width,  p ≡ 1 (mod 2N),  p is the largest such prime not already
 // returned for the same bit width.  Replaces SEAL's CoeffModulus::Create.
-std::vector<uint64_t> generate_ntt_friendly_primes(const std::vector<int> &bit_widths,
+std::vector<uint64_t> generate_ntt_friendly_primes(const std::vector<size_t> &bit_widths,
                                                    size_t N);
 
 // New functions for plaintext handling

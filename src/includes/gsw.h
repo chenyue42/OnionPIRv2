@@ -42,20 +42,28 @@ class GSWEval {
                           LogContext context = LogContext::GENERIC);
 
     /*!
-      Performs a gadget decomposition of a size 2 BFV ciphertext into 2 sets of
-      rows of l polynomials (the 2 sets are concatenated into a single vector of
-      vectors). Each polynomial coefficient encodes the value congruent to the
-      original ciphertext coefficient modulus the value of base^(l-row).
-      @param ct - input BFV ciphertext in NTT form. Should be of size 2.
-      @param output - output to store the decomposed ciphertext as a vector of
-      vectors of polynomial coefficients
+      MP-gadget decomposition (K>=2). Composes the per-coefficient RNS values
+      to a multi-precision integer, extracts unsigned base-B digits, then
+      decomposes back to RNS. Emits 2 * l_ rows; row p (MSB-first within each
+      half) holds the digit at exponent l_-1-p.
+      @param ct - input BFV ciphertext (coefficient form, K-limb).
+      @param output - decomposed rows, each K*N uint64 in limb-major layout.
     */
-    void decomp_rlwe(RlweCt const &ct, std::vector<std::vector<uint64_t>> &output,
-                         LogContext context = LogContext::GENERIC);
+    void decomp_rlwe_mp(RlweCt const &ct, std::vector<std::vector<uint64_t>> &output,
+                        LogContext context = LogContext::GENERIC);
 
-    // Similar to decomp_rlwe. Use this when rn_mod_cnt = 1. It avoids RNS decomposition and uses faster right shift.
+    // Similar to decomp_rlwe_mp. Use this when rn_mod_cnt = 1. Skips the
+    // RNS<->MP conversions; signed-digit decomposition directly under q.
     void decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<uint64_t>> &output,
                                    LogContext context = LogContext::GENERIC);
+
+    // RNS-variant decomposition: per-limb signed gadget. Emits 2 * K * l_ rows.
+    // Row index = half * (K * l_) + k_src * l_ + p_idx, with p_idx=0 holding
+    // the most-significant digit B_{k_src}^(l_-1). Each row has K*N values:
+    // the signed digit rendered under each output limb.
+    void decomp_rlwe_rns(RlweCt const &ct,
+                         std::vector<std::vector<uint64_t>> &output,
+                         LogContext context = LogContext::GENERIC);
 
     // Transform decomposed coefficients to NTT form
     void decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,
@@ -76,7 +84,7 @@ class GSWEval {
       Encrypt a plaintext polynomial as a full GSW ciphertext in NTT form.
       Single-mod only. Produces the flat layout consumed by external_product:
       2*l_ rows, each row = [c0 || c1] of size 2*N (NTT form, mod q).
-      @param plaintext - polynomial of length N (or N*rns_mod_cnt, but
+      @param plaintext - polynomial of length N (or N*K, but
                          only the single-mod case is supported).
       @param sk        - NTT-form ternary secret key.
       @param rng       - randomness source for a, e.

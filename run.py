@@ -16,16 +16,16 @@ BINARY = os.path.join(BUILD_DIR, "Onion-PIR")
 CONFIG_ALIASES = {
     "k1":           "CONFIG_N2048_M60",
     "n2048_m60":    "CONFIG_N2048_M60",
-    "k2":           "CONFIG_N2048_M28_28",
-    "n2048_m28_28": "CONFIG_N2048_M28_28",
+    "k2":           "CONFIG_N2048_M29_29",
+    "n2048_m28_28": "CONFIG_N2048_M29_29",
     # N=4096 configs are disabled in database_constants.h for this draft.
     # "n4096_m60_60": "CONFIG_N4096_M60_60",
     # "k4":           "CONFIG_N4096_M28_28_28_28",
 }
 
 VARIANT_ALIASES = {
-    "mp":         "VARIANT_MP",
-    "rns_hybrid": "VARIANT_RNS_HYBRID",
+    "mp":  "VARIANT_MP",   # Multi-Precision gadget (CRT-compose to single MP int)
+    "rns": "VARIANT_RNS",  # Residue Number System gadget (per-limb digits)
 }
 
 

@@ -94,6 +94,53 @@ void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
   }
 }
 
+void per_limb_signed_decomp(const uint64_t *poly, size_t N, size_t l,
+                            const std::vector<uint64_t> &qs,
+                            const std::vector<size_t> &base_log2_per_limb,
+                            std::vector<std::vector<uint64_t>> &out_rows) {
+  const size_t K = qs.size();
+  assert(base_log2_per_limb.size() == K);
+  const size_t row_size = K * N;
+  const size_t start = out_rows.size();
+  out_rows.resize(start + K * l, std::vector<uint64_t>(row_size, 0));
+
+  std::vector<int64_t> sdig(l * N);  // signed digits for one source limb
+  uint64_t buf[16];                  // l <= 16 in all current configs
+  for (size_t k_src = 0; k_src < K; ++k_src) {
+    const uint64_t qk = qs[k_src];
+    const uint64_t half_qk = qk >> 1;
+    const size_t base_log2_k = base_log2_per_limb[k_src];
+    const uint64_t *src = poly + k_src * N;
+
+    // Decompose poly[k_src] under base B_{k_src}, store as int64.
+    for (size_t coef = 0; coef < N; ++coef) {
+      signed_gadget_decompose(src[coef], base_log2_k, qk, buf, l);
+      for (size_t i = 0; i < l; ++i) {
+        const uint64_t u = buf[i];
+        sdig[i * N + coef] = (u > half_qk)
+            ? static_cast<int64_t>(u) - static_cast<int64_t>(qk)
+            : static_cast<int64_t>(u);
+      }
+    }
+
+    // Emit l rows MSB-first. Row at p_idx=0 holds digit l-1 (B^(l-1)).
+    for (size_t p_idx = 0; p_idx < l; ++p_idx) {
+      const size_t i_digit = l - 1 - p_idx;
+      const size_t row_idx = start + k_src * l + p_idx;
+      const int64_t *src_dig = sdig.data() + i_digit * N;
+      for (size_t j = 0; j < K; ++j) {
+        const uint64_t qj = qs[j];
+        uint64_t *out_j = out_rows[row_idx].data() + j * N;
+        for (size_t coef = 0; coef < N; ++coef) {
+          const int64_t s = src_dig[coef];
+          out_j[coef] = (s >= 0) ? static_cast<uint64_t>(s)
+                                 : qj - static_cast<uint64_t>(-s);
+        }
+      }
+    }
+  }
+}
+
 // Gadget base log: floor(log_q_data / L_KS) + 1.
 // The +1 guarantees B^L_KS > q, giving the signed-digit decomposition
 // enough headroom to absorb carries without leaving a non-zero residue in
@@ -106,7 +153,7 @@ static inline size_t bv_base_log2(const PirParams &pir_params) {
   return q_bits / L_KS + 1;
 }
 
-// RNS-hybrid per-limb base_log2: same formula as bv_base_log2 but using
+// RNS per-limb base_log2: same formula as bv_base_log2 but using
 // q_k bit width instead of total log Q. Each limb gets its own L_KS-digit
 // signed gadget decomposition with B_k = 2^base_log2_k.
 static inline size_t bv_base_log2_per_limb(const PirParams &pir_params, size_t k) {
@@ -263,8 +310,8 @@ BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
   const double sigma = pir_params.get_noise_std_dev();
   constexpr size_t N = DBConsts::PolyDegree;
   constexpr size_t K = DBConsts::RnsMods.size();
-  static_assert(K <= 2 || DBConsts::Decomp == DBConsts::DecompVariant::RnsHybrid,
-                "K >= 3 requires VARIANT_RNS_HYBRID");
+  static_assert(K <= 2 || DBConsts::Decomp == DBConsts::DecompVariant::RNS,
+                "K >= 3 requires VARIANT_RNS");
 
   const auto &qs = pir_params.get_rns_mods();
 
@@ -293,7 +340,7 @@ BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
       build_ksk_row_rns(msg, sk, qs, sigma, rng, ksk.cts[i]);
     }
   } else {
-    // RNS-hybrid: K · L_KS rows. Row (k, i) encrypts (g_k · B_k^i) · σ(s).
+    // RNS: K · L_KS rows. Row (k, i) encrypts (g_k · B_k^i) · σ(s).
     // Since g_k ≡ 1 mod q_k and g_k ≡ 0 mod q_{j!=k}, the message under
     // each output limb j is: (j == k) ? (B_k^i mod q_j) · σ(s)_j : 0.
     ksk.cts.resize(K * L_KS);
@@ -500,11 +547,11 @@ static void bv_apply_galois_inplace_k2(RlweCt &ct, uint32_t galois_k,
   std::memcpy(ct.data(1), delta_a.data(), 2 * N * sizeof(uint64_t));
 }
 
-// RNS-hybrid: per-limb signed gadget decomposition. Each source limb k decomposes
+// RNS: per-limb signed gadget decomposition. Each source limb k decomposes
 // independently with its own base B_k, producing K · L_KS digits. KSK has K · L_KS
 // rows where row (k, i) encrypts (g_k · B_k^i) · σ(s) — under limb j, this is
 // B_k^i · σ(s)_j when j == k, and 0 when j != k.
-static void bv_apply_galois_inplace_rns_hybrid(RlweCt &ct, uint32_t galois_k,
+static void bv_apply_galois_inplace_rns(RlweCt &ct, uint32_t galois_k,
                                                const BvKeySwitchKey &key,
                                                const PirParams &pir_params) {
   constexpr size_t N = DBConsts::PolyDegree;
@@ -584,8 +631,8 @@ void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
 
   constexpr size_t K = DBConsts::RnsMods.size();
 
-  if constexpr (DBConsts::Decomp == DBConsts::DecompVariant::RnsHybrid) {
-    bv_apply_galois_inplace_rns_hybrid(ct, galois_k, key, pir_params);
+  if constexpr (DBConsts::Decomp == DBConsts::DecompVariant::RNS) {
+    bv_apply_galois_inplace_rns(ct, galois_k, key, pir_params);
   } else if constexpr (K == 1) {
     bv_apply_galois_inplace_k1(ct, galois_k, key, pir_params);
   } else {

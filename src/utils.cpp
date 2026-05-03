@@ -174,11 +174,11 @@ std::string utils::uint128_to_string(uint128_t value) {
 
 
 
-std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log2, size_t rns_mod_cnt,
+std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log2, size_t K,
                 const std::vector<uint64_t> &rns_mods) {
   // Create RGSW gadget.
-  std::vector<std::vector<uint64_t>> gadget(rns_mod_cnt, std::vector<uint64_t>(l));
-  for (size_t i = 0; i < rns_mod_cnt; i++) {
+  std::vector<std::vector<uint64_t>> gadget(K, std::vector<uint64_t>(l));
+  for (size_t i = 0; i < K; i++) {
     const uint64_t mod = rns_mods[i];
     uint64_t pow = 1;
     for (int j = l - 1; j >= 0; j--) {
@@ -191,14 +191,14 @@ std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log
 
 std::vector<std::vector<uint64_t>>
 utils::gsw_gadget_approx(size_t l, uint64_t base_log2, size_t q_bits,
-                         size_t rns_mod_cnt,
+                         size_t K,
                          const std::vector<uint64_t> &rns_mods) {
   const size_t rep_bits = l * base_log2;
   assert(rep_bits <= q_bits);
   const size_t drop = q_bits - rep_bits;
 
-  std::vector<std::vector<uint64_t>> gadget(rns_mod_cnt, std::vector<uint64_t>(l));
-  for (size_t i = 0; i < rns_mod_cnt; i++) {
+  std::vector<std::vector<uint64_t>> gadget(K, std::vector<uint64_t>(l));
+  for (size_t i = 0; i < K; i++) {
     const uint64_t mod = rns_mods[i];
     // Seed gadget[l-1] = 2^drop mod q (bottom row is B^0 · 2^drop).
     uint64_t pow = 1 % mod;
@@ -236,16 +236,16 @@ std::uint64_t utils::generate_prime(size_t bit_width) {
 }
 
 std::vector<uint64_t> utils::generate_ntt_friendly_primes(
-    const std::vector<int> &bit_widths, size_t N) {
+    const std::vector<size_t> &bit_widths, size_t N) {
   // For each bit width bw, return the largest prime p < 2^bw with p ≡ 1 mod 2N.
   // If the same bit width appears more than once, return distinct primes by
   // continuing the downward scan from where we stopped last time.
   const uint64_t step = 2 * static_cast<uint64_t>(N);
-  std::unordered_map<int, uint64_t> next_candidate;
+  std::unordered_map<size_t, uint64_t> next_candidate;
   std::vector<uint64_t> out;
   out.reserve(bit_widths.size());
 
-  for (int bw : bit_widths) {
+  for (size_t bw : bit_widths) {
     if (bw < 2 || bw > 63)
       throw std::invalid_argument("bit width out of range [2, 63]");
 

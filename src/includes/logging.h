@@ -78,6 +78,39 @@ enum class LogContext {
     OTHER_DIM_MUX   // Operations within other_dim_mux
 };
 
+// Keys used by external_product / decomp_* / decomp_to_ntt, indexed by
+// LogContext. Centralizes the if/else-on-context dispatch so callers just do
+//   const auto& k = ext_log_keys(context);
+//   TIME_START(k.decomp);
+struct ExtLogKeys {
+  const char* decomp;          // decomp_rlwe wrapper
+  const char* matmul;          // extern product matmul
+  const char* compose;         // CRT compose (MP path)
+  const char* right_shift;     // right-shift step (MP / single-mod path)
+  const char* decomp_inner;    // decompose_mp_to_rns / per-limb decomp
+  const char* ntt;             // decomp_to_ntt
+};
+
+inline const ExtLogKeys& ext_log_keys(LogContext c) {
+  static constexpr ExtLogKeys QTG{
+      QTG_DECOMP_RLWE_TIME, QTG_EXTERN_PROD_MAT_MULT_TIME,
+      QTG_EXTERN_COMPOSE,   QTG_RIGHT_SHIFT_TIME,
+      QTG_EXTERN_DECOMP,    QTG_EXTERN_NTT_TIME};
+  static constexpr ExtLogKeys ODM{
+      ODM_DECOMP_RLWE_TIME, ODM_EXTERN_PROD_MAT_MULT_TIME,
+      ODM_EXTERN_COMPOSE,   ODM_RIGHT_SHIFT_TIME,
+      ODM_EXTERN_DECOMP,    ODM_EXTERN_NTT_TIME};
+  static constexpr ExtLogKeys GEN{
+      DECOMP_RLWE_TIME, EXTERN_PROD_MAT_MULT_TIME,
+      EXTERN_COMPOSE,   RIGHT_SHIFT_TIME,
+      EXTERN_DECOMP,    EXTERN_NTT_TIME};
+  switch (c) {
+    case LogContext::QUERY_TO_GSW:  return QTG;
+    case LogContext::OTHER_DIM_MUX: return ODM;
+    default:                        return GEN;
+  }
+}
+
 // Hierarchical structure for pretty result
 // Map structure: Parent -> Children
 const std::unordered_map<std::string, std::vector<std::string>> LOG_HIERARCHY = {

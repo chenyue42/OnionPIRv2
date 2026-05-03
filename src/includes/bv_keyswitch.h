@@ -24,7 +24,7 @@
 //   σ_k(ct) = (σ_k(c0) + Σ d_i · ksk.b[i],  Σ d_i · ksk.a[i])
 // where d_i = gadget_decompose(σ_k(c1))[i] and all products are in NTT form.
 //
-// For the currently active single-limb configuration, rns_mod_cnt == 1 and
+// For the currently active single-limb configuration, K == 1 and
 // gadget decomposition is a straightforward bit-shift on uint64 coefficients.
 
 namespace bvks {
@@ -34,10 +34,10 @@ namespace bvks {
 constexpr size_t L_KS = DBConsts::L_KS;
 
 // A single RLWE ciphertext under the data modulus, stored in NTT form.
-// Layout: rns_mod_cnt * N uint64s per polynomial component.
+// Layout: K * N uint64s per polynomial component.
 struct BvRlweCt {
-  std::vector<uint64_t> a; // size = rns_mod_cnt * N
-  std::vector<uint64_t> b; // size = rns_mod_cnt * N
+  std::vector<uint64_t> a; // size = K * N
+  std::vector<uint64_t> b; // size = K * N
 };
 
 // Key-switching key for one automorphism σ_k.
@@ -123,6 +123,22 @@ void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
                                     uint64_t q, size_t q_bits,
                                     uint64_t *out, size_t num_digits);
 
+// RNS-variant per-limb signed gadget decomposition for the GSW external product.
+// Decomposes each limb of `poly` (size K * N, limb-major) independently using
+// its own base B_k = 2^base_log2_per_limb[k], then renders each signed digit
+// under EVERY output limb (BV-style cross-limb rendering — keeps the row's
+// noise contribution residue-consistent across limbs so CRT-compose stays
+// bounded; mirrors bv_apply_galois_inplace_rns).
+//
+// Appends K * l rows to `out_rows`. Row index within the appended block:
+//   k_src * l + p_idx, with p_idx=0 holding the most-significant digit (B^(l-1)).
+// Each row has K*N values: row[j*N + coef] = signed digit (k_src, l-1-p_idx) of
+// poly[k_src*N + coef] in base B_{k_src}, rendered as a value in [0, q_j).
+void per_limb_signed_decomp(const uint64_t *poly, size_t N, size_t l,
+                            const std::vector<uint64_t> &qs,
+                            const std::vector<size_t> &base_log2_per_limb,
+                            std::vector<std::vector<uint64_t>> &out_rows);
+
 // ============================================================================
 // Key-switching operation (server side)
 // ============================================================================
@@ -131,7 +147,7 @@ void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
 // using BV. Modifies `ct` in place. `ct` must be in coefficient form on entry
 // and remains in coefficient form on return.
 //
-// Operates on all rns_mod_cnt limbs.
+// Operates on all K limbs.
 void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
                              const BvKeySwitchKey &key,
                              const PirParams &pir_params);

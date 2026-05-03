@@ -30,7 +30,7 @@ PirServer::PirServer(const PirParams &pir_params)
       key_gsw_(pir_params, pir_params.get_l_key(), pir_params.get_base_log2_key()),
       data_gsw_(pir_params, pir_params.get_l(), pir_params.get_base_log2()) {
   // after NTT, each database polynomial coefficient will be in mod q. Hence,
-  // each pt coefficient is represented by rns_mod_cnt many uint64_t, same as the ciphertext.
+  // each pt coefficient is represented by K many uint64_t, same as the ciphertext.
   const size_t db_elem_cnt = num_pt_ * pir_params_.get_coeff_val_cnt();
   db_aligned_ = make_unique_aligned<db_coeff_t, 64>(db_elem_cnt);
   fill_inter_res();
@@ -61,7 +61,7 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
   // Pass 1: fill random coefficients and record requested entries
   TIME_ONCE_START("DB random fill");
   const auto &rns_mods = pir_params_.get_rns_mods();
-  const size_t rns_mod_cnt = rns_mods.size();
+  const size_t K = rns_mods.size();
   std::vector<RlwePt> plaintexts(num_pt_);
   for (size_t poly_id = 0; poly_id < num_pt_; ++poly_id) {
     plaintexts[poly_id].data.resize(coeff_count);
@@ -82,10 +82,10 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
   TIME_ONCE_START("DB NTT + realign");
   constexpr size_t TILE = 8;
   // K limbs interleaved per tile: stage[k][p] of length coeff_count.
-  std::vector<uint64_t> stage(rns_mod_cnt * TILE * coeff_count);
+  std::vector<uint64_t> stage(K * TILE * coeff_count);
   for (size_t pb = 0; pb < num_pt_; pb += TILE) {
     const size_t bs = std::min(TILE, num_pt_ - pb);
-    for (size_t k = 0; k < rns_mod_cnt; ++k) {
+    for (size_t k = 0; k < K; ++k) {
       const uint64_t qk = rns_mods[k];
       uint64_t *limb_base = stage.data() + k * TILE * coeff_count;
       for (size_t p = 0; p < bs; ++p) {
@@ -98,7 +98,7 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
       }
     }
     // Transpose-write each limb to its slot in db_aligned_.
-    for (size_t k = 0; k < rns_mod_cnt; ++k) {
+    for (size_t k = 0; k < K; ++k) {
       uint64_t *limb_base = stage.data() + k * TILE * coeff_count;
       for (size_t coeff_idx = 0; coeff_idx < coeff_count; ++coeff_idx) {
         db_coeff_t *out = db_aligned_.get() +
@@ -120,13 +120,13 @@ void PirServer::prep_query(std::vector<RlweCt> &fst_dim_query,
   const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt(); // 4096
   const size_t slice_sz = fst_dim_sz * 2;
   const auto &rns_mods = pir_params_.get_rns_mods();
-  const size_t rns_mod_cnt = rns_mods.size();
+  const size_t K = rns_mods.size();
   constexpr size_t N = DBConsts::PolyDegree;
  
   // transform the selection vector to ntt form
   for (size_t i = 0; i < fst_dim_query.size(); i++) {
     RlweCt &ct = fst_dim_query[i];
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+    for (size_t mod_id = 0; mod_id < K; mod_id++) {
       utils::ntt_fwd(ct.c0.data() + mod_id * N, N, rns_mods[mod_id]);
       utils::ntt_fwd(ct.c1.data() + mod_id * N, N, rns_mods[mod_id]);
     }
@@ -174,7 +174,7 @@ std::vector<RlweCt>
 PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
   const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();  // number of plaintexts in the first dimension
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();  // number of plaintexts in the other dimensions
-  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  const size_t K = pir_params_.K();
   const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt(); // polydegree * RNS moduli count
   const size_t one_ct_sz = 2 * coeff_val_cnt; // Ciphertext has two polynomials
   const auto &rns_mods = pir_params_.get_rns_mods();
@@ -201,7 +201,7 @@ PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
 
   // Per-level modulus: level lvl spans coefficients of limb (lvl / N).
   std::vector<uint64_t> level_qs(coeff_val_cnt);
-  for (size_t k = 0; k < rns_mod_cnt; ++k) {
+  for (size_t k = 0; k < K; ++k) {
     std::fill(level_qs.begin() + k * N, level_qs.begin() + (k + 1) * N, rns_mods[k]);
   }
   TIME_START(CORE_TIME);
@@ -221,10 +221,10 @@ PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
 
 void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *__restrict inter_res) {
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
-  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  const size_t K = pir_params_.K();
   constexpr size_t coeff_count = DBConsts::PolyDegree;
   const auto &rns_mods = pir_params_.get_rns_mods();
-  const size_t coeff_val_cnt = coeff_count * rns_mod_cnt;
+  const size_t coeff_val_cnt = coeff_count * K;
   const size_t inter_padding = other_dim_sz * 2;  // distance between coefficients in inter_res
 
   // We need to unroll the loop to process multiple ciphertexts at once.
@@ -259,7 +259,7 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
     std::array<size_t, unroll_factor> ct_idx1    = {0};  // write index for poly1
 
     // Process each modulus and coefficient.
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+    for (size_t mod_id = 0; mod_id < K; mod_id++) {
       const uint64_t q = rns_mods[mod_id];
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         #pragma unroll
@@ -281,7 +281,7 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
     // Mark each ciphertext as being in NTT form and then transform back.
     #pragma unroll
     for (size_t idx = 0; idx < unroll_factor; idx++) {
-      for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+      for (size_t mod_id = 0; mod_id < K; mod_id++) {
         utils::ntt_inv(cts[idx].c0.data() + mod_id * coeff_count, coeff_count, rns_mods[mod_id]);
         utils::ntt_inv(cts[idx].c1.data() + mod_id * coeff_count, coeff_count, rns_mods[mod_id]);
       }
@@ -309,7 +309,7 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
     size_t ct_idx1 = 0;     // write index for poly1
 
     // Process each modulus and coefficient
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+    for (size_t mod_id = 0; mod_id < K; mod_id++) {
       const uint64_t q = rns_mods[mod_id];
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         // Process polynomial 0
@@ -327,7 +327,7 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
     }
 
     // Mark ciphertext as being in NTT form and then transform back
-    for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
+    for (size_t mod_id = 0; mod_id < K; mod_id++) {
       utils::ntt_inv(ct.c0.data() + mod_id * coeff_count, coeff_count, rns_mods[mod_id]);
       utils::ntt_inv(ct.c1.data() + mod_id * coeff_count, coeff_count, rns_mods[mod_id]);
     }
@@ -442,7 +442,8 @@ std::vector<RlweCt>
 PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
   // ============== parameters
   const size_t useful_cnt = pir_params_.get_fst_dim_sz() +
-                            pir_params_.get_l() * (pir_params_.get_num_dims() - 1); // u
+                            pir_params_.get_query_per_dim() *
+                                (pir_params_.get_num_dims() - 1); // u
   const size_t expan_height = pir_params_.get_expan_height(); // h
   const size_t capacity = size_t{1} << expan_height;          // 2^h
   const auto &bv_galois_key = client_bv_galois_keys_.at(client_id);
@@ -547,12 +548,15 @@ RlweCt PirServer::make_query(const size_t client_id, RlweCt &query) {
 
   // Reconstruct RGSW queries
   TIME_START(CONVERT_TIME);
+  const size_t query_per_dim = pir_params_.get_query_per_dim();
   std::vector<GSWCt> gsw_vec(pir_params_.get_num_dims() - 1); // GSW ciphertexts
   if (pir_params_.get_num_dims() != 1) {  // if we do need futher dimensions
     for (size_t i = 1; i < pir_params_.get_num_dims(); i++) {
-      std::vector<RlweCt> lwe_vector; // RLWE ciphertexts, size l. Reconstructed as a single RGSW ciphertext.
-      for (size_t k = 0; k < DBConsts::L_EP; k++) {
-        auto ptr = pir_params_.get_fst_dim_sz() + (i - 1) * DBConsts::L_EP + k;
+      // RLWE ciphertexts gathered per dim. Count is l (MP) or K*l (RNS-hybrid).
+      std::vector<RlweCt> lwe_vector;
+      lwe_vector.reserve(query_per_dim);
+      for (size_t k = 0; k < query_per_dim; ++k) {
+        auto ptr = pir_params_.get_fst_dim_sz() + (i - 1) * query_per_dim + k;
         lwe_vector.push_back(query_vector[ptr]);
       }
       // Converting the BFV ciphertexts to GSW ciphertext by doing external product
@@ -646,9 +650,9 @@ size_t PirServer::save_resp_to_stream(const RlweCt &response,
 
 
 void PirServer::fill_inter_res() {
-  const size_t rns_mod_cnt = pir_params_.get_rns_mod_cnt();
+  const size_t K = pir_params_.K();
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
-  const size_t elem_cnt = other_dim_sz * DBConsts::PolyDegree * rns_mod_cnt * 2;
+  const size_t elem_cnt = other_dim_sz * DBConsts::PolyDegree * K * 2;
   inter_res_.resize(elem_cnt);
 }
 
