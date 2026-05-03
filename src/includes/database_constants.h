@@ -8,9 +8,9 @@ typedef unsigned __int128 uint128_t;
 // ============================================================================
 // Build-time configuration selectors (orthogonal axes)
 // ============================================================================
-// Three independent macros, each with a default and an `#error` for unknown
+// Two independent macros, each with a default and an `#error` for unknown
 // values. Override on the cmake/compile line with e.g.
-//   -DACTIVE_CONFIG=CONFIG_N2048_M28_28 -DKS_VARIANT=KS_BV -DEP_VARIANT=EP_VARIANT
+//   -DACTIVE_CONFIG=CONFIG_N2048_M28_28 -DVARIANT=VARIANT_MP
 // ----------------------------------------------------------------------------
 
 // --- 1) Parameter set ---
@@ -19,59 +19,45 @@ typedef unsigned __int128 uint128_t;
 // of the prime widths. Status legend below: ✓ working end-to-end, △ partial,
 // ✗ not yet implemented.
 //
-//   CONFIG_N2048_M60           K=1, N=2048,  log Q = 60.   ✓ PIR works (KS_BV).
-//   CONFIG_N2048_M28_28        K=2, N=2048,  log Q ≈ 56.   ✓ PIR works (KS_BV, signed MP-gadget).
-//   CONFIG_N4096_M60_60        K=2, N=4096,  log Q ≈ 120.  △ K-aware path runs; tighter noise budget.
-//   CONFIG_N4096_M28_28_28_28  K=4, N=4096,  log Q ≈ 112.  ✗ RNS-hybrid only (per-limb math); not wired yet.
+//   CONFIG_N2048_M60           K=1, N=2048,  log Q = 60.   ✓ PIR works (VARIANT_MP).
+//   CONFIG_N2048_M28_28        K=2, N=2048,  log Q ≈ 56.   ✓ PIR works (VARIANT_MP, signed MP-gadget).
+//
+// N=4096 configs are commented out for now — the active draft only targets N=2048.
+//   CONFIG_N4096_M60_60        K=2, N=4096,  log Q ≈ 120.  (disabled)
+//   CONFIG_N4096_M28_28_28_28  K=4, N=4096,  log Q ≈ 112.  (disabled, needs RNS-hybrid)
 #define CONFIG_N2048_M60          0
 #define CONFIG_N2048_M28_28       1
-#define CONFIG_N4096_M60_60       2
-#define CONFIG_N4096_M28_28_28_28 3
+// #define CONFIG_N4096_M60_60       2
+// #define CONFIG_N4096_M28_28_28_28 3
 #ifndef ACTIVE_CONFIG
 #define ACTIVE_CONFIG CONFIG_N2048_M60
 #endif
 
-// --- 2) Keyswitch variant ---
+// --- 2) Decomposition variant (covers both keyswitch and external product) ---
 // Note: "RnsHybrid" here means per-limb digit extraction with gadget
 // {g_k · B_k^i}, NOT the BV+GHS blend that SEAL/OpenFHE call "Hybrid".
 //
-//   KS_BV          BV-style keyswitch (MP-gadget at K>1: CRT-compose c1 to a
-//                  single MP integer, signed base-B decomposition, NTT each
-//                  digit per limb against the KSK). ✓ K=1, ✓ K=2.
-//   KS_RNS_HYBRID  Per-limb digit extraction with gadget {g_k · B_k^i}.
-//                  ✗ Not implemented yet — selecting this trips static_assert.
-#define KS_BV          0
-#define KS_RNS_HYBRID  1
-#ifndef KS_VARIANT
-#define KS_VARIANT KS_BV
-#endif
+//   VARIANT_MP          MP-gadget at K>1: CRT-compose to a single MP integer,
+//                       signed base-B decomposition. ✓ K=1, ✓ K=2.
+//   VARIANT_RNS_HYBRID  Per-limb signed digit extraction with gadget
+//                       {g_k · B_k^i}. Smaller noise, more NTTs.
+#define VARIANT_MP          0
+#define VARIANT_RNS_HYBRID  1
 
-// --- 3) External-product variant ---
-#define EP_MP_GADGET   0   // CRT compose → global digit decomp → CRT decompose
-#define EP_RNS_HYBRID  1   // per-limb digit extraction, gadget {g_k · B_k^i}
-#ifndef EP_VARIANT
-#define EP_VARIANT EP_MP_GADGET
+#ifndef VARIANT
+#define VARIANT VARIANT_MP
 #endif
 
 namespace DBConsts {
 
-  enum class KsVariant { BV, RnsHybrid };
-  enum class EpVariant { MpGadget, RnsHybrid };
+  enum class DecompVariant { MP, RnsHybrid };
 
-#if KS_VARIANT == KS_BV
-  constexpr KsVariant Ks = KsVariant::BV;
-#elif KS_VARIANT == KS_RNS_HYBRID
-  constexpr KsVariant Ks = KsVariant::RnsHybrid;
+#if VARIANT == VARIANT_MP
+  constexpr DecompVariant Decomp = DecompVariant::MP;
+#elif VARIANT == VARIANT_RNS_HYBRID
+  constexpr DecompVariant Decomp = DecompVariant::RnsHybrid;
 #else
-  #error "Unknown KS_VARIANT"
-#endif
-
-#if EP_VARIANT == EP_MP_GADGET
-  constexpr EpVariant Ep = EpVariant::MpGadget;
-#elif EP_VARIANT == EP_RNS_HYBRID
-  constexpr EpVariant Ep = EpVariant::RnsHybrid;
-#else
-  #error "Unknown EP_VARIANT"
+  #error "Unknown VARIANT"
 #endif
 
   // ==========================================================================
@@ -79,6 +65,13 @@ namespace DBConsts {
   // ==========================================================================
   constexpr size_t DB_SIZE_MB = 128;
   constexpr double NoiseStdDev = 2.55;  // matches SEAL-For-OnionPIR default
+
+  // First-dimension shape policy. See utils::calculate_db_shape.
+  //   true : fst_dim_sz = largest power of two ≤ slack (OnionPIRv1 hypercube).
+  //   false: fst_dim_sz = slack (every leftover expansion slot; non-power-of-2).
+  // Tight packing raises DB capacity at the same num_dims but ups first-dim
+  // matmul work; pow-2 keeps matmul cheap at the cost of more dims.
+  constexpr bool FST_DIM_POW2 = true;
 
   // ==========================================================================
   // Per-config constants
@@ -91,7 +84,7 @@ namespace DBConsts {
   constexpr size_t L_KEY        = 8;
   constexpr size_t L_KS         = 8;
   constexpr size_t TREE_HEIGHT  = 10;
-  constexpr size_t PlainMod     = 13;
+  constexpr size_t PlainMod     = 14;
   constexpr size_t SmallQWidth  = 22;
   constexpr std::array<size_t, 1> RnsMods = {60};
 
@@ -106,27 +99,27 @@ namespace DBConsts {
   constexpr size_t SmallQWidth  = 25;
   constexpr std::array<size_t, 2> RnsMods = {28, 28};
 
-#elif ACTIVE_CONFIG == CONFIG_N4096_M60_60
-  // K=2, log Q ≈ 120 bits. Larger N for matching depth budget.
-  constexpr size_t PolyDegree   = 4096;
-  constexpr size_t L_EP         = 5;
-  constexpr size_t L_KEY        = 8;
-  constexpr size_t L_KS         = 8;
-  constexpr size_t TREE_HEIGHT  = 10;
-  constexpr size_t PlainMod     = 25;
-  constexpr size_t SmallQWidth  = 50;
-  constexpr std::array<size_t, 2> RnsMods = {60, 60};
-
-#elif ACTIVE_CONFIG == CONFIG_N4096_M28_28_28_28
-  // K=4, total Q ≈ 120 bits. Per-limb math only — requires EP_RNS_HYBRID.
-  constexpr size_t PolyDegree   = 4096;
-  constexpr size_t L_EP         = 5;
-  constexpr size_t L_KEY        = 8;
-  constexpr size_t L_KS         = 8;
-  constexpr size_t TREE_HEIGHT  = 10;
-  constexpr size_t PlainMod     = 30;
-  constexpr size_t SmallQWidth  = 50;
-  constexpr std::array<size_t, 4> RnsMods = {28, 28, 28, 28};
+// N=4096 configs disabled for the N=2048-only draft. Re-enable by
+// uncommenting the corresponding `#define` at the top of this file.
+// #elif ACTIVE_CONFIG == CONFIG_N4096_M60_60
+//   constexpr size_t PolyDegree   = 4096;
+//   constexpr size_t L_EP         = 5;
+//   constexpr size_t L_KEY        = 8;
+//   constexpr size_t L_KS         = 8;
+//   constexpr size_t TREE_HEIGHT  = 10;
+//   constexpr size_t PlainMod     = 40;
+//   constexpr size_t SmallQWidth  = 50;
+//   constexpr std::array<size_t, 2> RnsMods = {60, 60};
+//
+// #elif ACTIVE_CONFIG == CONFIG_N4096_M28_28_28_28
+//   constexpr size_t PolyDegree   = 4096;
+//   constexpr size_t L_EP         = 5;
+//   constexpr size_t L_KEY        = 8;
+//   constexpr size_t L_KS         = 8;
+//   constexpr size_t TREE_HEIGHT  = 10;
+//   constexpr size_t PlainMod     = 30;
+//   constexpr size_t SmallQWidth  = 50;
+//   constexpr std::array<size_t, 4> RnsMods = {28, 28, 28, 28};
 
 #else
   #error "Unknown ACTIVE_CONFIG"
@@ -145,21 +138,16 @@ namespace DBConsts {
   // Sanity guards on (config, variant) combinations
   // ==========================================================================
 
-  // K=1: both KS_RNS_HYBRID and EP_RNS_HYBRID degenerate to their non-hybrid
-  // counterparts. Forbid the redundant builds so benchmark cells don't double-count.
-  static_assert(!(RnsMods.size() == 1 && Ks == KsVariant::RnsHybrid),
-                "KS_RNS_HYBRID is a no-op at K=1; use KS_BV.");
-  static_assert(!(RnsMods.size() == 1 && Ep == EpVariant::RnsHybrid),
-                "EP_RNS_HYBRID is a no-op at K=1; use EP_MP_GADGET.");
+  // K=1: VARIANT_RNS_HYBRID degenerates to MP (single limb, no g_k factor).
+  // Forbid the redundant build so benchmark cells don't double-count.
+  static_assert(!(RnsMods.size() == 1 && Decomp == DecompVariant::RnsHybrid),
+                "VARIANT_RNS_HYBRID is a no-op at K=1; use VARIANT_MP.");
 
   // The MP-gadget path uses 128-bit multi-precision integers per coefficient
   // (compose_rns_to_mp / decompose_mp_to_rns in gsw.cpp). That works for K ≤ 2
-  // and total log Q ≤ 128 bits. K ≥ 3 needs Approach B (RNS-hybrid) for both
-  // KS and EP.
-  static_assert(!(RnsMods.size() >= 3 && Ep == EpVariant::MpGadget),
-                "EP_MP_GADGET only supports K ≤ 2; use EP_RNS_HYBRID at K ≥ 3.");
-  static_assert(!(RnsMods.size() >= 3 && Ks == KsVariant::BV),
-                "KS_BV (MP-gadget keyswitch) only supports K ≤ 2; use KS_RNS_HYBRID at K ≥ 3.");
+  // and total log Q ≤ 128 bits. K ≥ 3 needs RNS-hybrid.
+  static_assert(!(RnsMods.size() >= 3 && Decomp == DecompVariant::MP),
+                "VARIANT_MP only supports K ≤ 2; use VARIANT_RNS_HYBRID at K ≥ 3.");
 
 } // namespace DBConsts
 

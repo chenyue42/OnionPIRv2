@@ -98,10 +98,10 @@ RlweCt PirClient::fast_generate_query(const size_t pt_idx) {
   std::vector<size_t> query_indices = get_query_indices(pt_idx);
   PRINT_INT_ARRAY("\t\tquery_indices", query_indices.data(), query_indices.size());
   const size_t expan_height = pir_params_.get_expan_height();
-  const size_t bits_per_ciphertext = 1 << expan_height;
+  const size_t capacity = size_t{1} << expan_height;  // 2^h slots after expansion
 
   uint64_t inverse = 0;
-  utils::try_invert_uint_mod(bits_per_ciphertext, t, inverse);
+  utils::try_invert_uint_mod(capacity, t, inverse);
   const size_t reversed_index = utils::bit_reverse(query_indices[0], expan_height);
   DEBUG_PRINT("reversed_index: " << reversed_index << ", query_indices[0]: " << query_indices[0]);
 
@@ -138,7 +138,7 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
   // no further dimensions
   if (query_indices.size() == 1) { return; }
   const size_t expan_height = pir_params_.get_expan_height();
-  const size_t bits_per_ciphertext = 1 << expan_height; // padding msg_size to the next power of 2
+  const size_t capacity = size_t{1} << expan_height;  // 2^h slots after expansion
   const size_t l = pir_params_.get_l();
   const size_t base_log2 = pir_params_.get_base_log2();
   const auto rns_mods = pir_params_.get_rns_mods();
@@ -149,7 +149,7 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
   std::vector<uint64_t> inv(rns_mod_cnt);
   for (size_t k = 0; k < rns_mod_cnt; k++) {
     uint64_t result;
-    utils::try_invert_uint_mod(bits_per_ciphertext, rns_mods[k], result);
+    utils::try_invert_uint_mod(capacity, rns_mods[k], result);
     inv[k] = result;
   }
 
@@ -169,7 +169,7 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
         for (size_t mod_id = 0; mod_id < rns_mod_cnt; mod_id++) {
           const size_t pad = mod_id * DBConsts::PolyDegree;   // We use two moduli for the same gadget value. They are apart by coeff_count.
           inter_coeff_t mod = rns_mods[mod_id];
-          // the coeff is (B^{l-1}, ..., B^0) / bits_per_ciphertext
+          // the coeff is (B^{l-1}, ..., B^0) / capacity
           uint64_t coef = (inter_coeff_t)gadget[mod_id][k] * inv[mod_id] % mod;
           q_head[reversed_idx + pad] = (q_head[reversed_idx + pad] + coef) % mod;
         }

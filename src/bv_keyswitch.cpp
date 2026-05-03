@@ -38,6 +38,30 @@ void signed_gadget_decompose(uint64_t val, size_t base_log2,
   }
 }
 
+void signed_gadget_decompose_mp(uint128_t val, uint128_t Q, size_t base_log2,
+                                int64_t *out, size_t num_digits) {
+  using i128 = __int128_t;
+  const uint128_t half_Q = Q >> 1;
+  const uint64_t  B      = uint64_t(1) << base_log2;
+  const uint64_t  half_B = B >> 1;
+  const uint64_t  B_mask = B - 1;
+
+  i128 d = (val > half_Q) ? static_cast<i128>(val) - static_cast<i128>(Q)
+                          : static_cast<i128>(val);
+  for (size_t i = 0; i < num_digits; ++i) {
+    const uint64_t low = static_cast<uint64_t>(d) & B_mask;
+    int64_t r;
+    if (low > half_B) {
+      r = static_cast<int64_t>(low) - static_cast<int64_t>(B);
+      d = (d >> base_log2) + 1;
+    } else {
+      r = static_cast<int64_t>(low);
+      d >>= base_log2;
+    }
+    out[i] = r;
+  }
+}
+
 void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
                                     uint64_t q, size_t q_bits,
                                     uint64_t *out, size_t num_digits) {
@@ -80,6 +104,13 @@ void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
 static inline size_t bv_base_log2(const PirParams &pir_params) {
   const size_t q_bits = pir_params.get_ct_mod_width();
   return q_bits / L_KS + 1;
+}
+
+// RNS-hybrid per-limb base_log2: same formula as bv_base_log2 but using
+// q_k bit width instead of total log Q. Each limb gets its own L_KS-digit
+// signed gadget decomposition with B_k = 2^base_log2_k.
+static inline size_t bv_base_log2_per_limb(const PirParams &pir_params, size_t k) {
+  return pir_params.get_rns_mod_bits()[k] / L_KS + 1;
 }
 
 // Compute (1 << (i * base_log2)) mod q, safely.
@@ -191,18 +222,51 @@ static void sample_gaussian_shared_rns(uint64_t *out, size_t N,
   }
 }
 
+// Build one RLWE row of a KSK. Encrypts msg under all K limbs:
+//   for each output limb j: b_j = msg_j - a_j · sk_j + e_j
+// where msg_j is supplied per-limb in NTT form (size N · K), and e is shared
+// across limbs (signed Gaussian, then reduced per-limb).
+static void build_ksk_row_rns(const std::vector<uint64_t> &msg_ntt,
+                              const RlweSk &sk,
+                              const std::vector<uint64_t> &qs,
+                              double sigma, std::mt19937_64 &rng,
+                              BvRlweCt &ct) {
+  constexpr size_t N = DBConsts::PolyDegree;
+  const size_t K = qs.size();
+  ct.a.assign(N * K, 0);
+  ct.b.assign(N * K, 0);
+
+  for (size_t k = 0; k < K; ++k) {
+    utils::sample_uniform_poly(ct.a.data() + k * N, N, qs[k], rng);
+  }
+  std::vector<uint64_t> e(N * K);
+  sample_gaussian_shared_rns(e.data(), N, qs, sigma, rng);
+
+  std::vector<uint64_t> as(N);
+  for (size_t k = 0; k < K; ++k) {
+    const uint64_t qk = qs[k];
+    uint64_t *a_k = ct.a.data() + k * N;
+    uint64_t *b_k = ct.b.data() + k * N;
+    uint64_t *e_k = e.data() + k * N;
+    utils::ntt_fwd(a_k, N, qk);
+    utils::ntt_fwd(e_k, N, qk);
+    intel::hexl::EltwiseMultMod(as.data(), a_k, sk.data.data() + k * N,
+                                N, qk, 1);
+    intel::hexl::EltwiseSubMod(b_k, msg_ntt.data() + k * N, as.data(), N, qk);
+    intel::hexl::EltwiseAddMod(b_k, b_k, e_k, N, qk);
+  }
+}
+
 BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
                              const RlweSk &sk, uint32_t galois_k,
                              std::mt19937_64 &rng) {
   const double sigma = pir_params.get_noise_std_dev();
   constexpr size_t N = DBConsts::PolyDegree;
   constexpr size_t K = DBConsts::RnsMods.size();
-  static_assert(K <= 2, "BV keyswitch (MP-gadget) supports K <= 2 only");
-  static_assert(DBConsts::Ks == DBConsts::KsVariant::BV,
-                "KS_RNS_HYBRID not yet implemented; set KS_VARIANT=KS_BV");
+  static_assert(K <= 2 || DBConsts::Decomp == DBConsts::DecompVariant::RnsHybrid,
+                "K >= 3 requires VARIANT_RNS_HYBRID");
 
   const auto &qs = pir_params.get_rns_mods();
-  const size_t base_log2 = bv_base_log2(pir_params);
 
   // σ_k(s) per limb, in NTT form.
   std::vector<uint64_t> sigma_s(N * K);
@@ -213,39 +277,37 @@ BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
 
   BvKeySwitchKey ksk;
   ksk.galois_k = galois_k;
-  ksk.cts.resize(L_KS);
 
-  std::vector<uint64_t> e(N * K);
-  std::vector<uint64_t> as(N), msg(N);
-
-  for (size_t i = 0; i < L_KS; ++i) {
-    BvRlweCt &ct = ksk.cts[i];
-    ct.a.assign(N * K, 0);
-    ct.b.assign(N * K, 0);
-
-    // Per-limb a uniform mod q_k.
-    for (size_t k = 0; k < K; ++k) {
-      utils::sample_uniform_poly(ct.a.data() + k * N, N, qs[k], rng);
+  if constexpr (DBConsts::Decomp == DBConsts::DecompVariant::MP) {
+    // MP-gadget: L_KS rows, each row encrypts σ(s) · B^i under all K limbs.
+    const size_t base_log2 = bv_base_log2(pir_params);
+    ksk.cts.resize(L_KS);
+    std::vector<uint64_t> msg(N * K);
+    for (size_t i = 0; i < L_KS; ++i) {
+      for (size_t k = 0; k < K; ++k) {
+        const uint64_t qk = qs[k];
+        const uint64_t Bi = power_of_two_mod(i * base_log2, qk);
+        intel::hexl::EltwiseFMAMod(msg.data() + k * N, sigma_s.data() + k * N,
+                                   Bi, nullptr, N, qk, 1);
+      }
+      build_ksk_row_rns(msg, sk, qs, sigma, rng, ksk.cts[i]);
     }
-    // Shared signed e, reduced per limb.
-    sample_gaussian_shared_rns(e.data(), N, qs, sigma, rng);
-
-    // Per-limb: b_k = σ(s)_k · (B^i mod q_k) − (a_k · sk_k) + e_k.
+  } else {
+    // RNS-hybrid: K · L_KS rows. Row (k, i) encrypts (g_k · B_k^i) · σ(s).
+    // Since g_k ≡ 1 mod q_k and g_k ≡ 0 mod q_{j!=k}, the message under
+    // each output limb j is: (j == k) ? (B_k^i mod q_j) · σ(s)_j : 0.
+    ksk.cts.resize(K * L_KS);
+    std::vector<uint64_t> msg(N * K);
     for (size_t k = 0; k < K; ++k) {
+      const size_t base_log2_k = bv_base_log2_per_limb(pir_params, k);
       const uint64_t qk = qs[k];
-      const uint64_t Bi = power_of_two_mod(i * base_log2, qk);
-      uint64_t *a_k = ct.a.data() + k * N;
-      uint64_t *b_k = ct.b.data() + k * N;
-      uint64_t *e_k = e.data() + k * N;
-
-      utils::ntt_fwd(a_k, N, qk);
-      utils::ntt_fwd(e_k, N, qk);
-      intel::hexl::EltwiseMultMod(as.data(), a_k, sk.data.data() + k * N,
-                                  N, qk, 1);
-      intel::hexl::EltwiseFMAMod(msg.data(), sigma_s.data() + k * N, Bi,
-                                 nullptr, N, qk, 1);
-      intel::hexl::EltwiseSubMod(b_k, msg.data(), as.data(), N, qk);
-      intel::hexl::EltwiseAddMod(b_k, b_k, e_k, N, qk);
+      for (size_t i = 0; i < L_KS; ++i) {
+        std::fill(msg.begin(), msg.end(), 0);
+        const uint64_t Bi = power_of_two_mod(i * base_log2_k, qk);
+        intel::hexl::EltwiseFMAMod(msg.data() + k * N, sigma_s.data() + k * N,
+                                   Bi, nullptr, N, qk, 1);
+        build_ksk_row_rns(msg, sk, qs, sigma, rng, ksk.cts[k * L_KS + i]);
+      }
     }
   }
 
@@ -377,34 +439,15 @@ static void bv_apply_galois_inplace_k2(RlweCt &ct, uint32_t galois_k,
     c1_mp[j] = static_cast<uint128_t>(q0) * s + r0;
   }
 
-  // Step 3: extract L_KS *signed* digits per coefficient. Center the MP value
-  // to (-Q/2, Q/2], then signed base-B decomposition with carry. Storing the
-  // signed digit (as int64) means each limb later renders it as
-  //   digit_k = (s >= 0) ? s : (qk - (-s))
-  // which halves the per-step keyswitch noise compared to unsigned digits.
-  using i128 = __int128_t;
+  // Step 3: extract L_KS signed digits per coefficient (centered MP base-B
+  // decomposition with carry). Per-coeff buf, then scatter into row layout.
+  // Signed digits halve the per-step keyswitch noise vs unsigned.
   const uint128_t Q_total = static_cast<uint128_t>(q0) * q1;
-  const uint128_t half_Q  = Q_total >> 1;
-  const uint64_t  B       = uint64_t(1) << base_log2;
-  const uint64_t  half_B  = B >> 1;
-
   std::vector<int64_t> sdigits(L_KS * N);
+  int64_t buf[16];  // L_KS ≤ 16 in all current configs
   for (size_t j = 0; j < N; ++j) {
-    i128 d = (c1_mp[j] > half_Q)
-        ? static_cast<i128>(c1_mp[j]) - static_cast<i128>(Q_total)
-        : static_cast<i128>(c1_mp[j]);
-    for (size_t i = 0; i < L_KS; ++i) {
-      const uint64_t low = static_cast<uint64_t>(d) & B_mask;
-      int64_t r;
-      if (low > half_B) {
-        r = static_cast<int64_t>(low) - static_cast<int64_t>(B);
-        d = (d >> base_log2) + 1;  // arithmetic shift on i128, then carry
-      } else {
-        r = static_cast<int64_t>(low);
-        d >>= base_log2;
-      }
-      sdigits[i * N + j] = r;
-    }
+    signed_gadget_decompose_mp(c1_mp[j], Q_total, base_log2, buf, L_KS);
+    for (size_t i = 0; i < L_KS; ++i) sdigits[i * N + j] = buf[i];
   }
 
   // Step 4: for each limb, NTT each digit (rendered into uint64 mod qk) and
@@ -457,6 +500,82 @@ static void bv_apply_galois_inplace_k2(RlweCt &ct, uint32_t galois_k,
   std::memcpy(ct.data(1), delta_a.data(), 2 * N * sizeof(uint64_t));
 }
 
+// RNS-hybrid: per-limb signed gadget decomposition. Each source limb k decomposes
+// independently with its own base B_k, producing K · L_KS digits. KSK has K · L_KS
+// rows where row (k, i) encrypts (g_k · B_k^i) · σ(s) — under limb j, this is
+// B_k^i · σ(s)_j when j == k, and 0 when j != k.
+static void bv_apply_galois_inplace_rns_hybrid(RlweCt &ct, uint32_t galois_k,
+                                               const BvKeySwitchKey &key,
+                                               const PirParams &pir_params) {
+  constexpr size_t N = DBConsts::PolyDegree;
+  const auto &qs = pir_params.get_rns_mods();
+  const size_t K = qs.size();
+
+  // Step 1: per-limb σ on (c0, c1).
+  std::vector<uint64_t> c0_perm(K * N), c1_perm(K * N);
+  for (size_t k = 0; k < K; ++k) {
+    utils::automorphism_coeff(ct.data(0) + k * N, N, galois_k, qs[k],
+                              c0_perm.data() + k * N);
+    utils::automorphism_coeff(ct.data(1) + k * N, N, galois_k, qs[k],
+                              c1_perm.data() + k * N);
+  }
+
+  // Step 2: per-limb signed gadget decomposition of c1_perm[k] under q_k.
+  // sdigits[k * L_KS + i][j] = signed digit i of c1_perm coeff j under q_k.
+  std::vector<std::vector<int64_t>> sdigits(K * L_KS, std::vector<int64_t>(N));
+  std::vector<uint64_t> digit_buf_uns(N);
+  for (size_t k = 0; k < K; ++k) {
+    const size_t base_log2_k = bv_base_log2_per_limb(pir_params, k);
+    const uint64_t qk = qs[k];
+    const uint64_t half_qk = qk >> 1;
+    uint64_t buf[16];
+    for (size_t j = 0; j < N; ++j) {
+      const uint64_t v = c1_perm[k * N + j];
+      signed_gadget_decompose(v, base_log2_k, qk, buf, L_KS);
+      // Convert "buf[i] mod q_k" back to signed int64 for cross-limb rendering.
+      for (size_t i = 0; i < L_KS; ++i) {
+        const uint64_t u = buf[i];
+        const int64_t s = (u > half_qk) ? (int64_t)u - (int64_t)qk : (int64_t)u;
+        sdigits[k * L_KS + i][j] = s;
+      }
+    }
+  }
+
+  // Step 3: for each output limb j, accumulate Σ_{k,i} digit_{k,i} · ksk[k*L_KS+i].{a,b}_j.
+  std::vector<uint64_t> delta_a(K * N, 0), delta_b(K * N, 0);
+  std::vector<uint64_t> prod(N), digit_ntt(N);
+  for (size_t j = 0; j < K; ++j) {
+    const uint64_t qj = qs[j];
+    uint64_t *da_j = delta_a.data() + j * N;
+    uint64_t *db_j = delta_b.data() + j * N;
+    for (size_t k = 0; k < K; ++k) {
+      for (size_t i = 0; i < L_KS; ++i) {
+        // Render signed digit k,i under modulus q_j.
+        const int64_t *src = sdigits[k * L_KS + i].data();
+        for (size_t p = 0; p < N; ++p) {
+          const int64_t s = src[p];
+          digit_ntt[p] = (s >= 0) ? (uint64_t)s : (qj - (uint64_t)(-s));
+        }
+        utils::ntt_fwd(digit_ntt.data(), N, qj);
+        const BvRlweCt &row = key.cts[k * L_KS + i];
+        intel::hexl::EltwiseMultMod(prod.data(), digit_ntt.data(),
+                                    row.b.data() + j * N, N, qj, 1);
+        intel::hexl::EltwiseAddMod(db_j, db_j, prod.data(), N, qj);
+        intel::hexl::EltwiseMultMod(prod.data(), digit_ntt.data(),
+                                    row.a.data() + j * N, N, qj, 1);
+        intel::hexl::EltwiseAddMod(da_j, da_j, prod.data(), N, qj);
+      }
+    }
+    utils::ntt_inv(db_j, N, qj);
+    utils::ntt_inv(da_j, N, qj);
+    intel::hexl::EltwiseAddMod(c0_perm.data() + j * N, c0_perm.data() + j * N,
+                               db_j, N, qj);
+  }
+
+  std::memcpy(ct.data(0), c0_perm.data(), K * N * sizeof(uint64_t));
+  std::memcpy(ct.data(1), delta_a.data(), K * N * sizeof(uint64_t));
+}
+
 void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
                              const BvKeySwitchKey &key,
                              const PirParams &pir_params) {
@@ -464,11 +583,10 @@ void bv_apply_galois_inplace(RlweCt &ct, uint32_t galois_k,
   assert(!ct.ntt_form);
 
   constexpr size_t K = DBConsts::RnsMods.size();
-  static_assert(K <= 2, "BV keyswitch (MP-gadget) supports K <= 2 only");
-  static_assert(DBConsts::Ks == DBConsts::KsVariant::BV,
-                "KS_RNS_HYBRID not yet implemented; set KS_VARIANT=KS_BV");
 
-  if constexpr (K == 1) {
+  if constexpr (DBConsts::Decomp == DBConsts::DecompVariant::RnsHybrid) {
+    bv_apply_galois_inplace_rns_hybrid(ct, galois_k, key, pir_params);
+  } else if constexpr (K == 1) {
     bv_apply_galois_inplace_k1(ct, galois_k, key, pir_params);
   } else {
     bv_apply_galois_inplace_k2(ct, galois_k, key, pir_params);

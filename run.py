@@ -10,25 +10,26 @@ OUTPUT_DIR = os.path.join(PROJECT_DIR, "outputs")
 BINARY = os.path.join(BUILD_DIR, "Onion-PIR")
 
 
-# Short aliases → ACTIVE_CONFIG / KS_VARIANT values.
+# Short aliases → ACTIVE_CONFIG / VARIANT values.
 # Both macros are defined in src/includes/database_constants.h — see that file
 # for the meaning of each config (N, K, log Q, working status).
 CONFIG_ALIASES = {
     "k1":           "CONFIG_N2048_M60",
     "n2048_m60":    "CONFIG_N2048_M60",
-    "k2":           "CONFIG_N2048_M30_30",
-    "n2048_m30_30": "CONFIG_N2048_M30_30",
-    "n4096_m60_60": "CONFIG_N4096_M60_60",
-    "k4":           "CONFIG_N4096_M30_30_30_30",
+    "k2":           "CONFIG_N2048_M28_28",
+    "n2048_m28_28": "CONFIG_N2048_M28_28",
+    # N=4096 configs are disabled in database_constants.h for this draft.
+    # "n4096_m60_60": "CONFIG_N4096_M60_60",
+    # "k4":           "CONFIG_N4096_M28_28_28_28",
 }
 
-KS_ALIASES = {
-    "bv":         "KS_BV",
-    "rns_hybrid": "KS_RNS_HYBRID",
+VARIANT_ALIASES = {
+    "mp":         "VARIANT_MP",
+    "rns_hybrid": "VARIANT_RNS_HYBRID",
 }
 
 
-def build(build_type: str, jobs: int, active_config: str, ks_variant: str):
+def build(build_type: str, jobs: int, active_config: str, variant: str):
     """Configure (if needed) and build with the given CMake build type."""
     os.makedirs(BUILD_DIR, exist_ok=True)
 
@@ -36,7 +37,7 @@ def build(build_type: str, jobs: int, active_config: str, ks_variant: str):
         "cmake",
         f"-DCMAKE_BUILD_TYPE={build_type}",
         f"-DACTIVE_CONFIG={active_config}",
-        f"-DKS_VARIANT={ks_variant}",
+        f"-DVARIANT={variant}",
         PROJECT_DIR,
     ]
     subprocess.run(cmake_cmd, cwd=BUILD_DIR, check=True)
@@ -89,21 +90,21 @@ def main():
               " for per-config meanings."),
     )
     parser.add_argument(
-        "--ks", default="bv",
-        help=("KS_VARIANT (default: bv). Aliases: "
-              + ", ".join(sorted(KS_ALIASES))
+        "--variant", default="mp",
+        help=("VARIANT (default: mp). Aliases: "
+              + ", ".join(sorted(VARIANT_ALIASES))
               + "; or pass full name. See src/includes/database_constants.h"
               " for per-variant meanings."),
     )
     args = parser.parse_args()
 
     active_config = CONFIG_ALIASES.get(args.config.lower(), args.config)
-    ks_variant = KS_ALIASES.get(args.ks.lower(), args.ks)
+    variant = VARIANT_ALIASES.get(args.variant.lower(), args.variant)
 
     # --- Build ---
     build_type = "Debug" if args.verbose else "Benchmark"
-    print(f"Build: ACTIVE_CONFIG={active_config} KS_VARIANT={ks_variant} TYPE={build_type}")
-    build(build_type, args.jobs, active_config, ks_variant)
+    print(f"Build: ACTIVE_CONFIG={active_config} VARIANT={variant} TYPE={build_type}")
+    build(build_type, args.jobs, active_config, variant)
 
     if args.build_only:
         return

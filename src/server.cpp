@@ -198,8 +198,14 @@ PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
   db_matrix_t db_mat { db_aligned_.get(), other_dim_sz, fst_dim_sz, coeff_val_cnt };
   db_matrix_t query_mat { query_data.data(), fst_dim_sz, 2, coeff_val_cnt };
   inter_matrix_t inter_res_mat { inter_res_.data(), other_dim_sz, 2, coeff_val_cnt };
+
+  // Per-level modulus: level lvl spans coefficients of limb (lvl / N).
+  std::vector<uint64_t> level_qs(coeff_val_cnt);
+  for (size_t k = 0; k < rns_mod_cnt; ++k) {
+    std::fill(level_qs.begin() + k * N, level_qs.begin() + (k + 1) * N, rns_mods[k]);
+  }
   TIME_START(CORE_TIME);
-  level_mat_mat(&db_mat, &query_mat, &inter_res_mat);
+  level_mat_mat(&db_mat, &query_mat, &inter_res_mat, level_qs.data());
   TIME_END(CORE_TIME);
 
   // ========== transform the intermediate to coefficient form. Delay the modulus operation ==========
@@ -438,7 +444,7 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
   const size_t useful_cnt = pir_params_.get_fst_dim_sz() +
                             pir_params_.get_l() * (pir_params_.get_num_dims() - 1); // u
   const size_t expan_height = pir_params_.get_expan_height(); // h
-  const size_t w = size_t{1} << expan_height;                 // 2^h
+  const size_t capacity = size_t{1} << expan_height;          // 2^h
   const auto &bv_galois_key = client_bv_galois_keys_.at(client_id);
   constexpr size_t N = DBConsts::PolyDegree;
   const auto &qs = pir_params_.get_rns_mods();
@@ -478,14 +484,14 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
   };
 
   // ============== storage   – index 0 is *unused*, root is slot 1
-  std::vector<RlweCt> cts(2 * w); // slots 0 … 2w-1
+  std::vector<RlweCt> cts(2 * capacity); // slots 0 … 2*capacity-1
   cts[1] = ciphertext;
 
   // ============== level-order walk, skip right-of-u sub-trees
-  for (size_t i = 1; i < w; ++i) { // internal nodes only
+  for (size_t i = 1; i < capacity; ++i) { // internal nodes only
     const int k = int{1} << (std::bit_width(i) - 1); // k = 2^{⌊log i⌋}   (span of this sub-tree)
 
-    const size_t left_leaf = i * w / k - w;
+    const size_t left_leaf = i * capacity / k - capacity;
     if (left_leaf >= useful_cnt)
       continue;
 
@@ -506,10 +512,10 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
     TIME_END("shift polynomial");
   }
 
-  // ==============  return the first  u  leaves: heap slots  w … w+u−1
+  // ==============  return the first  u  leaves: heap slots  capacity … capacity+u−1
   return std::vector<RlweCt>(
-      std::make_move_iterator(cts.begin() + w),
-      std::make_move_iterator(cts.begin() + w + useful_cnt));
+      std::make_move_iterator(cts.begin() + capacity),
+      std::make_move_iterator(cts.begin() + capacity + useful_cnt));
 }
 
 void PirServer::set_client_bv_galois_key(const size_t client_id, bvks::BvGaloisKeys bv_keys) {

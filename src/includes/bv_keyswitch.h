@@ -98,6 +98,13 @@ BvGaloisKeys gen_bv_galois_keys(const PirParams &pir_params,
 void signed_gadget_decompose(uint64_t val, size_t base_log2,
                              uint64_t q, uint64_t *out, size_t num_digits);
 
+// Multi-precision variant for K=2 (uint128 modulus Q = q0·q1). Centers `val`
+// in (-Q/2, Q/2] then emits num_digits signed digits in [-B/2, B/2) as int64_t.
+// Callers render each digit to uint64 mod q_k per limb separately, since the
+// same digit needs to land under multiple moduli.
+void signed_gadget_decompose_mp(uint128_t val, uint128_t Q, size_t base_log2,
+                                int64_t *out, size_t num_digits);
+
 // Approximate signed gadget decomposition (TFHE-rs style).
 //
 // Pre-rounds `val` (signed, centered in (-q/2, q/2]) to the nearest multiple

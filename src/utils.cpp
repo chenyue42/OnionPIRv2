@@ -183,7 +183,7 @@ std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log
     uint64_t pow = 1;
     for (int j = l - 1; j >= 0; j--) {
       gadget[i][j] = pow;
-      pow = (pow << base_log2) % mod;
+      pow = static_cast<uint64_t>((static_cast<uint128_t>(pow) << base_log2) % mod);
     }
   }
   return gadget;
@@ -335,17 +335,39 @@ size_t utils::roundup_div(const size_t numerator, const size_t denominator) {
 }
 
 
+// Pick (fst_dim_sz, num_dims) so the database holds ≥ target_num_pt plaintexts
+// and the expansion output fits the chosen shape.
+//
+// The query expansion tree of height h produces capacity = 2^h BFV ciphertexts.
+// Of those, the first num_dims - 1 "other" dimensions are each binary muxes
+// driven by a full l-row GSW gadget reconstruction, so they consume
+//   reserved = l * (num_dims - 1)
+// expansion slots. The remaining
+//   slack    = capacity - reserved
+// slots feed the first dimension. fst_dim_sz is set from slack per the
+// FST_DIM_POW2 policy. Database capacity (in plaintexts) is then
+//   fst_dim_sz · 2^(num_dims - 1)
+// since each "other" dim is binary and doubles the addressable plaintexts.
+//
+// Loop walks num_dims upward and returns the smallest one that meets target.
+// max_num_dims is just a loop bound; the inner `reserved >= capacity` break
+// is the real correctness guard against size_t underflow.
+//
+// Args:
+//   target_num_pt: minimum plaintexts the DB must hold (= DB_SIZE_MB / pt size).
+//   l            : GSW gadget length used for "other"-dim reconstruction (= l_ep).
+//   h            : expansion tree height (= TREE_HEIGHT).
+// Returns: {fst_dim_sz, num_dims}.
 std::pair<size_t, size_t> utils::calculate_db_shape(size_t target_num_pt, size_t l, size_t h) {
-  // OnionPIRv1-style hypercube: fst_dim_sz is a power of two. The expansion
-  // tree of height h yields 2^h BFV ciphertexts; (num_dims - 1) * l of those
-  // slots are consumed by RGSW reconstruction for the other dims, leaving the
-  // rest for the first dimension. We floor that remainder to a power of two.
   const size_t capacity = size_t{1} << h;
-  size_t max_num_dims = 1 + (capacity - 1) / l;
+  const size_t max_num_dims = 1 + (capacity - 1) / l;
   for (size_t num_dims = 1; num_dims <= max_num_dims + 1; num_dims++) {
-    const size_t slack = capacity - l * (num_dims - 1);
-    if (slack == 0) break;
-    const size_t fst_dim_sz = size_t{1} << (std::bit_width(slack) - 1);
+    const size_t reserved = l * (num_dims - 1);
+    if (reserved >= capacity) break;  // guard size_t underflow
+    const size_t slack = capacity - reserved;
+    const size_t fst_dim_sz = DBConsts::FST_DIM_POW2
+        ? (size_t{1} << (std::bit_width(slack) - 1))
+        : slack;
     if (fst_dim_sz * (size_t{1} << (num_dims - 1)) >= target_num_pt) {
       return {fst_dim_sz, num_dims};
     }

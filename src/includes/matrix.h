@@ -44,13 +44,16 @@ typedef struct {
 // we are doing out = A * B, where A = m * n, B = n * 2, n = DBConsts::MaxFstDimSz
 
 
-// db_coeff_t x db_coeff_t -> inter_coeff_t multiplication
+// db_coeff_t x db_coeff_t -> inter_coeff_t multiplication, accumulator
+// reduced modulo q periodically to keep the running sum within inter_coeff_t.
+// q == 0 disables the periodic reduction (caller asserts no overflow risk).
 void mat_mat(const db_coeff_t *__restrict A, const db_coeff_t *__restrict B,
     inter_coeff_t *__restrict out, const size_t rows,
-    const size_t cols);
+    const size_t cols, uint64_t q);
 
-// Doing levels of mat_mat, where each level is doing db_coeff_t x db_coeff_t -> inter_coeff_t multiplication.
-void level_mat_mat(db_matrix_t *A, db_matrix_t *B, inter_matrix_t *out);
+// Per-level mat_mat. level_qs has length A->levels; level k uses level_qs[k].
+void level_mat_mat(db_matrix_t *A, db_matrix_t *B, inter_matrix_t *out,
+                   const uint64_t *level_qs);
 
 // ======================== COMPONENT WISE MULTIPLICATION ========================
 

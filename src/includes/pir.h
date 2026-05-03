@@ -59,9 +59,9 @@ public:
   inline const size_t get_BFV_size(bool use_seed = true) const {
     const size_t per_poly_bits = DBConsts::PolyDegree * get_ct_mod_width();
     if (use_seed) {
-      return 32 + (get_ct_mod_width() * get_coeff_val_cnt()) / 8; // assuming 32 bytes for the seed
+      return 32 + (get_ct_mod_width() * DBConsts::PolyDegree) / 8; // assuming 32 bytes for the seed
     } else {
-      return (get_ct_mod_width() * get_coeff_val_cnt() * 2) / 8; // two polynomials per ciphertext
+      return (get_ct_mod_width() * DBConsts::PolyDegree * 2) / 8; // two polynomials per ciphertext
     }
   }
 
