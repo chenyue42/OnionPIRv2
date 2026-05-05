@@ -7,8 +7,6 @@
 
 // Algebraic test for the RNS-hybrid gadget decomposition (no encryption).
 //
-// Verifies the identity from claude_resp/rns_hybrid_keyswitch.md:
-//
 //   x  ≡  Σ_{k,i}  d_{k,i} · (g_k · B^i)   (mod Q)
 //
 // where Q = q_0 * q_1, g_k is the CRT basis vector (≡ 1 mod q_k, ≡ 0 mod q_j),

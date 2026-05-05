@@ -55,6 +55,56 @@ void mat_mat(const db_coeff_t *__restrict A, const db_coeff_t *__restrict B,
 void level_mat_mat(db_matrix_t *A, db_matrix_t *B, inter_matrix_t *out,
                    const uint64_t *level_qs);
 
+// No-chunk variant for diagnostics: uses a uint128 accumulator and reduces
+// only once per output column. Output type is inter_coeff_t (the value still
+// fits since it is a residue mod q). For benchmarking only.
+void level_mat_mat_nochunk(db_matrix_t *A, db_matrix_t *B, inter_matrix_t *out,
+                           const uint64_t *level_qs);
+
+// Pure uint64 no-chunk variant. WRAPS on overflow when n·q² > 2^64 — output
+// is wrong mod q in that case. Diagnostic only: measures the upper-bound
+// throughput when the accumulator stays in uint64.
+void level_mat_mat_nochunk_u64(const uint32_t *A_data, const uint32_t *B_data,
+                               uint64_t *out_data, size_t m, size_t n,
+                               size_t levels, const uint64_t *level_qs);
+
+// Same as nochunk_u64 but B is deinterleaved per level into B0/B1, so the
+// inner loop has unit-stride loads (auto-vectorizer-friendly). WRAPS.
+void level_mat_mat_split_b_u64(const uint32_t *A_data, const uint32_t *B_data,
+                               uint64_t *out_data, size_t m, size_t n,
+                               size_t levels, const uint64_t *level_qs);
+
+#if defined(__AVX512F__)
+// Explicit AVX-512 inner loop. Two vpmuludq's per output column cover all 16
+// lanes; uint64 accumulator vectors. Same B-deinterleave preprocessing as
+// the split_b variant. WRAPS on overflow.
+void level_mat_mat_avx512_u64(const uint32_t *A_data, const uint32_t *B_data,
+                              uint64_t *out_data, size_t m, size_t n,
+                              size_t levels, const uint64_t *level_qs);
+
+// CORRECT AVX-512 path. Inputs MUST be reduced mod q on entry. Per-lane
+// accumulator bound: ⌈n/16⌉ · q² < 2⁶⁴ (holds for q < 2³⁰, n ≤ 1024).
+// Final 16-lane horizontal sum widens to uint128 before % q.
+void level_mat_mat_avx512_safe(const uint32_t *A_data, const uint32_t *B_data,
+                               uint64_t *out_data, size_t m, size_t n,
+                               size_t levels, const uint64_t *level_qs);
+#endif
+
+#if defined(__AVX512F__)
+// Mat-vec (B has one column) analogue of level_mat_mat_avx512_safe. Same A
+// memory traffic, half the multiplies. Useful for checking whether the
+// matmul is memory-bound on A.
+void level_mat_vec_avx512_safe(const uint32_t *A_data, const uint32_t *B_data,
+                               uint64_t *out_data, size_t m, size_t n,
+                               size_t levels, const uint64_t *level_qs);
+#endif
+
+// Pure-stream baseline: read A in the matmul's exact access pattern, no
+// multiplies, no B/output. Returns an XOR sink to defeat DCE. Measures the
+// single-thread memory-read ceiling for this layout.
+uint32_t level_mat_mat_stream_only(const uint32_t *A_data, size_t m,
+                                   size_t n, size_t levels);
+
 // ======================== COMPONENT WISE MULTIPLICATION ========================
 
 // These are examples of component wise multiplication. This demonstrates the

@@ -1,5 +1,6 @@
 #include "bv_keyswitch.h"
 #include "database_constants.h"
+#include "logging.h"
 #include "utils.h"
 #include "hexl/hexl.hpp"
 #include <cassert>
@@ -415,9 +416,12 @@ static void bv_apply_galois_inplace_k1(RlweCt &ct, uint32_t galois_k,
   uint64_t *const tmp = s.tmp.data();
   uint64_t *const digits = s.digits.data();
 
+  TIME_START(APPLY_GAL_SIGMA);
   utils::automorphism_coeff(ct.data(0), N, galois_k, q_val, c0_perm);
   utils::automorphism_coeff(ct.data(1), N, galois_k, q_val, c1_perm);
+  TIME_END(APPLY_GAL_SIGMA);
 
+  TIME_START(APPLY_GAL_DECOMP);
   for (size_t k = 0; k < N; ++k) {
     uint64_t digit_vals[L_KS];
     signed_gadget_decompose(c1_perm[k], base_log2, q_val, digit_vals, L_KS);
@@ -425,25 +429,36 @@ static void bv_apply_galois_inplace_k1(RlweCt &ct, uint32_t galois_k,
       digits[i * N + k] = digit_vals[i];
     }
   }
+  TIME_END(APPLY_GAL_DECOMP);
 
   {
     uint64_t *digit0 = digits;
+    TIME_START(APPLY_GAL_NTT_FWD);
     utils::ntt_fwd(digit0, N, q_val);
+    TIME_END(APPLY_GAL_NTT_FWD);
+    TIME_START(APPLY_GAL_POINTWISE);
     intel::hexl::EltwiseMultMod(delta_b, digit0, key.cts[0].b.data(), N, q_val, 1);
     intel::hexl::EltwiseMultMod(delta_a, digit0, key.cts[0].a.data(), N, q_val, 1);
+    TIME_END(APPLY_GAL_POINTWISE);
   }
   for (size_t i = 1; i < L_KS; ++i) {
     uint64_t *digit_i = digits + i * N;
+    TIME_START(APPLY_GAL_NTT_FWD);
     utils::ntt_fwd(digit_i, N, q_val);
+    TIME_END(APPLY_GAL_NTT_FWD);
     const auto &ksk_ct = key.cts[i];
+    TIME_START(APPLY_GAL_POINTWISE);
     intel::hexl::EltwiseMultMod(tmp, digit_i, ksk_ct.b.data(), N, q_val, 1);
     intel::hexl::EltwiseAddMod(delta_b, delta_b, tmp, N, q_val);
     intel::hexl::EltwiseMultMod(tmp, digit_i, ksk_ct.a.data(), N, q_val, 1);
     intel::hexl::EltwiseAddMod(delta_a, delta_a, tmp, N, q_val);
+    TIME_END(APPLY_GAL_POINTWISE);
   }
 
+  TIME_START(APPLY_GAL_NTT_INV);
   utils::ntt_inv(delta_b, N, q_val);
   utils::ntt_inv(delta_a, N, q_val);
+  TIME_END(APPLY_GAL_NTT_INV);
 
   intel::hexl::EltwiseAddMod(c0_perm, c0_perm, delta_b, N, q_val);
 
@@ -466,6 +481,7 @@ static void bv_apply_galois_inplace_k2(RlweCt &ct, uint32_t galois_k,
   const uint64_t B_mask = (uint64_t(1) << base_log2) - 1;
 
   // Step 1: per-limb σ on (c0, c1).
+  TIME_START(APPLY_GAL_SIGMA);
   std::vector<uint64_t> c0_perm(2 * N), c1_perm(2 * N);
   for (size_t k = 0; k < 2; ++k) {
     utils::automorphism_coeff(ct.data(0) + k * N, N, galois_k, qs[k],
@@ -473,8 +489,12 @@ static void bv_apply_galois_inplace_k2(RlweCt &ct, uint32_t galois_k,
     utils::automorphism_coeff(ct.data(1) + k * N, N, galois_k, qs[k],
                               c1_perm.data() + k * N);
   }
+  TIME_END(APPLY_GAL_SIGMA);
 
-  // Step 2: per-coef CRT compose σ(c1) → 128-bit MP integer.
+  // Step 2 + 3: per-coef CRT compose σ(c1) → 128-bit MP integer, then signed
+  // base-B decomposition with carry. Both bundled under DECOMP since they're
+  // the variant-specific gadget extraction work.
+  TIME_START(APPLY_GAL_DECOMP);
   std::vector<uint128_t> c1_mp(N);
   for (size_t j = 0; j < N; ++j) {
     const uint64_t r0 = c1_perm[0 * N + j];
@@ -486,9 +506,6 @@ static void bv_apply_galois_inplace_k2(RlweCt &ct, uint32_t galois_k,
     c1_mp[j] = static_cast<uint128_t>(q0) * s + r0;
   }
 
-  // Step 3: extract L_KS signed digits per coefficient (centered MP base-B
-  // decomposition with carry). Per-coeff buf, then scatter into row layout.
-  // Signed digits halve the per-step keyswitch noise vs unsigned.
   const uint128_t Q_total = static_cast<uint128_t>(q0) * q1;
   std::vector<int64_t> sdigits(L_KS * N);
   int64_t buf[16];  // L_KS ≤ 16 in all current configs
@@ -496,6 +513,7 @@ static void bv_apply_galois_inplace_k2(RlweCt &ct, uint32_t galois_k,
     signed_gadget_decompose_mp(c1_mp[j], Q_total, base_log2, buf, L_KS);
     for (size_t i = 0; i < L_KS; ++i) sdigits[i * N + j] = buf[i];
   }
+  TIME_END(APPLY_GAL_DECOMP);
 
   // Step 4: for each limb, NTT each digit (rendered into uint64 mod qk) and
   // accumulate inner products against the KSK.
@@ -517,26 +535,40 @@ static void bv_apply_galois_inplace_k2(RlweCt &ct, uint32_t galois_k,
     uint64_t *da_k = delta_a.data() + k * N;
 
     // First iteration: write instead of accumulate.
+    TIME_START(APPLY_GAL_DECOMP);
     render_digits_for_limb(0, qk);
+    TIME_END(APPLY_GAL_DECOMP);
+    TIME_START(APPLY_GAL_NTT_FWD);
     utils::ntt_fwd(digit_buf.data(), N, qk);
+    TIME_END(APPLY_GAL_NTT_FWD);
+    TIME_START(APPLY_GAL_POINTWISE);
     intel::hexl::EltwiseMultMod(db_k, digit_buf.data(),
                                 key.cts[0].b.data() + k * N, N, qk, 1);
     intel::hexl::EltwiseMultMod(da_k, digit_buf.data(),
                                 key.cts[0].a.data() + k * N, N, qk, 1);
+    TIME_END(APPLY_GAL_POINTWISE);
 
     for (size_t i = 1; i < L_KS; ++i) {
+      TIME_START(APPLY_GAL_DECOMP);
       render_digits_for_limb(i, qk);
+      TIME_END(APPLY_GAL_DECOMP);
+      TIME_START(APPLY_GAL_NTT_FWD);
       utils::ntt_fwd(digit_buf.data(), N, qk);
+      TIME_END(APPLY_GAL_NTT_FWD);
+      TIME_START(APPLY_GAL_POINTWISE);
       intel::hexl::EltwiseMultMod(prod.data(), digit_buf.data(),
                                   key.cts[i].b.data() + k * N, N, qk, 1);
       intel::hexl::EltwiseAddMod(db_k, db_k, prod.data(), N, qk);
       intel::hexl::EltwiseMultMod(prod.data(), digit_buf.data(),
                                   key.cts[i].a.data() + k * N, N, qk, 1);
       intel::hexl::EltwiseAddMod(da_k, da_k, prod.data(), N, qk);
+      TIME_END(APPLY_GAL_POINTWISE);
     }
 
+    TIME_START(APPLY_GAL_NTT_INV);
     utils::ntt_inv(db_k, N, qk);
     utils::ntt_inv(da_k, N, qk);
+    TIME_END(APPLY_GAL_NTT_INV);
 
     // c0_perm_k += delta_b_k
     intel::hexl::EltwiseAddMod(c0_perm.data() + k * N, c0_perm.data() + k * N,
@@ -559,6 +591,7 @@ static void bv_apply_galois_inplace_rns(RlweCt &ct, uint32_t galois_k,
   const size_t K = qs.size();
 
   // Step 1: per-limb σ on (c0, c1).
+  TIME_START(APPLY_GAL_SIGMA);
   std::vector<uint64_t> c0_perm(K * N), c1_perm(K * N);
   for (size_t k = 0; k < K; ++k) {
     utils::automorphism_coeff(ct.data(0) + k * N, N, galois_k, qs[k],
@@ -566,9 +599,11 @@ static void bv_apply_galois_inplace_rns(RlweCt &ct, uint32_t galois_k,
     utils::automorphism_coeff(ct.data(1) + k * N, N, galois_k, qs[k],
                               c1_perm.data() + k * N);
   }
+  TIME_END(APPLY_GAL_SIGMA);
 
   // Step 2: per-limb signed gadget decomposition of c1_perm[k] under q_k.
   // sdigits[k * L_KS + i][j] = signed digit i of c1_perm coeff j under q_k.
+  TIME_START(APPLY_GAL_DECOMP);
   std::vector<std::vector<int64_t>> sdigits(K * L_KS, std::vector<int64_t>(N));
   std::vector<uint64_t> digit_buf_uns(N);
   for (size_t k = 0; k < K; ++k) {
@@ -587,6 +622,7 @@ static void bv_apply_galois_inplace_rns(RlweCt &ct, uint32_t galois_k,
       }
     }
   }
+  TIME_END(APPLY_GAL_DECOMP);
 
   // Step 3: for each output limb j, accumulate Σ_{k,i} digit_{k,i} · ksk[k*L_KS+i].{a,b}_j.
   std::vector<uint64_t> delta_a(K * N, 0), delta_b(K * N, 0);
@@ -598,23 +634,31 @@ static void bv_apply_galois_inplace_rns(RlweCt &ct, uint32_t galois_k,
     for (size_t k = 0; k < K; ++k) {
       for (size_t i = 0; i < L_KS; ++i) {
         // Render signed digit k,i under modulus q_j.
+        TIME_START(APPLY_GAL_DECOMP);
         const int64_t *src = sdigits[k * L_KS + i].data();
         for (size_t p = 0; p < N; ++p) {
           const int64_t s = src[p];
           digit_ntt[p] = (s >= 0) ? (uint64_t)s : (qj - (uint64_t)(-s));
         }
+        TIME_END(APPLY_GAL_DECOMP);
+        TIME_START(APPLY_GAL_NTT_FWD);
         utils::ntt_fwd(digit_ntt.data(), N, qj);
+        TIME_END(APPLY_GAL_NTT_FWD);
         const BvRlweCt &row = key.cts[k * L_KS + i];
+        TIME_START(APPLY_GAL_POINTWISE);
         intel::hexl::EltwiseMultMod(prod.data(), digit_ntt.data(),
                                     row.b.data() + j * N, N, qj, 1);
         intel::hexl::EltwiseAddMod(db_j, db_j, prod.data(), N, qj);
         intel::hexl::EltwiseMultMod(prod.data(), digit_ntt.data(),
                                     row.a.data() + j * N, N, qj, 1);
         intel::hexl::EltwiseAddMod(da_j, da_j, prod.data(), N, qj);
+        TIME_END(APPLY_GAL_POINTWISE);
       }
     }
+    TIME_START(APPLY_GAL_NTT_INV);
     utils::ntt_inv(db_j, N, qj);
     utils::ntt_inv(da_j, N, qj);
+    TIME_END(APPLY_GAL_NTT_INV);
     intel::hexl::EltwiseAddMod(c0_perm.data() + j * N, c0_perm.data() + j * N,
                                db_j, N, qj);
   }

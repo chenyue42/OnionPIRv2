@@ -14,20 +14,20 @@ typedef unsigned __int128 uint128_t;
 // ----------------------------------------------------------------------------
 
 // --- 1) Parameter set ---
-// Naming: CONFIG_N{poly_degree}_M{prime_bit_widths joined by _}.
-// The number of primes is K (= the RNS limb count). Total log Q is the sum
-// of the prime widths. 
-//   CONFIG_N2048_M60           K=1, N=2048,  log Q = 60.   ✓ PIR works (VARIANT_MP).
-//   CONFIG_N2048_M29_29        K=2, N=2048,  log Q ≈ 58.   ✓ PIR works (VARIANT_MP, signed MP-gadget).
-//
-// N=4096 configs are commented out for now — the active draft only targets N=2048.
-//   CONFIG_N4096_M60_60        K=2, N=4096,  log Q ≈ 120.  (disabled)
-//   CONFIG_N4096_M28_28_28_28  K=4, N=4096,  log Q ≈ 112.  (disabled, needs RNS-hybrid)
-#define CONFIG_N2048_M60          0
-#define CONFIG_N2048_M29_29       1
-// #define CONFIG_N4096_M60_60       2
+// Naming: CONFIG_N{poly_degree}_K{rns_limb_count}[_{VARIANT}]. Each config
+// carries its OWN gadget lengths and PlainMod since DecompVariant changes
+// both RGSW size and noise growth — the K=2 cell is split into one config
+// per variant. Keep config and variant in sync via the run.py aliases.
+//   CONFIG_N2048_K1        K=1, N=2048, log Q ≈ 60.   Requires VARIANT_MP.
+//   CONFIG_N2048_K2_MP     K=2, N=2048, log Q ≈ 58.   Requires VARIANT_MP.
+//   CONFIG_N2048_K2_RNS    K=2, N=2048, log Q ≈ 58.   Requires VARIANT_RNS.
+//   CONFIG_N4096_K2_MP     K=2, N=4096, log Q ≈ 120.  Requires VARIANT_MP.
+#define CONFIG_N2048_K1          0
+#define CONFIG_N2048_K2_MP       1
+#define CONFIG_N2048_K2_RNS      2
+#define CONFIG_N4096_K2_MP       3
 #ifndef ACTIVE_CONFIG
-#define ACTIVE_CONFIG CONFIG_N2048_M60
+#define ACTIVE_CONFIG CONFIG_N2048_K1
 #endif
 
 // --- 2) Decomposition variant (covers both keyswitch and external product) ---
@@ -66,22 +66,22 @@ namespace DBConsts {
   // ==========================================================================
   // Constants common to all configs
   // ==========================================================================
-  constexpr size_t DB_SIZE_MB = 128;
-  constexpr double NoiseStdDev = 2.55;  // matches SEAL-For-OnionPIR default
+  constexpr size_t DB_SIZE_MB = 512;
+  constexpr double NoiseStdDev = 2.55;  // matches Spiral & InsPIRe. 
 
   // First-dimension shape policy. See utils::calculate_db_shape.
   //   true : fst_dim_sz = largest power of two ≤ slack (OnionPIRv1 hypercube).
   //   false: fst_dim_sz = slack (every leftover expansion slot; non-power-of-2).
   // Tight packing raises DB capacity at the same num_dims but ups first-dim
   // matmul work; pow-2 keeps matmul cheap at the cost of more dims.
-  constexpr bool FST_DIM_POW2 = false;
+  constexpr bool FST_DIM_POW2 = true;
 
   // ==========================================================================
   // Per-config constants
   // ==========================================================================
 
-#if ACTIVE_CONFIG == CONFIG_N2048_M60
-  // Production-tested cell. K=1.
+#if ACTIVE_CONFIG == CONFIG_N2048_K1
+  // Production-tested cell. K=1, log Q = 60.
   constexpr size_t PolyDegree   = 2048;
   constexpr size_t L_EP         = 5;
   constexpr size_t L_KEY        = 8;
@@ -91,8 +91,9 @@ namespace DBConsts {
   constexpr size_t SmallQWidth  = 22;
   constexpr std::array<size_t, 1> RnsMods = {60};
 
-#elif ACTIVE_CONFIG == CONFIG_N2048_M29_29
-  // K=2, same total Q (~60 bits) as N2048_M60.
+#elif ACTIVE_CONFIG == CONFIG_N2048_K2_MP
+  // K=2 with VARIANT_MP. Single CRT-composed gadget of base B = 2^(60/l) —
+  // needs more digits than the RNS variant to keep B small.
   constexpr size_t PolyDegree   = 2048;
   constexpr size_t L_EP         = 5;
   constexpr size_t L_KEY        = 8;
@@ -102,17 +103,31 @@ namespace DBConsts {
   constexpr size_t SmallQWidth  = 22;
   constexpr std::array<size_t, 2> RnsMods = {29, 29};
 
-// N=4096 configs disabled for the N=2048-only draft. Re-enable by
-// uncommenting the corresponding `#define` at the top of this file.
-// #elif ACTIVE_CONFIG == CONFIG_N4096_M60_60
-//   constexpr size_t PolyDegree   = 4096;
-//   constexpr size_t L_EP         = 5;
-//   constexpr size_t L_KEY        = 8;
-//   constexpr size_t L_KS         = 8;
-//   constexpr size_t TREE_HEIGHT  = 10;
-//   constexpr size_t PlainMod     = 40;
-//   constexpr size_t SmallQWidth  = 50;
-//   constexpr std::array<size_t, 2> RnsMods = {60, 60};
+#elif ACTIVE_CONFIG == CONFIG_N2048_K2_RNS
+  // K=2 with VARIANT_RNS. Per-limb gadgets of base B_k = 2^(29/l) are already
+  // small with l=4, leaving more room in the noise budget for t.
+  constexpr size_t PolyDegree   = 2048;
+  constexpr size_t L_EP         = 3;
+  constexpr size_t L_KEY        = 4;
+  constexpr size_t L_KS         = 4;
+  constexpr size_t TREE_HEIGHT  = 10;
+  constexpr size_t PlainMod     = 13;
+  constexpr size_t SmallQWidth  = 22;
+  constexpr std::array<size_t, 2> RnsMods = {29, 29};
+
+#elif ACTIVE_CONFIG == CONFIG_N4096_K2_MP
+  // K=2 with VARIANT_MP at N=4096. Total log Q ≈ 120 — fits in uint128, so MP
+  // works (compose_rns_to_mp uses uint128). With max_ct_mod_width = 60, the
+  // matmul falls back to the uint64→uint128 scalar path (AVX-512 fast path
+  // requires uint32→uint64).
+  constexpr size_t PolyDegree   = 4096;
+  constexpr size_t L_EP         = 5;
+  constexpr size_t L_KEY        = 8;
+  constexpr size_t L_KS         = 8;
+  constexpr size_t TREE_HEIGHT  = 10;
+  constexpr size_t PlainMod     = 40;
+  constexpr size_t SmallQWidth  = 50;
+  constexpr std::array<size_t, 2> RnsMods = {60, 60};
 
 #else
   #error "Unknown ACTIVE_CONFIG"
@@ -131,14 +146,26 @@ namespace DBConsts {
   // Sanity guards on (config, variant) combinations
   // ==========================================================================
 
-  // K=1: VARIANT_RNS degenerates to MP (single limb, no g_k factor).
-  // Forbid the redundant build so benchmark cells don't double-count.
-  static_assert(!(RnsMods.size() == 1 && Decomp == DecompVariant::RNS),
-                "VARIANT_RNS is a no-op at K=1; use VARIANT_MP.");
+  // Each named config pins the variant it expects (gadget lengths and
+  // PlainMod were tuned for that variant). The run.py aliases set both
+  // ACTIVE_CONFIG and VARIANT consistently.
+#if ACTIVE_CONFIG == CONFIG_N2048_K1
+  static_assert(Decomp == DecompVariant::MP,
+                "CONFIG_N2048_K1 requires VARIANT_MP (RNS is a no-op at K=1).");
+#elif ACTIVE_CONFIG == CONFIG_N2048_K2_MP
+  static_assert(Decomp == DecompVariant::MP,
+                "CONFIG_N2048_K2_MP requires VARIANT_MP.");
+#elif ACTIVE_CONFIG == CONFIG_N2048_K2_RNS
+  static_assert(Decomp == DecompVariant::RNS,
+                "CONFIG_N2048_K2_RNS requires VARIANT_RNS.");
+#elif ACTIVE_CONFIG == CONFIG_N4096_K2_MP
+  static_assert(Decomp == DecompVariant::MP,
+                "CONFIG_N4096_K2_MP requires VARIANT_MP.");
+#endif
 
   // The MP-gadget path uses 128-bit multi-precision integers per coefficient
   // (compose_rns_to_mp / decompose_mp_to_rns in gsw.cpp). That works for K ≤ 2
-  // and total log Q ≤ 128 bits. K ≥ 3 needs the RNS variant.
+  // and total log Q ≤ 128 bits. K ≥ 3 would need the RNS variant.
   static_assert(!(RnsMods.size() >= 3 && Decomp == DecompVariant::MP),
                 "VARIANT_MP only supports K ≤ 2; use VARIANT_RNS at K ≥ 3.");
 

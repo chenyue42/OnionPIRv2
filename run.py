@@ -11,21 +11,22 @@ BINARY = os.path.join(BUILD_DIR, "Onion-PIR")
 
 
 # Short aliases → ACTIVE_CONFIG / VARIANT values.
-# Both macros are defined in src/includes/database_constants.h — see that file
-# for the meaning of each config (N, K, log Q, working status).
+# Each config pins both ACTIVE_CONFIG and VARIANT — they are tuned together
+# (gadget lengths and PlainMod differ per variant). See
+# src/includes/database_constants.h for per-config meanings.
 CONFIG_ALIASES = {
-    "k1":           "CONFIG_N2048_M60",
-    "n2048_m60":    "CONFIG_N2048_M60",
-    "k2":           "CONFIG_N2048_M29_29",
-    "n2048_m28_28": "CONFIG_N2048_M29_29",
-    # N=4096 configs are disabled in database_constants.h for this draft.
-    # "n4096_m60_60": "CONFIG_N4096_M60_60",
-    # "k4":           "CONFIG_N4096_M28_28_28_28",
-}
-
-VARIANT_ALIASES = {
-    "mp":  "VARIANT_MP",   # Multi-Precision gadget (CRT-compose to single MP int)
-    "rns": "VARIANT_RNS",  # Residue Number System gadget (per-limb digits)
+    # alias       → (ACTIVE_CONFIG,            VARIANT)
+    "k1":           ("CONFIG_N2048_K1",        "VARIANT_MP"),
+    "n2048_k1":     ("CONFIG_N2048_K1",        "VARIANT_MP"),
+    
+    "k2_mp":        ("CONFIG_N2048_K2_MP",     "VARIANT_MP"),
+    "n2048_k2_mp":  ("CONFIG_N2048_K2_MP",     "VARIANT_MP"),
+    
+    "k2_rns":       ("CONFIG_N2048_K2_RNS",    "VARIANT_RNS"),
+    "n2048_k2_rns": ("CONFIG_N2048_K2_RNS",    "VARIANT_RNS"),
+    
+    "n4096_k2":     ("CONFIG_N4096_K2_MP",     "VARIANT_MP"),
+    "n4096_k2_mp":  ("CONFIG_N4096_K2_MP",     "VARIANT_MP"),
 }
 
 
@@ -84,22 +85,18 @@ def main():
     )
     parser.add_argument(
         "-c", "--config", default="k1",
-        help=("ACTIVE_CONFIG (default: k1). Aliases: "
+        help=("Build configuration (default: k1). Aliases: "
               + ", ".join(sorted(CONFIG_ALIASES))
-              + "; or pass full name. See src/includes/database_constants.h"
-              " for per-config meanings."),
-    )
-    parser.add_argument(
-        "--variant", default="mp",
-        help=("VARIANT (default: mp). Aliases: "
-              + ", ".join(sorted(VARIANT_ALIASES))
-              + "; or pass full name. See src/includes/database_constants.h"
-              " for per-variant meanings."),
+              + ". Each alias selects both ACTIVE_CONFIG and VARIANT. See"
+              " src/includes/database_constants.h for per-config meanings."),
     )
     args = parser.parse_args()
 
-    active_config = CONFIG_ALIASES.get(args.config.lower(), args.config)
-    variant = VARIANT_ALIASES.get(args.variant.lower(), args.variant)
+    key = args.config.lower()
+    if key not in CONFIG_ALIASES:
+        parser.error(f"unknown config alias '{args.config}'. "
+                     f"Choices: {', '.join(sorted(CONFIG_ALIASES))}")
+    active_config, variant = CONFIG_ALIASES[key]
 
     # --- Build ---
     build_type = "Debug" if args.verbose else "Benchmark"

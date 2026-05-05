@@ -37,6 +37,12 @@ inline std::size_t WARMUP_ITERATIONS = 3;
 #define OTHER_DIM_TIME "Other dim"
 #define EXPAND_TIME "Expand"
 #define APPLY_GALOIS "Apply Galois"
+// Sub-phases of one apply-galois call, summed across all calls in an experiment.
+#define APPLY_GAL_SIGMA     "  AG sigma"
+#define APPLY_GAL_DECOMP    "  AG decomp"
+#define APPLY_GAL_NTT_FWD   "  AG NTT fwd"
+#define APPLY_GAL_NTT_INV   "  AG NTT inv"
+#define APPLY_GAL_POINTWISE "  AG pointwise"
 #define CONVERT_TIME "Convert"
 #define CONVERT_EXTERN "Convert external product"
 #define SERVER_TOT_TIME "Server total"
@@ -116,6 +122,7 @@ inline const ExtLogKeys& ext_log_keys(LogContext c) {
 const std::unordered_map<std::string, std::vector<std::string>> LOG_HIERARCHY = {
     {SERVER_TOT_TIME, {EXPAND_TIME, CONVERT_TIME, FST_DIM_TIME, OTHER_DIM_TIME, MOD_SWITCH}},
     {EXPAND_TIME, {APPLY_GALOIS}},
+    {APPLY_GALOIS, {APPLY_GAL_SIGMA, APPLY_GAL_DECOMP, APPLY_GAL_NTT_FWD, APPLY_GAL_NTT_INV, APPLY_GAL_POINTWISE}},
     {CONVERT_TIME, {CONVERT_EXTERN}},
     {CONVERT_EXTERN, {QTG_DECOMP_RLWE_TIME, QTG_EXTERN_NTT_TIME, QTG_EXTERN_PROD_MAT_MULT_TIME}}, // Children for QTG path
     {QTG_DECOMP_RLWE_TIME, {QTG_EXTERN_COMPOSE, QTG_RIGHT_SHIFT_TIME, QTG_EXTERN_DECOMP}},
