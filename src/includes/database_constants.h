@@ -22,10 +22,12 @@ typedef unsigned __int128 uint128_t;
 //   CONFIG_N2048_K2_MP     K=2, N=2048, log Q ≈ 58.   Requires VARIANT_MP.
 //   CONFIG_N2048_K2_RNS    K=2, N=2048, log Q ≈ 58.   Requires VARIANT_RNS.
 //   CONFIG_N4096_K2_MP     K=2, N=4096, log Q ≈ 120.  Requires VARIANT_MP.
+//   CONFIG_N4096_K2_RNS    K=2, N=4096, log Q ≈ 120.  Requires VARIANT_RNS.
 #define CONFIG_N2048_K1          0
 #define CONFIG_N2048_K2_MP       1
 #define CONFIG_N2048_K2_RNS      2
 #define CONFIG_N4096_K2_MP       3
+#define CONFIG_N4096_K2_RNS      4
 #ifndef ACTIVE_CONFIG
 #define ACTIVE_CONFIG CONFIG_N2048_K1
 #endif
@@ -66,7 +68,7 @@ namespace DBConsts {
   // ==========================================================================
   // Constants common to all configs
   // ==========================================================================
-  constexpr size_t DB_SIZE_MB = 512;
+  constexpr size_t DB_SIZE_MB = 128;
   constexpr double NoiseStdDev = 2.55;  // matches Spiral & InsPIRe. 
 
   // First-dimension shape policy. See utils::calculate_db_shape.
@@ -129,6 +131,20 @@ namespace DBConsts {
   constexpr size_t SmallQWidth  = 50;
   constexpr std::array<size_t, 2> RnsMods = {60, 60};
 
+#elif ACTIVE_CONFIG == CONFIG_N4096_K2_RNS
+  // K=2 with VARIANT_RNS at N=4096. Per-limb gadget B_k = 2^(60/l). Smaller l
+  // than the MP cell since RNS gives 2·K·l = 16 RGSW rows at l=4, equivalent
+  // to MP at l=8. PlainMod stays at 40 — RNS noise ≤ MP noise at the same
+  // effective row count.
+  constexpr size_t PolyDegree   = 4096;
+  constexpr size_t L_EP         = 4;
+  constexpr size_t L_KEY        = 4;
+  constexpr size_t L_KS         = 4;
+  constexpr size_t TREE_HEIGHT  = 10;
+  constexpr size_t PlainMod     = 40;
+  constexpr size_t SmallQWidth  = 50;
+  constexpr std::array<size_t, 2> RnsMods = {60, 60};
+
 #else
   #error "Unknown ACTIVE_CONFIG"
 #endif
@@ -161,6 +177,9 @@ namespace DBConsts {
 #elif ACTIVE_CONFIG == CONFIG_N4096_K2_MP
   static_assert(Decomp == DecompVariant::MP,
                 "CONFIG_N4096_K2_MP requires VARIANT_MP.");
+#elif ACTIVE_CONFIG == CONFIG_N4096_K2_RNS
+  static_assert(Decomp == DecompVariant::RNS,
+                "CONFIG_N4096_K2_RNS requires VARIANT_RNS.");
 #endif
 
   // The MP-gadget path uses 128-bit multi-precision integers per coefficient

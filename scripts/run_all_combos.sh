@@ -46,7 +46,7 @@ fi
 lscpu > "$OUT_DIR/00_lscpu.txt" 2>&1 || true
 
 # --- Run all combos ---
-CONFIGS=(k1 k2_mp k2_rns n4096_k2_mp)
+CONFIGS=(k1 k2_mp k2_rns n4096_k2_mp n4096_k2_rns)
 POW2_VALS=(true false)
 
 cd "$PROJECT_DIR"

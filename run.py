@@ -27,6 +27,7 @@ CONFIG_ALIASES = {
     
     "n4096_k2":     ("CONFIG_N4096_K2_MP",     "VARIANT_MP"),
     "n4096_k2_mp":  ("CONFIG_N4096_K2_MP",     "VARIANT_MP"),
+    "n4096_k2_rns": ("CONFIG_N4096_K2_RNS",    "VARIANT_RNS"),
 }
 
 

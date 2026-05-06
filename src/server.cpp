@@ -209,17 +209,17 @@ PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
   TIME_END(CORE_TIME);
 
   // ========== transform the intermediate to coefficient form. Delay the modulus operation ==========
-  TIME_START(FST_DELEY_MOD_TIME);
+  TIME_START(FST_INTER_TO_CTS_TIME);
   std::vector<RlweCt> result; // output vector
   result.reserve(other_dim_sz);
-  delay_modulus(result, inter_res_.data());
-  TIME_END(FST_DELEY_MOD_TIME);
+  inter_to_cts(result, inter_res_.data());
+  TIME_END(FST_INTER_TO_CTS_TIME);
 
   return result;
 }
 
 
-void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *__restrict inter_res) {
+void PirServer::inter_to_cts(std::vector<RlweCt> &result, const inter_coeff_t *__restrict inter_res) {
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   const size_t K = pir_params_.K();
   constexpr size_t coeff_count = DBConsts::PolyDegree;
@@ -258,20 +258,20 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
     std::array<size_t, unroll_factor> ct_idx0    = {0};  // write index for poly0
     std::array<size_t, unroll_factor> ct_idx1    = {0};  // write index for poly1
 
-    // Process each modulus and coefficient.
+    // Process each modulus and coefficient. The `% q` is mathematically
+    // redundant (mat_mat already reduces per output write)
     for (size_t mod_id = 0; mod_id < K; mod_id++) {
-      const uint64_t q = rns_mods[mod_id];
+      // const uint64_t q = rns_mods[mod_id];
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
         #pragma unroll
         for (size_t idx = 0; idx < unroll_factor; idx++) {
-          // Process polynomial 0 for ciphertext idx.
           inter_coeff_t x0 = inter_res[ base0[idx] + inter_idx0[idx] * inter_padding ];
-          cts[idx].c0[ ct_idx0[idx]++ ] = static_cast<uint64_t>(x0 % q);
+          // cts[idx].c0[ ct_idx0[idx]++ ] = static_cast<uint64_t>(x0 % q);
+          cts[idx].c0[ ct_idx0[idx]++ ] = static_cast<uint64_t>(x0);
 
-          // Process polynomial 1 for ciphertext idx.
           inter_coeff_t x1 = inter_res[ base1[idx] + inter_idx1[idx] * inter_padding ];
-          cts[idx].c1[ ct_idx1[idx]++ ] = static_cast<uint64_t>(x1 % q);
-          // Advance intermediate indices.
+          cts[idx].c1[ ct_idx1[idx]++ ] = static_cast<uint64_t>(x1);
+
           inter_idx0[idx]++;
           inter_idx1[idx]++;
         }
@@ -308,19 +308,16 @@ void PirServer::delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *
     size_t ct_idx0 = 0;     // write index for poly0
     size_t ct_idx1 = 0;     // write index for poly1
 
-    // Process each modulus and coefficient
+    // Edge-case loop (other_dim_sz % unroll_factor != 0). Same gather-and-cast
+    // as the unrolled block above; mat_mat already produced values < q.
     for (size_t mod_id = 0; mod_id < K; mod_id++) {
-      const uint64_t q = rns_mods[mod_id];
       for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
-        // Process polynomial 0
         inter_coeff_t x0 = inter_res[base0 + inter_idx0 * inter_padding];
-        ct.c0[ct_idx0++] = static_cast<uint64_t>(x0 % q);
+        ct.c0[ct_idx0++] = static_cast<uint64_t>(x0);
 
-        // Process polynomial 1
         inter_coeff_t x1 = inter_res[base1 + inter_idx1 * inter_padding];
-        ct.c1[ct_idx1++] = static_cast<uint64_t>(x1 % q);
+        ct.c1[ct_idx1++] = static_cast<uint64_t>(x1);
 
-        // Advance intermediate indices
         inter_idx0++;
         inter_idx1++;
       }

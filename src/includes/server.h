@@ -75,10 +75,19 @@ private:
 
   std::vector<RlweCt> full_expand_qry(size_t client_id, RlweCt &ciphertext) const;
 
-  // This is a helper for evaluate the first dimension.
-  // Instead of doing a mod operation after every addition and multiplication during the matrix multiplication,
-  // we delay the mod operation until the end. We also use barret reduction for the mod operation.
-  void delay_modulus(std::vector<RlweCt> &result, const inter_coeff_t *__restrict inter_res);
+  // Convert the first-dim matmul output `inter_res` into per-ciphertext form.
+  // Two responsibilities:
+  //   1. Layout transpose. mat_mat writes coeff-major:
+  //        inter_res[level][i][p]   for i ∈ [0, other_dim_sz), p ∈ {0,1}
+  //      with stride `other_dim_sz * 2` between coefficient levels. The
+  //      per-ciphertext layout we want is poly-contiguous:
+  //        cts[i].c{p}[level]
+  //   2. NTT inverse on each polynomial (database is in NTT form).
+  //
+  // Assumes mat_mat already produced values < q at every output position
+  // (chunked / AVX-512 paths both reduce per output write), so no `% q`
+  // is performed here.
+  void inter_to_cts(std::vector<RlweCt> &result, const inter_coeff_t *__restrict inter_res);
 
   // Fill the intermediate_db_ with some ciphertext. We just need to allocate the memory.
   void fill_inter_res();

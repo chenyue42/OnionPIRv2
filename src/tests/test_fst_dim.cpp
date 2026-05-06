@@ -208,10 +208,8 @@ void PirTest::test_fst_dim_mult() {
   // (true here for K=2 with n=512, q≈2^29). Output is wrong mod q; we only
   // care about the timing — establishes the upper bound for "stay in uint64,
   // skip all mid-loop reductions".
-  const std::string MAT_MULT_64_NC    = "level mat mat 32->64 nochunk";
-  const std::string MAT_MULT_64_SPLIT = "level mat mat 32->64 split_b";
-  const std::string MAT_MULT_64_AVX   = "level mat mat 32->64 avx512";
-  std::vector<uint64_t> C64_nc, C64_sp, C64_avx;
+  const std::string MAT_MULT_64_NC = "level mat mat 32->64 nochunk";
+  std::vector<uint64_t> C64_nc;
   if (can_run_32to64) {
     C64_nc.assign(m * p * levels, 0);
     TIME_START(MAT_MULT_64_NC);
@@ -228,89 +226,6 @@ void PirTest::test_fst_dim_mult() {
     volatile uint32_t sink = level_mat_mat_stream_only(A32.data(), m, n, levels);
     (void)sink;
     TIME_END(MAT_MULT_STREAM);
-
-    C64_sp.assign(m * p * levels, 0);
-    TIME_START(MAT_MULT_64_SPLIT);
-    level_mat_mat_split_b_u64(A32.data(), B32.data(), C64_sp.data(),
-                              m, n, levels, level_qs.data());
-    TIME_END(MAT_MULT_64_SPLIT);
-    uint64_t checksum64_sp = 0;
-    for (size_t i = 0; i < C64_sp.size(); ++i) checksum64_sp += C64_sp[i];
-    BENCH_PRINT("Checksum (32->64 split_b, may wrap): " << checksum64_sp);
-
-#if defined(__AVX512F__)
-    C64_avx.assign(m * p * levels, 0);
-    TIME_START(MAT_MULT_64_AVX);
-    level_mat_mat_avx512_u64(A32.data(), B32.data(), C64_avx.data(),
-                             m, n, levels, level_qs.data());
-    TIME_END(MAT_MULT_64_AVX);
-    uint64_t checksum64_avx = 0;
-    for (size_t i = 0; i < C64_avx.size(); ++i) checksum64_avx += C64_avx[i];
-    BENCH_PRINT("Checksum (32->64 avx512,  may wrap): " << checksum64_avx);
-
-    // Correct AVX-512: inputs must be < q. Reduce A32/B32 once and rerun;
-    // compare against the scalar 32->64 chunked output (also using reduced
-    // inputs for a fair check).
-    std::vector<uint32_t> A32r(A32.size()), B32r(B32.size());
-    for (size_t lvl = 0; lvl < levels; ++lvl) {
-      const uint64_t qq = level_qs[lvl];
-      const uint32_t *Ain = A32.data() + lvl * (m * n);
-      const uint32_t *Bin = B32.data() + lvl * (n * p);
-      uint32_t *Aout = A32r.data() + lvl * (m * n);
-      uint32_t *Bout = B32r.data() + lvl * (n * p);
-      for (size_t k = 0; k < m * n; ++k)   Aout[k] = static_cast<uint32_t>(Ain[k] % qq);
-      for (size_t k = 0; k < n * p; ++k)   Bout[k] = static_cast<uint32_t>(Bin[k] % qq);
-    }
-
-    // Scalar reference (chunked) on reduced inputs.
-    std::vector<uint64_t> C_ref32(m * p * levels, 0);
-    for (size_t lvl = 0; lvl < levels; ++lvl) {
-      const uint64_t qq = level_qs[lvl];
-      const uint32_t *Ar = A32r.data() + lvl * (m * n);
-      const uint32_t *Br = B32r.data() + lvl * (n * p);
-      uint64_t *Cr = C_ref32.data() + lvl * (m * p);
-      for (size_t i = 0; i < m; ++i) {
-        uint128_t t0 = 0, t1 = 0;
-        for (size_t k = 0; k < n; ++k) {
-          t0 += (uint128_t)Ar[i * n + k] * Br[2 * k];
-          t1 += (uint128_t)Ar[i * n + k] * Br[2 * k + 1];
-        }
-        Cr[2 * i]     = static_cast<uint64_t>(t0 % qq);
-        Cr[2 * i + 1] = static_cast<uint64_t>(t1 % qq);
-      }
-    }
-
-    const std::string MAT_MULT_AVX_SAFE = "level mat mat 32->64 avx512 safe";
-    std::vector<uint64_t> C64_avx_safe(m * p * levels, 0);
-    TIME_START(MAT_MULT_AVX_SAFE);
-    level_mat_mat_avx512_safe(A32r.data(), B32r.data(), C64_avx_safe.data(),
-                              m, n, levels, level_qs.data());
-    TIME_END(MAT_MULT_AVX_SAFE);
-
-    // Correctness vs scalar reference.
-    bool avx_safe_ok = true;
-    for (size_t i = 0; i < C_ref32.size(); ++i) {
-      if (C_ref32[i] != C64_avx_safe[i]) { avx_safe_ok = false; break; }
-    }
-    BENCH_PRINT("AVX-512 safe correctness: " << (avx_safe_ok ? "PASS" : "FAIL"));
-
-    // Mat-vec variant: same A traffic, half the multiplies. B has 1 column.
-    std::vector<uint32_t> Bv(n * levels);
-    for (size_t lvl = 0; lvl < levels; ++lvl) {
-      const uint64_t qq = level_qs[lvl];
-      for (size_t k = 0; k < n; ++k)
-        Bv[lvl * n + k] = static_cast<uint32_t>(rand() % qq);
-    }
-    std::vector<uint64_t> Cv(m * levels, 0);
-    const std::string MAT_VEC_AVX = "level mat vec 32->64 avx512 safe";
-    TIME_START(MAT_VEC_AVX);
-    level_mat_vec_avx512_safe(A32r.data(), Bv.data(), Cv.data(),
-                              m, n, levels, level_qs.data());
-    TIME_END(MAT_VEC_AVX);
-    uint64_t cv_sum = 0;
-    for (size_t i = 0; i < Cv.size(); ++i) cv_sum += Cv[i];
-    BENCH_PRINT("Checksum (mat-vec): " << cv_sum);
-#endif
   }
 
   END_EXPERIMENT();
@@ -346,36 +261,6 @@ void PirTest::test_fst_dim_mult() {
     BENCH_PRINT("A-stream ceiling time: " << t_stream << " ms");
     BENCH_PRINT("A-stream ceiling throughput: \t"
                 << static_cast<size_t>(db64 / (t_stream * 1000)) << " MB/s");
-
-    const double t64_sp = GET_LAST_TIME(MAT_MULT_64_SPLIT);
-    BENCH_PRINT("level_mat_mat (32->64 split_b) time:  " << t64_sp << " ms");
-    BENCH_PRINT("level_mat_mat (32->64 split_b) throughput: \t"
-                << static_cast<size_t>(db64 / (t64_sp * 1000)) << " MB/s");
-    BENCH_PRINT("Speedup of 32->64 split_b vs build path: "
-                << (mat_mult_time / t64_sp) << "x");
-
-#if defined(__AVX512F__)
-    const double t64_avx = GET_LAST_TIME(MAT_MULT_64_AVX);
-    BENCH_PRINT("level_mat_mat (32->64 avx512)  time:  " << t64_avx << " ms");
-    BENCH_PRINT("level_mat_mat (32->64 avx512)  throughput: \t"
-                << static_cast<size_t>(db64 / (t64_avx * 1000)) << " MB/s");
-    BENCH_PRINT("Speedup of 32->64 avx512 vs build path: "
-                << (mat_mult_time / t64_avx) << "x");
-
-    const double t64_safe = GET_LAST_TIME("level mat mat 32->64 avx512 safe");
-    BENCH_PRINT("level_mat_mat (32->64 avx512 SAFE) time:  " << t64_safe << " ms");
-    BENCH_PRINT("level_mat_mat (32->64 avx512 SAFE) throughput: \t"
-                << static_cast<size_t>(db64 / (t64_safe * 1000)) << " MB/s");
-    BENCH_PRINT("Speedup of 32->64 avx512 SAFE vs build path: "
-                << (mat_mult_time / t64_safe) << "x");
-
-    const double t_vec = GET_LAST_TIME("level mat vec 32->64 avx512 safe");
-    BENCH_PRINT("level_mat_VEC (32->64 avx512 SAFE) time:  " << t_vec << " ms");
-    BENCH_PRINT("level_mat_VEC (32->64 avx512 SAFE) throughput: \t"
-                << static_cast<size_t>(db64 / (t_vec * 1000)) << " MB/s");
-    BENCH_PRINT("mat-vec / mat-mat ratio: " << (t_vec / t64_safe)
-                << " (1.0 = pure memory-bound on A)");
-#endif
   } else {
     BENCH_PRINT("Skipping 32->64 chunk: max modulus " << max_q_test
                 << " does not fit in 32 bits (K=1 60-bit cell).");

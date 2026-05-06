@@ -97,6 +97,35 @@ inline void right_shift_uint128(uint64_t *operand, int shift, uint64_t *result) 
 void ntt_fwd(uint64_t *data, size_t N, uint64_t q);
 void ntt_inv(uint64_t *data, size_t N, uint64_t q);
 
+// Barrett reduction for 64-bit x mod 64-bit q.
+//
+// Precompute once per modulus (barrett_u64_setup); call barrett_reduce_u64
+// for hot reductions where the value to reduce is already a uint64_t. This is
+// cheaper than the 128-bit-input Barrett reducer: one 64x64->128 multiply, one
+// multiply-subtract, and one conditional subtract.
+//
+// Precondition: q > 0. q == 1 is handled as a degenerate modulus.
+struct BarrettU64 {
+  uint64_t q;
+  uint64_t mu;  // floor(2^64 / q)
+};
+
+inline BarrettU64 barrett_u64_setup(uint64_t q) {
+  const uint64_t mu = (q == 1)
+      ? 0
+      : static_cast<uint64_t>((static_cast<uint128_t>(1) << 64) / q);
+  return BarrettU64{q, mu};
+}
+
+inline uint64_t barrett_reduce_u64(uint64_t x, const BarrettU64 &b) {
+  if (b.q == 1) return 0;
+  const uint64_t q_est = static_cast<uint64_t>(
+      (static_cast<uint128_t>(x) * b.mu) >> 64);
+  uint64_t r = x - q_est * b.q;
+  if (r >= b.q) r -= b.q;
+  return r;
+}
+
 // Barrett reduction for 128-bit x mod 64-bit q (SEAL-style).
 //
 // Precompute once per modulus (barrett_u128_setup); call barrett_reduce_u128

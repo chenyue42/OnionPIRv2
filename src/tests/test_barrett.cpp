@@ -1,11 +1,26 @@
 #include "tests.h"
 
+#include <array>
 #include <chrono>
+#include <limits>
 #include <random>
 #include <stdexcept>
+#include <sstream>
 #include <string>
 
 namespace {
+
+void check_case_u64(uint64_t x, uint64_t q) {
+  const utils::BarrettU64 b = utils::barrett_u64_setup(q);
+  const uint64_t got = utils::barrett_reduce_u64(x, b);
+  const uint64_t want = x % q;
+  if (got != want) {
+    std::ostringstream os;
+    os << "barrett_reduce_u64 mismatch: x=" << x
+       << " q=" << q << " got=" << got << " want=" << want;
+    throw std::runtime_error(os.str());
+  }
+}
 
 void check_case(uint128_t x, uint64_t q) {
   const utils::BarrettU128 b = utils::barrett_u128_setup(q);
@@ -44,6 +59,40 @@ void PirTest::test_barrett() {
   print_func_name(__FUNCTION__);
 
   std::mt19937_64 rng(0xBA77E77Fu);
+
+  // === 64-bit-input reducer: correctness over common and edge moduli ===
+  const std::array<uint64_t, 12> q_u64_set = {
+      1,
+      2,
+      3,
+      17,
+      utils::generate_prime(29),
+      utils::generate_prime(32),
+      utils::generate_prime(40),
+      utils::generate_prime(50),
+      utils::generate_prime(60),
+      (uint64_t{1} << 63) - 25,
+      (uint64_t{1} << 63) + 29,
+      std::numeric_limits<uint64_t>::max()};
+  constexpr size_t u64_samples_per_modulus = 20000;
+
+  size_t u64_cases = 0;
+  for (uint64_t q : q_u64_set) {
+    check_case_u64(0, q);
+    check_case_u64(1, q);
+    check_case_u64(q - 1, q);
+    check_case_u64(q, q);
+    check_case_u64(q + 1, q);
+    check_case_u64(std::numeric_limits<uint64_t>::max(), q);
+    u64_cases += 6;
+
+    for (size_t i = 0; i < u64_samples_per_modulus; i++) {
+      check_case_u64(rng(), q);
+      u64_cases++;
+    }
+  }
+
+  BENCH_PRINT("Barrett u64 correctness: " << u64_cases << " cases OK");
 
   // === Correctness grid: every (q_bits, x_bits) combo that actually appears ===
   const std::array<size_t, 7> q_bits_set  = {8, 17, 32, 40, 50, 60, 61};
@@ -113,7 +162,37 @@ void PirTest::test_barrett() {
   const double barrett_ns = std::chrono::duration<double, std::nano>(t1 - t0).count() / total;
   const double percent_ns = std::chrono::duration<double, std::nano>(t3 - t2).count() / total;
 
-  BENCH_PRINT("Per-reduction cost (q = " << q << ", compute-bound):");
+  // 64-bit-input variant benchmark.
+  std::vector<uint64_t> xs64(N);
+  for (size_t i = 0; i < N; i++) xs64[i] = rng();
+  const utils::BarrettU64 b64 = utils::barrett_u64_setup(q);
+
+  for (int r = 0; r < 10; r++)
+    for (size_t i = 0; i < N; i++) sink ^= utils::barrett_reduce_u64(xs64[i], b64);
+  for (int r = 0; r < 10; r++)
+    for (size_t i = 0; i < N; i++) sink ^= xs64[i] % q;
+
+  auto t4 = clk::now();
+  for (int r = 0; r < iters; r++)
+    for (size_t i = 0; i < N; i++) sink ^= utils::barrett_reduce_u64(xs64[i], b64);
+  auto t5 = clk::now();
+
+  auto t6 = clk::now();
+  for (int r = 0; r < iters; r++)
+    for (size_t i = 0; i < N; i++) sink ^= xs64[i] % q;
+  auto t7 = clk::now();
+
+  const double barrett_u64_ns =
+      std::chrono::duration<double, std::nano>(t5 - t4).count() / total;
+  const double percent_u64_ns =
+      std::chrono::duration<double, std::nano>(t7 - t6).count() / total;
+
+  BENCH_PRINT("Per-reduction cost (q = " << q << ", compute-bound, uint64 input):");
+  BENCH_PRINT("  barrett_reduce_u64  : " << barrett_u64_ns << " ns");
+  BENCH_PRINT("  x % q               : " << percent_u64_ns << " ns");
+  BENCH_PRINT("  speedup             : " << (percent_u64_ns / barrett_u64_ns) << "x");
+
+  BENCH_PRINT("Per-reduction cost (q = " << q << ", compute-bound, uint128 input):");
   BENCH_PRINT("  barrett_reduce_u128 : " << barrett_ns << " ns");
   BENCH_PRINT("  x % q               : " << percent_ns << " ns");
   BENCH_PRINT("  speedup             : " << (percent_ns / barrett_ns) << "x");

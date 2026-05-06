@@ -75,7 +75,7 @@ inline std::size_t WARMUP_ITERATIONS = 3;
 #define ODM_EXTERN_DECOMP "ODM ExtDecomp"
 
 #define RIGHT_SHIFT_TIME "Right shift"
-#define FST_DELEY_MOD_TIME "First dim delay mod"
+#define FST_INTER_TO_CTS_TIME "First dim gather+intt"
 
 // Enum to specify the logging context for detailed operations
 enum class LogContext {
@@ -126,7 +126,7 @@ const std::unordered_map<std::string, std::vector<std::string>> LOG_HIERARCHY = 
     {CONVERT_TIME, {CONVERT_EXTERN}},
     {CONVERT_EXTERN, {QTG_DECOMP_RLWE_TIME, QTG_EXTERN_NTT_TIME, QTG_EXTERN_PROD_MAT_MULT_TIME}}, // Children for QTG path
     {QTG_DECOMP_RLWE_TIME, {QTG_EXTERN_COMPOSE, QTG_RIGHT_SHIFT_TIME, QTG_EXTERN_DECOMP}},
-    {FST_DIM_TIME, {CORE_TIME, FST_DIM_PREP, FST_DELEY_MOD_TIME, FST_NTT_TIME}},
+    {FST_DIM_TIME, {CORE_TIME, FST_DIM_PREP, FST_INTER_TO_CTS_TIME, FST_NTT_TIME}},
     {OTHER_DIM_TIME, {OTHER_DIM_MUX_EXTERN, OTHER_DIM_INTT, OTHER_DIM_ADD_SUB}},
     {OTHER_DIM_MUX_EXTERN, {ODM_DECOMP_RLWE_TIME, ODM_EXTERN_NTT_TIME, ODM_EXTERN_PROD_MAT_MULT_TIME}}, // Replaced children with ODM specific
     {ODM_DECOMP_RLWE_TIME, {ODM_EXTERN_COMPOSE, ODM_RIGHT_SHIFT_TIME, ODM_EXTERN_DECOMP}},
