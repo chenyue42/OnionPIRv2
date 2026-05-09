@@ -97,6 +97,17 @@ inline void right_shift_uint128(uint64_t *operand, int shift, uint64_t *result) 
 void ntt_fwd(uint64_t *data, size_t N, uint64_t q);
 void ntt_inv(uint64_t *data, size_t N, uint64_t q);
 
+// Register a custom 2N-th root of unity for a single (N, q). HEXL's default
+// NTT ctor searches for a primitive root, but only works when q is prime.
+// Composite-mod first-dim (q = q1 * q2) needs a CRT-combined root supplied
+// externally. Call once during PirParams construction; thread-safe to read
+// thereafter.
+void register_ntt_root(size_t N, uint64_t q, uint64_t root);
+
+// Garner's CRT combine: given w1 ≡ w (mod q1), w2 ≡ w (mod q2) with
+// gcd(q1, q2) = 1, return the unique w ∈ [0, q1*q2). Requires q1*q2 < 2^64.
+uint64_t crt_combine(uint64_t w1, uint64_t q1, uint64_t w2, uint64_t q2);
+
 // Barrett reduction for 64-bit x mod 64-bit q.
 //
 // Precompute once per modulus (barrett_u64_setup); call barrett_reduce_u64

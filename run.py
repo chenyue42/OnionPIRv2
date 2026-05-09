@@ -18,7 +18,10 @@ CONFIG_ALIASES = {
     # alias       → (ACTIVE_CONFIG,            VARIANT)
     "k1":           ("CONFIG_N2048_K1",        "VARIANT_MP"),
     "n2048_k1":     ("CONFIG_N2048_K1",        "VARIANT_MP"),
-    
+
+    "k1_comp":      ("CONFIG_N2048_K1_COMP",   "VARIANT_MP"),
+    "n2048_k1_comp":("CONFIG_N2048_K1_COMP",   "VARIANT_MP"),
+
     "k2_mp":        ("CONFIG_N2048_K2_MP",     "VARIANT_MP"),
     "n2048_k2_mp":  ("CONFIG_N2048_K2_MP",     "VARIANT_MP"),
     
@@ -85,8 +88,8 @@ def main():
         help="Build without running",
     )
     parser.add_argument(
-        "-c", "--config", default="k1",
-        help=("Build configuration (default: k1). Aliases: "
+        "-c", "--config", default="k1_comp",
+        help=("Build configuration (default: k1_comp). Aliases: "
               + ", ".join(sorted(CONFIG_ALIASES))
               + ". Each alias selects both ACTIVE_CONFIG and VARIANT. See"
               " src/includes/database_constants.h for per-config meanings."),

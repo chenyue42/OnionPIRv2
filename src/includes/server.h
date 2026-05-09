@@ -60,6 +60,15 @@ private:
   std::unordered_map<size_t, RlwePt> recorded_pts_; // pre-NTT plaintexts for test verification
   std::unique_ptr<db_coeff_t[], AlignedDeleter<db_coeff_t>> db_aligned_; // aligned database for fast first dim
   std::vector<inter_coeff_t> inter_res_; // intermediate result vector for fst dim
+
+  // Composite-mod first-dim path (q = q1 * q2). When DBConsts::CompositeFirstDim
+  // is true these replace db_aligned_ + inter_res_: the DB is split into two
+  // u32 arrays (one per RNS limb), and the matmul writes into two u64 buffers
+  // which are CRT-composed in inter_to_cts_composite.
+  std::unique_ptr<uint32_t[], AlignedDeleter<uint32_t>> db_lo_;
+  std::unique_ptr<uint32_t[], AlignedDeleter<uint32_t>> db_hi_;
+  std::vector<uint64_t> inter_res_lo_;
+  std::vector<uint64_t> inter_res_hi_;
   PirParams pir_params_;
   GSWEval key_gsw_;
   GSWEval data_gsw_;
@@ -93,6 +102,18 @@ private:
   void fill_inter_res();
 
   void prep_query(std::vector<RlweCt> &fst_dim_query, std::vector<db_coeff_t>& query_data);
+
+  // Composite-mod variant: splits each NTT query coefficient into (mod q1,
+  // mod q2) u32 buffers. Inputs are already NTT-transformed under q = q1*q2.
+  void prep_query_composite(const std::vector<RlweCt> &fst_dim_query,
+                            uint32_t *query_lo, uint32_t *query_hi);
+
+  // Composite-mod variant of inter_to_cts: reads two per-limb u64 buffers,
+  // CRT-composes each coefficient back to mod q = q1*q2, then runs a single
+  // INTT mod q.
+  void inter_to_cts_composite(std::vector<RlweCt> &result,
+                              const uint64_t *inter_lo,
+                              const uint64_t *inter_hi);
 
   // customized modulus switch for single mod RlweCt. (Not RNS modulus)
   // The goal is to halve the size of the ciphertext.

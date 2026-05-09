@@ -28,6 +28,11 @@ typedef unsigned __int128 uint128_t;
 #define CONFIG_N2048_K2_RNS      2
 #define CONFIG_N4096_K2_MP       3
 #define CONFIG_N4096_K2_RNS      4
+// Composite first-dim split: q = q1*q2 (29+29). Pipeline sees a single ~58-bit
+// modulus (single-mod K=1 paths are reused for everything), but the first-dim
+// matmul splits each NTT coefficient into (mod q1, mod q2) for 32x32->64
+// multiplies. Requires VARIANT_MP.
+#define CONFIG_N2048_K1_COMP     5
 #ifndef ACTIVE_CONFIG
 #define ACTIVE_CONFIG CONFIG_N2048_K1
 #endif
@@ -68,7 +73,7 @@ namespace DBConsts {
   // ==========================================================================
   // Constants common to all configs
   // ==========================================================================
-  constexpr size_t DB_SIZE_MB = 128;
+  constexpr size_t DB_SIZE_MB = 8192;
   constexpr double NoiseStdDev = 2.55;  // matches Spiral & InsPIRe. 
 
   // First-dimension shape policy. See utils::calculate_db_shape.
@@ -92,6 +97,26 @@ namespace DBConsts {
   constexpr size_t PlainMod     = 14;
   constexpr size_t SmallQWidth  = 22;
   constexpr std::array<size_t, 1> RnsMods = {60};
+  constexpr bool CompositeFirstDim = false;
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {0, 0};
+
+#elif ACTIVE_CONFIG == CONFIG_N2048_K1_COMP
+  // K=1 composite: pipeline sees single q ≈ 2^58 (= q1*q2 with q1, q2 ~ 2^29).
+  // First-dim matmul splits per-limb to hit the 32x32->64 fast path.
+  // PlainMod and SmallQWidth follow ClayPIR's CONFIG_COMPOSITE_56-style budget.
+  constexpr size_t PolyDegree   = 2048;
+  constexpr size_t L_EP         = 6;
+  constexpr size_t L_KEY        = 10;
+  constexpr size_t L_KS         = 8;
+  constexpr size_t TREE_HEIGHT  = 10;
+  constexpr size_t PlainMod     = 13;
+  constexpr size_t SmallQWidth  = 22;
+  // Logical (single) RNS view: rns_mods_ holds {q1*q2}, ~58 bits. The 58 here
+  // is the bit width passed to inter_coeff_t / db_coeff_t selectors; actual
+  // modulus is computed in PirParams::init_composite_rns.
+  constexpr std::array<size_t, 1> RnsMods = {58};
+  constexpr bool CompositeFirstDim = true;
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {29, 29};
 
 #elif ACTIVE_CONFIG == CONFIG_N2048_K2_MP
   // K=2 with VARIANT_MP. Single CRT-composed gadget of base B = 2^(60/l) —
@@ -104,6 +129,8 @@ namespace DBConsts {
   constexpr size_t PlainMod     = 10;
   constexpr size_t SmallQWidth  = 22;
   constexpr std::array<size_t, 2> RnsMods = {29, 29};
+  constexpr bool CompositeFirstDim = false;
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {0, 0};
 
 #elif ACTIVE_CONFIG == CONFIG_N2048_K2_RNS
   // K=2 with VARIANT_RNS. Per-limb gadgets of base B_k = 2^(29/l) are already
@@ -116,6 +143,8 @@ namespace DBConsts {
   constexpr size_t PlainMod     = 13;
   constexpr size_t SmallQWidth  = 22;
   constexpr std::array<size_t, 2> RnsMods = {29, 29};
+  constexpr bool CompositeFirstDim = false;
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {0, 0};
 
 #elif ACTIVE_CONFIG == CONFIG_N4096_K2_MP
   // K=2 with VARIANT_MP at N=4096. Total log Q ≈ 120 — fits in uint128, so MP
@@ -130,6 +159,8 @@ namespace DBConsts {
   constexpr size_t PlainMod     = 40;
   constexpr size_t SmallQWidth  = 50;
   constexpr std::array<size_t, 2> RnsMods = {60, 60};
+  constexpr bool CompositeFirstDim = false;
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {0, 0};
 
 #elif ACTIVE_CONFIG == CONFIG_N4096_K2_RNS
   // K=2 with VARIANT_RNS at N=4096. Per-limb gadget B_k = 2^(60/l). Smaller l
@@ -144,6 +175,8 @@ namespace DBConsts {
   constexpr size_t PlainMod     = 40;
   constexpr size_t SmallQWidth  = 50;
   constexpr std::array<size_t, 2> RnsMods = {60, 60};
+  constexpr bool CompositeFirstDim = false;
+  constexpr std::array<size_t, 2> FirstDimRNSMods = {0, 0};
 
 #else
   #error "Unknown ACTIVE_CONFIG"
@@ -168,6 +201,11 @@ namespace DBConsts {
 #if ACTIVE_CONFIG == CONFIG_N2048_K1
   static_assert(Decomp == DecompVariant::MP,
                 "CONFIG_N2048_K1 requires VARIANT_MP (RNS is a no-op at K=1).");
+#elif ACTIVE_CONFIG == CONFIG_N2048_K1_COMP
+  static_assert(Decomp == DecompVariant::MP,
+                "CONFIG_N2048_K1_COMP requires VARIANT_MP (single-mod K=1 view).");
+  static_assert(CompositeFirstDim,
+                "CONFIG_N2048_K1_COMP must enable CompositeFirstDim.");
 #elif ACTIVE_CONFIG == CONFIG_N2048_K2_MP
   static_assert(Decomp == DecompVariant::MP,
                 "CONFIG_N2048_K2_MP requires VARIANT_MP.");
@@ -187,6 +225,10 @@ namespace DBConsts {
   // and total log Q ≤ 128 bits. K ≥ 3 would need the RNS variant.
   static_assert(!(RnsMods.size() >= 3 && Decomp == DecompVariant::MP),
                 "VARIANT_MP only supports K ≤ 2; use VARIANT_RNS at K ≥ 3.");
+
+  // Composite split is only meaningful for the single-mod (K=1) view.
+  static_assert(!CompositeFirstDim || RnsMods.size() == 1,
+                "CompositeFirstDim requires a single composite ct modulus");
 
 } // namespace DBConsts
 

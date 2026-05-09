@@ -9,9 +9,18 @@
 #include <unordered_map>
 
 namespace {
+// Optional custom 2N-th root for a single (N, q). Set once by
+// utils::register_ntt_root during PirParams construction, then read-only.
+// Used for composite q = q1*q2 since HEXL's default ctor can't search for a
+// root when q is non-prime.
+size_t g_custom_N = 0;
+uint64_t g_custom_q = 0;
+uint64_t g_custom_root = 0;
+
 // Thread-local cache of HEXL NTT objects keyed by (N, q). Each thread owns
-// its own copy; no locking needed. Every (N, q) used here is a prime modulus,
-// so HEXL's default ctor can search for a primitive root itself.
+// its own copy; no locking needed. Most (N, q) used here are prime moduli;
+// HEXL's default ctor searches for a primitive root. Composite q falls back
+// to the registered custom root.
 intel::hexl::NTT &get_ntt(size_t N, uint64_t q) {
   struct Key {
     size_t N; uint64_t q;
@@ -25,10 +34,24 @@ intel::hexl::NTT &get_ntt(size_t N, uint64_t q) {
   static std::unordered_map<Key, std::unique_ptr<intel::hexl::NTT>, Hash> cache;
   auto it = cache.find({N, q});
   if (it != cache.end()) return *it->second;
-  auto ins = cache.emplace(Key{N, q}, std::make_unique<intel::hexl::NTT>(N, q));
+  auto ntt = (N == g_custom_N && q == g_custom_q)
+                 ? std::make_unique<intel::hexl::NTT>(N, q, g_custom_root)
+                 : std::make_unique<intel::hexl::NTT>(N, q);
+  auto ins = cache.emplace(Key{N, q}, std::move(ntt));
   return *ins.first->second;
 }
 } // namespace
+
+void utils::register_ntt_root(size_t N, uint64_t q, uint64_t root) {
+  if (g_custom_N != 0 &&
+      (g_custom_N != N || g_custom_q != q || g_custom_root != root)) {
+    throw std::invalid_argument(
+        "register_ntt_root: a different (N, q, root) is already registered");
+  }
+  g_custom_N = N;
+  g_custom_q = q;
+  g_custom_root = root;
+}
 
 void utils::automorphism_coeff(const uint64_t *in, size_t N, uint32_t k,
                                uint64_t q, uint64_t *out) {
@@ -222,6 +245,17 @@ utils::gsw_gadget_approx(size_t l, uint64_t base_log2, size_t q_bits,
  * @param bit_width >= 2 and <= 64
  * @return std::uint64_t  
  */
+uint64_t utils::crt_combine(uint64_t w1, uint64_t q1,
+                             uint64_t w2, uint64_t q2) {
+  // Garner: w = w1 + q1 * ((w2 - w1) * q1^{-1} mod q2) ∈ [0, q1*q2).
+  uint64_t q1_inv;
+  if (!try_invert_uint_mod(q1 % q2, q2, q1_inv))
+    throw std::invalid_argument("crt_combine: q1, q2 must be coprime");
+  const uint64_t diff = (w2 + q2 - (w1 % q2)) % q2;
+  const uint64_t k = mulmod_u64(diff, q1_inv, q2);
+  return static_cast<uint64_t>(static_cast<uint128_t>(q1) * k + w1);
+}
+
 std::uint64_t utils::generate_prime(size_t bit_width) {
   if (bit_width < 2) throw std::invalid_argument("Bit width must be at least 2.");
 

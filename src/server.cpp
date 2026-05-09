@@ -29,10 +29,17 @@ PirServer::PirServer(const PirParams &pir_params)
       num_pt_(pir_params.get_num_pt()),
       key_gsw_(pir_params, pir_params.get_l_key(), pir_params.get_base_log2_key()),
       data_gsw_(pir_params, pir_params.get_l(), pir_params.get_base_log2()) {
-  // after NTT, each database polynomial coefficient will be in mod q. Hence,
-  // each pt coefficient is represented by K many uint64_t, same as the ciphertext.
   const size_t db_elem_cnt = num_pt_ * pir_params_.get_coeff_val_cnt();
-  db_aligned_ = make_unique_aligned<db_coeff_t, 64>(db_elem_cnt);
+  if (pir_params_.get_composite_rns().enabled) {
+    // Composite path: two u32 arrays (mod q1 and mod q2) with the same
+    // coeff-major layout. Bytes match the u64 DB on the standard path.
+    db_lo_ = make_unique_aligned<uint32_t, 64>(db_elem_cnt);
+    db_hi_ = make_unique_aligned<uint32_t, 64>(db_elem_cnt);
+  } else {
+    // after NTT, each database polynomial coefficient will be in mod q. Hence,
+    // each pt coefficient is represented by K many uint64_t, same as the ciphertext.
+    db_aligned_ = make_unique_aligned<db_coeff_t, 64>(db_elem_cnt);
+  }
   fill_inter_res();
 }
 
@@ -80,6 +87,30 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
   // over [0, coeff_val_cnt) = K * coeff_count limbs. Limb k occupies coeff_idx
   // in [k*N, (k+1)*N).
   TIME_ONCE_START("DB NTT + realign");
+
+  // Composite path: NTT mod q (= q1*q2) once, then split each coefficient into
+  // (mod q1, mod q2) u32 limbs in the same coeff-major layout.
+  const auto &crt = pir_params_.get_composite_rns();
+  if (crt.enabled) {
+    const uint64_t q  = rns_mods[0];   // q1*q2
+    const uint64_t q1 = crt.q1;
+    const uint64_t q2 = crt.q2;
+    for (size_t poly_id = 0; poly_id < num_pt_; ++poly_id) {
+      uint64_t *coeffs = plaintexts[poly_id].data.data();
+      utils::ntt_fwd(coeffs, coeff_count, q);
+      for (size_t coeff_idx = 0; coeff_idx < coeff_count; ++coeff_idx) {
+        const uint64_t c = coeffs[coeff_idx];
+        const size_t idx = coeff_idx * num_pt_ + poly_id;
+        db_lo_[idx] = static_cast<uint32_t>(c % q1);
+        db_hi_[idx] = static_cast<uint32_t>(c % q2);
+      }
+    }
+    TIME_ONCE_END("DB NTT + realign");
+    PRINT_ONCE("DB random fill");
+    PRINT_ONCE("DB NTT + realign");
+    return;
+  }
+
   constexpr size_t TILE = 8;
   // K limbs interleaved per tile: stage[k][p] of length coeff_count.
   std::vector<uint64_t> stage(K * TILE * coeff_count);
@@ -167,6 +198,44 @@ void PirServer::prep_query(std::vector<RlweCt> &fst_dim_query,
   }
 }
 
+void PirServer::prep_query_composite(const std::vector<RlweCt> &fst_dim_query,
+                                     uint32_t *query_lo, uint32_t *query_hi) {
+  const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
+  const size_t coeff_val_cnt = pir_params_.get_coeff_val_cnt();
+  const size_t slice_sz = fst_dim_sz * 2;
+  const auto &crt = pir_params_.get_composite_rns();
+  const uint64_t q1 = crt.q1;
+  const uint64_t q2 = crt.q2;
+
+  std::vector<const uint64_t *> data0_ptrs(fst_dim_sz);
+  std::vector<const uint64_t *> data1_ptrs(fst_dim_sz);
+  for (size_t i = 0; i < fst_dim_sz; ++i) {
+    data0_ptrs[i] = fst_dim_query[i].c0.data();
+    data1_ptrs[i] = fst_dim_query[i].c1.data();
+  }
+
+  constexpr size_t BLOCK_SIZE = 8;
+  for (size_t slice_block = 0; slice_block < coeff_val_cnt;
+       slice_block += BLOCK_SIZE) {
+    const size_t slice_block_end =
+        std::min(slice_block + BLOCK_SIZE, coeff_val_cnt);
+    for (size_t i = 0; i < fst_dim_sz; ++i) {
+      const uint64_t *p0 = data0_ptrs[i];
+      const uint64_t *p1 = data1_ptrs[i];
+      for (size_t slice_id = slice_block; slice_id < slice_block_end;
+           ++slice_id) {
+        const size_t idx = slice_id * slice_sz + i * 2;
+        const uint64_t v0 = p0[slice_id];
+        const uint64_t v1 = p1[slice_id];
+        query_lo[idx]     = static_cast<uint32_t>(v0 % q1);
+        query_lo[idx + 1] = static_cast<uint32_t>(v1 % q1);
+        query_hi[idx]     = static_cast<uint32_t>(v0 % q2);
+        query_hi[idx + 1] = static_cast<uint32_t>(v1 % q2);
+      }
+    }
+  }
+}
+
 // Computes a dot product between the fst_dim_query and the database for the
 // first dimension with a delayed modulus optimization. fst_dim_query should
 // be transformed to ntt.
@@ -179,6 +248,43 @@ PirServer::evaluate_first_dim(std::vector<RlweCt> &fst_dim_query) {
   const size_t one_ct_sz = 2 * coeff_val_cnt; // Ciphertext has two polynomials
   const auto &rns_mods = pir_params_.get_rns_mods();
   constexpr size_t N = DBConsts::PolyDegree;
+
+  const auto &crt = pir_params_.get_composite_rns();
+  if (crt.enabled) {
+    // Composite path: NTT each fst_dim_query under q = q1*q2 (single mod),
+    // split DB & query into (mod q1, mod q2) u32 limbs, run two parallel
+    // 32x32->64 matmuls, CRT-compose results back to mod q, then INTT mod q.
+    const uint64_t q = rns_mods[0];
+    for (size_t i = 0; i < fst_dim_query.size(); ++i) {
+      RlweCt &ct = fst_dim_query[i];
+      utils::ntt_fwd(ct.c0.data(), N, q);
+      utils::ntt_fwd(ct.c1.data(), N, q);
+      ct.ntt_form = true;
+    }
+
+    std::fill(inter_res_lo_.begin(), inter_res_lo_.end(), 0);
+    std::fill(inter_res_hi_.begin(), inter_res_hi_.end(), 0);
+
+    TIME_START(FST_DIM_PREP);
+    std::vector<uint32_t> query_lo(fst_dim_sz * one_ct_sz);
+    std::vector<uint32_t> query_hi(fst_dim_sz * one_ct_sz);
+    prep_query_composite(fst_dim_query, query_lo.data(), query_hi.data());
+    TIME_END(FST_DIM_PREP);
+
+    TIME_START(CORE_TIME);
+    level_mat_mat_32(db_lo_.get(), query_lo.data(), inter_res_lo_.data(),
+                     other_dim_sz, fst_dim_sz, coeff_val_cnt, crt.q1);
+    level_mat_mat_32(db_hi_.get(), query_hi.data(), inter_res_hi_.data(),
+                     other_dim_sz, fst_dim_sz, coeff_val_cnt, crt.q2);
+    TIME_END(CORE_TIME);
+
+    TIME_START(FST_INTER_TO_CTS_TIME);
+    std::vector<RlweCt> result;
+    result.reserve(other_dim_sz);
+    inter_to_cts_composite(result, inter_res_lo_.data(), inter_res_hi_.data());
+    TIME_END(FST_INTER_TO_CTS_TIME);
+    return result;
+  }
 
   // fill the intermediate result with zeros
   std::fill(inter_res_.begin(), inter_res_.end(), 0);
@@ -328,6 +434,71 @@ void PirServer::inter_to_cts(std::vector<RlweCt> &result, const inter_coeff_t *_
       utils::ntt_inv(ct.c0.data() + mod_id * coeff_count, coeff_count, rns_mods[mod_id]);
       utils::ntt_inv(ct.c1.data() + mod_id * coeff_count, coeff_count, rns_mods[mod_id]);
     }
+    ct.ntt_form = false;
+    result.emplace_back(std::move(ct));
+  }
+}
+
+void PirServer::inter_to_cts_composite(std::vector<RlweCt> &result,
+                                       const uint64_t *inter_lo,
+                                       const uint64_t *inter_hi) {
+  const auto &crt = pir_params_.get_composite_rns();
+  const uint64_t q1 = crt.q1;
+  const uint64_t q2 = crt.q2;
+  const uint64_t q1_inv_mod_q2 = crt.q1_inv_mod_q2;
+  const uint64_t q = q1 * q2;
+  const size_t other_dim_sz = pir_params_.get_other_dim_sz();
+  constexpr size_t coeff_count = DBConsts::PolyDegree;
+  const size_t inter_padding = other_dim_sz * 2;
+
+  // Garner CRT compose: (lo, hi) → lo + q1 * ((hi − lo) · q1_inv mod q2).
+  // Since q1, q2 < 2^29, diff·q1_inv stays under 2^58 — no 128-bit mul.
+  auto compose = [q1, q2, q1_inv_mod_q2](uint64_t lo, uint64_t hi) -> uint64_t {
+    const uint64_t lo_mod_q2 = lo % q2;
+    const uint64_t diff = (hi + q2 - lo_mod_q2) % q2;
+    const uint64_t k = (diff * q1_inv_mod_q2) % q2;
+    return lo + q1 * k;
+  };
+
+  constexpr size_t unroll_factor = 16;
+  const size_t main_blocks = other_dim_sz / unroll_factor;
+  for (size_t block = 0; block < main_blocks; block++) {
+    const size_t j = block * unroll_factor;
+    std::array<RlweCt, unroll_factor> cts;
+    for (size_t idx = 0; idx < unroll_factor; idx++) {
+      cts[idx].c0.assign(coeff_count, 0);
+      cts[idx].c1.assign(coeff_count, 0);
+    }
+    for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
+      const size_t row = coeff_id * inter_padding;
+      #pragma unroll
+      for (size_t idx = 0; idx < unroll_factor; idx++) {
+        const size_t b0 = row + j * 2 + 2 * idx;
+        const size_t b1 = b0 + 1;
+        cts[idx].c0[coeff_id] = compose(inter_lo[b0], inter_hi[b0]);
+        cts[idx].c1[coeff_id] = compose(inter_lo[b1], inter_hi[b1]);
+      }
+    }
+    for (size_t idx = 0; idx < unroll_factor; idx++) {
+      utils::ntt_inv(cts[idx].c0.data(), coeff_count, q);
+      utils::ntt_inv(cts[idx].c1.data(), coeff_count, q);
+      cts[idx].ntt_form = false;
+      result.emplace_back(std::move(cts[idx]));
+    }
+  }
+
+  for (size_t j = main_blocks * unroll_factor; j < other_dim_sz; j++) {
+    RlweCt ct;
+    ct.c0.assign(coeff_count, 0);
+    ct.c1.assign(coeff_count, 0);
+    for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
+      const size_t b0 = coeff_id * inter_padding + j * 2;
+      const size_t b1 = b0 + 1;
+      ct.c0[coeff_id] = compose(inter_lo[b0], inter_hi[b0]);
+      ct.c1[coeff_id] = compose(inter_lo[b1], inter_hi[b1]);
+    }
+    utils::ntt_inv(ct.c0.data(), coeff_count, q);
+    utils::ntt_inv(ct.c1.data(), coeff_count, q);
     ct.ntt_form = false;
     result.emplace_back(std::move(ct));
   }
@@ -650,7 +821,12 @@ void PirServer::fill_inter_res() {
   const size_t K = pir_params_.K();
   const size_t other_dim_sz = pir_params_.get_other_dim_sz();
   const size_t elem_cnt = other_dim_sz * DBConsts::PolyDegree * K * 2;
-  inter_res_.resize(elem_cnt);
+  if (pir_params_.get_composite_rns().enabled) {
+    inter_res_lo_.resize(elem_cnt);
+    inter_res_hi_.resize(elem_cnt);
+  } else {
+    inter_res_.resize(elem_cnt);
+  }
 }
 
 void PirServer::mod_switch_inplace(RlweCt &ciphertext, const uint64_t q) {

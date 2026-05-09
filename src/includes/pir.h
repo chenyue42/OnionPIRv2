@@ -11,6 +11,20 @@ struct RnsTables {
   std::vector<uint64_t> r64_mod_q;
 };
 
+// Constants for the composite-mod first-dim split. Only populated when the
+// active config splits the (single, logical) ciphertext modulus q into two
+// CRT limbs (q = q1*q2) for the first-dimension matmul. enabled = false
+// otherwise; rest of the pipeline still sees a single-mod K=1 view.
+struct CompositeRnsTables {
+  bool enabled = false;
+  uint64_t q1 = 0;              // first RNS limb (~29 bits)
+  uint64_t q2 = 0;              // second RNS limb (~29 bits)
+  uint64_t w1 = 0;              // primitive 2N-th root mod q1
+  uint64_t w2 = 0;              // primitive 2N-th root mod q2
+  uint64_t w_crt = 0;           // CRT-combined primitive 2N-th root mod q1*q2
+  uint64_t q1_inv_mod_q2 = 0;   // for CRT-compose hot path
+};
+
 // ================== CLASS DEFINITIONS ==================
 class PirParams {
 public:
@@ -57,6 +71,7 @@ public:
   inline const std::vector<uint64_t> &get_rns_mods() const { return rns_mods_; }
   inline const std::vector<size_t> &get_rns_mod_bits() const { return rns_mod_bits_; }
   inline const RnsTables &get_rns_tables() const { return rns_tables_; }
+  inline const CompositeRnsTables &get_composite_rns() const { return composite_rns_; }
   inline size_t get_poly_degree() const { return DBConsts::PolyDegree; }
   inline const size_t get_expan_height() const { return DBConsts::TREE_HEIGHT; }
   inline size_t get_num_other_dims() const { return num_dims_ - 1; }
@@ -115,4 +130,10 @@ private:
   std::vector<size_t> rns_mod_bits_;
   std::vector<uint64_t> rns_mods_;
   RnsTables rns_tables_;
+  CompositeRnsTables composite_rns_;
+
+  // Populate rns_mods_ and composite_rns_ for the composite-first-dim path.
+  // Registers the CRT-combined 2N-th root with utils so later NTT calls on the
+  // composite modulus pick it up (HEXL's default ctor assumes a prime).
+  void init_composite_rns();
 };

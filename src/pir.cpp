@@ -1,16 +1,51 @@
 #include "pir.h"
 #include "database_constants.h"
 #include "utils.h"
+#include "hexl/hexl.hpp"
 
 #include <cassert>
 #include <cmath>
 #include <iostream>
 #include <string>
 
+void PirParams::init_composite_rns() {
+  // Generate two NTT-friendly primes from FirstDimRNSMods bit widths and
+  // combine them: q = q1 * q2, single composite limb visible to the rest of
+  // the pipeline. The first-dim matmul will split each NTT coefficient back
+  // into (mod q1, mod q2) for 32x32->64 multiplies; everything else (decomp,
+  // keyswitch, external product) sees a single ~58-bit modulus.
+  std::vector<size_t> rns_bits(DBConsts::FirstDimRNSMods.begin(),
+                               DBConsts::FirstDimRNSMods.end());
+  auto rns_primes = utils::generate_ntt_friendly_primes(rns_bits,
+                                                        DBConsts::PolyDegree);
+  const uint64_t q1 = rns_primes[0];
+  const uint64_t q2 = rns_primes[1];
+  const uint64_t crt_mod = q1 * q2;
+  const uint64_t w1 = intel::hexl::MinimalPrimitiveRoot(2 * DBConsts::PolyDegree, q1);
+  const uint64_t w2 = intel::hexl::MinimalPrimitiveRoot(2 * DBConsts::PolyDegree, q2);
+  const uint64_t w_crt = utils::crt_combine(w1, q1, w2, q2);
+  utils::register_ntt_root(DBConsts::PolyDegree, crt_mod, w_crt);
+  rns_mods_ = {crt_mod};
+  composite_rns_.enabled = true;
+  composite_rns_.q1 = q1;
+  composite_rns_.q2 = q2;
+  composite_rns_.w1 = w1;
+  composite_rns_.w2 = w2;
+  composite_rns_.w_crt = w_crt;
+  uint64_t q1_inv;
+  if (!utils::try_invert_uint_mod(q1 % q2, q2, q1_inv))
+    throw std::runtime_error("PirParams: q1 and q2 must be coprime");
+  composite_rns_.q1_inv_mod_q2 = q1_inv;
+}
+
 PirParams::PirParams()
     : rns_mod_bits_(DBConsts::RnsMods.begin(), DBConsts::RnsMods.end()) {
-  rns_mods_ = utils::generate_ntt_friendly_primes(rns_mod_bits_,
-                                                       DBConsts::PolyDegree);
+  if constexpr (DBConsts::CompositeFirstDim) {
+    init_composite_rns();
+  } else {
+    rns_mods_ = utils::generate_ntt_friendly_primes(rns_mod_bits_,
+                                                    DBConsts::PolyDegree);
+  }
 
   // =============== Plaintext modulus ===============
   plain_mod_ = utils::generate_prime(DBConsts::PlainMod);

@@ -74,6 +74,19 @@ void level_mat_mat_nochunk_u64(const uint32_t *A_data, const uint32_t *B_data,
 uint32_t level_mat_mat_stream_only(const uint32_t *A_data, size_t m,
                                    size_t n, size_t levels);
 
+// Composite-mod first-dim helper: per-limb 32x32 -> 64 mat-mat under a single
+// scalar modulus q (typically one of q1, q2 with q < 2^32). Wraps the AVX-512
+// SAFE kernel; falls back to scalar 32x32->64 with a single per-output Barrett
+// reduce when AVX-512 is not available. Output is reduced mod q.
+//   A   : m x n, layout matches level_mat_mat (level-major, row-major)
+//   B   : n x 2 (interleaved [B0_k, B1_k]), one level
+//   out : m x 2 per level (interleaved)
+//   levels : number of levels, must match A
+//   q   : single modulus shared across all levels
+void level_mat_mat_32(const uint32_t *A_data, const uint32_t *B_data,
+                      uint64_t *out_data, size_t m, size_t n, size_t levels,
+                      uint64_t q);
+
 // ======================== COMPONENT WISE MULTIPLICATION ========================
 
 // These are examples of component wise multiplication. This demonstrates the
