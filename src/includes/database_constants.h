@@ -73,7 +73,7 @@ namespace DBConsts {
   // ==========================================================================
   // Constants common to all configs
   // ==========================================================================
-  constexpr size_t DB_SIZE_MB = 8192;
+  constexpr size_t DB_SIZE_MB = 128;
   constexpr double NoiseStdDev = 2.55;  // matches Spiral & InsPIRe. 
 
   // First-dimension shape policy. See utils::calculate_db_shape.

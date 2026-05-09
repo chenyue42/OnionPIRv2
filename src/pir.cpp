@@ -111,44 +111,55 @@ void PirParams::print_params() const {
     print_field(label, std::to_string(value));
   };
 
-  print_field_num("db_coeff_t size (bytes)", get_uint_size());
+  // ---- Database shape ----
   print_field_num("Database size (MB)", get_DBSize_MB());
   print_field_num("Physical storage (MB)", get_physical_storage_MB());
   print_field_num("Plaintext size (KB)", get_pt_size() / 1024);
-  print_field_num("num_pt_", num_pt_);
-  print_field_num("expansion tree height", get_expan_height());
-  print_field_num("l_ep_", l_ep_);
-  print_field_num("l_key_", l_key_);
-  print_field_num("base_log2_", base_log2_);
-
+  print_field_num("num_pt", num_pt_);
   print_field_num("fst_dim_sz", fst_dim_sz_);
   print_field_num("num_dims", num_dims_);
-  print_field_num("num_other_dims", get_num_other_dims());
+  print_field_num("expansion tree height", get_expan_height());
 
+  // ---- Gadget / decomposition ----
+  print_field_num("l_ep (data RGSW)",  l_ep_);
+  print_field_num("l_key (key RGSW)",  l_key_);
+  print_field_num("l_ks (BV keyswitch)", DBConsts::L_KS);
+  // print_field_num("base_log2 (data)", base_log2_);
+  // print_field_num("base_log2 (key)",  base_log2_key_);
+
+  // ---- Ring / moduli ----
   print_field_num("poly_modulus_degree", DBConsts::PolyDegree);
 
-  std::string bit_count_str = "[";
-  for (std::size_t i = 0; i + 1 < rns_mod_bits_.size(); i++) {
-    bit_count_str += std::to_string(rns_mod_bits_[i]) + " + ";
+  std::string bits_str = "[";
+  std::string mods_str = "[";
+  for (size_t i = 0; i < rns_mods_.size(); ++i) {
+    bits_str += std::to_string(rns_mod_bits_[i]);
+    mods_str += std::to_string(rns_mods_[i]);
+    if (i + 1 < rns_mods_.size()) { bits_str += " + "; mods_str += " + "; }
   }
-  bit_count_str += std::to_string(rns_mod_bits_.back());
-  bit_count_str += "] = " + std::to_string(get_ct_mod_width()) + " bits";
-  print_field("rns_mods bit widths", bit_count_str, 40);
+  bits_str += "] = " + std::to_string(get_ct_mod_width()) + " bits";
+  mods_str += "]";
+  print_field("rns_mods (bits)", bits_str, 40);
+  print_field("rns_mods", mods_str, 40);
 
-  std::string coeff_mod_str = "[";
-  for (std::size_t i = 0; i + 1 < rns_mods_.size(); i++) {
-    coeff_mod_str += std::to_string(rns_mods_[i]) + " + ";
-  }
-  coeff_mod_str += std::to_string(rns_mods_.back());
-  coeff_mod_str += "]";
-  print_field("rns_mods", coeff_mod_str, 40);
-
-  print_field_num("plain_modulus", plain_mod_);
-  print_field_num("log(q)", get_ct_mod_width());
-  print_field_num("log(t)", static_cast<int>(std::ceil(std::log2(plain_mod_))));
+  print_field("plain_modulus",
+              std::to_string(plain_mod_) + " (log_2 ≈ " +
+                  std::to_string(static_cast<int>(std::ceil(std::log2(plain_mod_)))) +
+                  ")", 40);
 
   if (K() == 1) {
-    print_field_num("log(small_q)", static_cast<int>(std::ceil(std::log2(small_q_))));
+    print_field("small_q (mod-switch)",
+                std::to_string(small_q_) + " (log_2 ≈ " +
+                    std::to_string(static_cast<int>(std::ceil(std::log2(small_q_)))) +
+                    ")", 40);
+  }
+
+  // ---- Composite-mod first-dim (only when enabled) ----
+  if (composite_rns_.enabled) {
+    print_field("composite split q1*q2",
+                std::to_string(composite_rns_.q1) + " * " +
+                    std::to_string(composite_rns_.q2),
+                40);
   }
 
   std::cout << "==============================================================" << std::endl;
