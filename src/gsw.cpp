@@ -137,8 +137,7 @@ void GSWEval::external_product(GSWCt const &gsw_enc, RlweCt const &bfv,
       2, std::vector<inter_coeff_t>(coeff_val_cnt, 0));
 
   TIME_START(log_keys.matmul);
-  // matrix multiplication: decomp(bfv) * gsw. Rows = gsw_rows (2*l_ for MP,
-  // 2*K*l_ for RNS).
+  // matrix multiplication: decomp(bfv) * gsw. Rows = 2 * l_.
   for (size_t k = 0; k < 2; ++k) {
     for (size_t j = 0; j < gsw_rows; j++) {
       const uint64_t *encrypted_gsw_ptr = gsw_enc[j].data() + k * coeff_val_cnt;
@@ -339,7 +338,7 @@ GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
   // MP gadget table: gadget_table[k][p] = B^(l_-1-p) mod q_k, MSB-first
   // (p=0 = largest power B^(l_-1)).
   std::vector<std::vector<uint64_t>> gadget_table =
-      utils::gsw_gadget(l_, base_log2_, K, rns_mods_arr);
+      utils::gsw_gadget(l_, base_log2_, rns_mods_arr);
 
   const size_t rows_per_half = l_;
   GSWCt output(2 * rows_per_half, std::vector<uint64_t>(2 * K * N));

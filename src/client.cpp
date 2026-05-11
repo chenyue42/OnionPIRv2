@@ -155,7 +155,7 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
   // MP gadget table: gadget[k][p] = B^(l-1-p) mod q_k. MSB-first
   // (p=0 = largest power), matching plain_to_gsw.
   std::vector<std::vector<uint64_t>> gadget =
-      utils::gsw_gadget(l, pir_params_.get_base_log2(), K, rns_mods);
+      utils::gsw_gadget(l, pir_params_.get_base_log2(), rns_mods);
 
   // Algorithm 1 from the OnionPIR paper: when bit i is "1", write gadget powers
   // (scaled by 1/capacity) into the slots that the expansion will turn into

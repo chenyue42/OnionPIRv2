@@ -197,9 +197,10 @@ std::string utils::uint128_to_string(uint128_t value) {
 
 
 
-std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log2, size_t K,
+std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log2,
                 const std::vector<uint64_t> &rns_mods) {
   // Create RGSW gadget.
+  const size_t K = rns_mods.size();
   std::vector<std::vector<uint64_t>> gadget(K, std::vector<uint64_t>(l));
   for (size_t i = 0; i < K; i++) {
     const uint64_t mod = rns_mods[i];

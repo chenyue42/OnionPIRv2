@@ -48,9 +48,6 @@ public:
   inline size_t get_num_pt() const { return num_pt_; }
   inline size_t get_num_dims() const { return num_dims_; }
   inline size_t get_l() const { return l_ep_; }
-  // GSW queries packed into the client-side query per non-first dimension:
-  // l_ep_ slots, one per gadget power.
-  inline size_t get_query_per_dim() const { return l_ep_; }
   inline size_t get_l_key() const { return l_key_; }
   inline size_t get_small_q() const { return small_q_; }
   inline size_t get_base_log2() const { return base_log2_; }
@@ -84,11 +81,8 @@ public:
     }
   }
 
-  // Number of RLWE rows in a GSW ciphertext under the MP gadget: 2 * l rows.
-  inline size_t gsw_rows(size_t l) const { return 2 * l; }
-
   inline const size_t get_gsw_key_size(bool use_seed = true) const {
-    return gsw_rows(l_key_) * get_BFV_size(use_seed);
+    return 2 * l_key_ * get_BFV_size(use_seed);
   }
 
   inline const size_t get_bv_galois_key_size(bool use_seed = true) const {

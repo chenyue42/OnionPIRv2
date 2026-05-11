@@ -609,7 +609,7 @@ std::vector<RlweCt>
 PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
   // ============== parameters
   const size_t useful_cnt = pir_params_.get_fst_dim_sz() +
-                            pir_params_.get_query_per_dim() *
+                            pir_params_.get_l() *
                                 (pir_params_.get_num_dims() - 1); // u
   const size_t expan_height = pir_params_.get_expan_height(); // h
   const size_t capacity = size_t{1} << expan_height;          // 2^h
@@ -715,15 +715,15 @@ RlweCt PirServer::make_query(const size_t client_id, RlweCt &query) {
 
   // Reconstruct RGSW queries
   TIME_START(CONVERT_TIME);
-  const size_t query_per_dim = pir_params_.get_query_per_dim();
+  const size_t l_ep = pir_params_.get_l();
   std::vector<GSWCt> gsw_vec(pir_params_.get_num_dims() - 1); // GSW ciphertexts
   if (pir_params_.get_num_dims() != 1) {  // if we do need futher dimensions
     for (size_t i = 1; i < pir_params_.get_num_dims(); i++) {
-      // RLWE ciphertexts gathered per dim. Count is l (MP) or K*l (RNS-hybrid).
+      // l_ep RLWE ciphertexts per dim (one per gadget power).
       std::vector<RlweCt> lwe_vector;
-      lwe_vector.reserve(query_per_dim);
-      for (size_t k = 0; k < query_per_dim; ++k) {
-        auto ptr = pir_params_.get_fst_dim_sz() + (i - 1) * query_per_dim + k;
+      lwe_vector.reserve(l_ep);
+      for (size_t k = 0; k < l_ep; ++k) {
+        auto ptr = pir_params_.get_fst_dim_sz() + (i - 1) * l_ep + k;
         lwe_vector.push_back(query_vector[ptr]);
       }
       // Converting the BFV ciphertexts to GSW ciphertext by doing external product

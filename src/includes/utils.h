@@ -208,7 +208,7 @@ std::string uint128_to_string(uint128_t value);
  * small, i.e., the first row is B^(log q / log B -1), the final row is 1.
  */
 std::vector<std::vector<uint64_t>>
-gsw_gadget(size_t l, uint64_t base_log2, size_t K,
+gsw_gadget(size_t l, uint64_t base_log2,
            const std::vector<uint64_t> &rns_mods);
 
 // Generate a prime that is bit_width long

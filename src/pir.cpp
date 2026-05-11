@@ -77,10 +77,9 @@ PirParams::PirParams()
   // =============== Database shape calculation ===============
   size_t target_num_pt = DBConsts::DB_SIZE_MB * 1024 * 1024 / get_pt_size();
   DEBUG_PRINT("target_num_pt: " << target_num_pt);
-  // Per-dim query slot count: l_ep_ for MP, K*l_ep_ for RNS-hybrid. The
-  // variant decision is constexpr; use the helper that already encodes it.
+  // Per-dim query slot count is l_ep_ (one BFV per gadget power).
   auto [fst_dim_sz, num_dims] = utils::calculate_db_shape(
-      target_num_pt, get_query_per_dim(), DBConsts::TREE_HEIGHT);
+      target_num_pt, l_ep_, DBConsts::TREE_HEIGHT);
   fst_dim_sz_ = fst_dim_sz;
   num_dims_ = num_dims;
   DEBUG_PRINT("fst_dim_sz: " << fst_dim_sz_ << ", num_dims: " << num_dims_);
