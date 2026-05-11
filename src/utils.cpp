@@ -212,34 +212,6 @@ std::vector<std::vector<uint64_t>> utils::gsw_gadget(size_t l, uint64_t base_log
   return gadget;
 }
 
-std::vector<std::vector<uint64_t>>
-utils::gsw_gadget_approx(size_t l, uint64_t base_log2, size_t q_bits,
-                         size_t K,
-                         const std::vector<uint64_t> &rns_mods) {
-  const size_t rep_bits = l * base_log2;
-  assert(rep_bits <= q_bits);
-  const size_t drop = q_bits - rep_bits;
-
-  std::vector<std::vector<uint64_t>> gadget(K, std::vector<uint64_t>(l));
-  for (size_t i = 0; i < K; i++) {
-    const uint64_t mod = rns_mods[i];
-    // Seed gadget[l-1] = 2^drop mod q (bottom row is B^0 · 2^drop).
-    uint64_t pow = 1 % mod;
-    for (size_t b = 0; b < drop; ++b) {
-      pow = static_cast<uint64_t>((static_cast<uint128_t>(pow) << 1) % mod);
-    }
-    for (int j = static_cast<int>(l) - 1; j >= 0; j--) {
-      gadget[i][j] = pow;
-      // Next row up = previous · B (= 2^base_log2) mod q.
-      for (size_t b = 0; b < base_log2; ++b) {
-        pow = static_cast<uint64_t>((static_cast<uint128_t>(pow) << 1) % mod);
-      }
-    }
-  }
-  return gadget;
-}
-
-
 /**
  * @brief Generate the smallest prime that is at least bit_width bits long.
  * @param bit_width >= 2 and <= 64

@@ -19,8 +19,6 @@ void PirTest::run_test(const std::string &test_name) {
   else if (test_name == "noise_sampling")    test_noise_sampling();
   else if (test_name == "rlwe_enc")          test_rlwe_enc();
   else if (test_name == "barrett")           test_barrett();
-  else if (test_name == "rns_decomp")        test_rns_decomp();
-  else if (test_name == "rns_enc_dec")       test_rns_enc_dec();
   else if (test_name == "plan_params")       plan_params();
   else {
     std::cerr << "Unknown test: " << test_name << std::endl;

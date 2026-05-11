@@ -105,40 +105,6 @@ void signed_gadget_decompose(uint64_t val, size_t base_log2,
 void signed_gadget_decompose_mp(uint128_t val, uint128_t Q, size_t base_log2,
                                 int64_t *out, size_t num_digits);
 
-// Approximate signed gadget decomposition (TFHE-rs style).
-//
-// Pre-rounds `val` (signed, centered in (-q/2, q/2]) to the nearest multiple
-// of 2^drop where drop = q_bits - num_digits · base_log2 (≥ 0), then emits
-// num_digits signed digits in [-B/2, B/2) for the rounded, down-scaled value.
-//
-// When drop == 0 this reduces exactly to signed_gadget_decompose.
-//
-// Reconstruction (integer, no mod): Σ out[i] · B^i = round(val_signed / 2^drop)
-// so after multiplying by 2^drop we recover val_signed up to error ≤ 2^(drop-1).
-//
-// Callers MUST pair these digits with a gadget scaled by 2^drop (see
-// utils::gsw_gadget_approx); otherwise the external product lands at
-// val · m / 2^drop instead of val · m.
-void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
-                                    uint64_t q, size_t q_bits,
-                                    uint64_t *out, size_t num_digits);
-
-// RNS-variant per-limb signed gadget decomposition for the GSW external product.
-// Decomposes each limb of `poly` (size K * N, limb-major) independently using
-// its own base B_k = 2^base_log2_per_limb[k], then renders each signed digit
-// under EVERY output limb (BV-style cross-limb rendering — keeps the row's
-// noise contribution residue-consistent across limbs so CRT-compose stays
-// bounded; mirrors bv_apply_galois_inplace_rns).
-//
-// Appends K * l rows to `out_rows`. Row index within the appended block:
-//   k_src * l + p_idx, with p_idx=0 holding the most-significant digit (B^(l-1)).
-// Each row has K*N values: row[j*N + coef] = signed digit (k_src, l-1-p_idx) of
-// poly[k_src*N + coef] in base B_{k_src}, rendered as a value in [0, q_j).
-void per_limb_signed_decomp(const uint64_t *poly, size_t N, size_t l,
-                            const std::vector<uint64_t> &qs,
-                            const std::vector<size_t> &base_log2_per_limb,
-                            std::vector<std::vector<uint64_t>> &out_rows);
-
 // ============================================================================
 // Key-switching operation (server side)
 // ============================================================================

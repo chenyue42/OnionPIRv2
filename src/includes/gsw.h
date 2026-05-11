@@ -13,20 +13,12 @@ class GSWEval {
     PirParams pir_params_;
     size_t l_;
     size_t base_log2_;
-    // When true, decomp_rlwe_single_mod uses approximate (pre-rounded) gadget
-    // decomposition, and plain_to_gsw builds a 2^drop-scaled gadget. Drop is
-    // inferred from (ct_mod_width - l · base_log2). Caller must pick l and
-    // base_log2 such that l · base_log2 ≤ ct_mod_width.
-    bool use_approx_decomp_ = false;
 
   public:
     GSWEval(const PirParams &pir_params, const size_t l, const size_t base_log2)
         : pir_params_(pir_params), l_(l), base_log2_(base_log2) {}
     ~GSWEval() = default;
     GSWEval(const GSWEval &gsw_eval) = default;
-
-    void set_approx_decomp(bool v) { use_approx_decomp_ = v; }
-    bool approx_decomp() const { return use_approx_decomp_; }
 
     /*!
       Computes the external product between a GSW ciphertext and a decomposed BFV
@@ -56,14 +48,6 @@ class GSWEval {
     // RNS<->MP conversions; signed-digit decomposition directly under q.
     void decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<uint64_t>> &output,
                                    LogContext context = LogContext::GENERIC);
-
-    // RNS-variant decomposition: per-limb signed gadget. Emits 2 * K * l_ rows.
-    // Row index = half * (K * l_) + k_src * l_ + p_idx, with p_idx=0 holding
-    // the most-significant digit B_{k_src}^(l_-1). Each row has K*N values:
-    // the signed digit rendered under each output limb.
-    void decomp_rlwe_rns(RlweCt const &ct,
-                         std::vector<std::vector<uint64_t>> &output,
-                         LogContext context = LogContext::GENERIC);
 
     // Transform decomposed coefficients to NTT form
     void decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,

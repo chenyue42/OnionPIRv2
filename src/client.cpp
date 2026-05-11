@@ -143,9 +143,6 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
   const auto rns_mods = pir_params_.get_rns_mods();
   const size_t K = pir_params_.K();
   const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
-  const size_t query_per_dim = pir_params_.get_query_per_dim();
-  constexpr bool rns =
-      DBConsts::Decomp == DBConsts::DecompVariant::RNS;
 
   // 1/capacity per limb, cancels the scaling factor introduced by expansion.
   std::vector<uint64_t> inv(K);
@@ -155,24 +152,10 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
     inv[k] = result;
   }
 
-  // Build the gadget table.
-  //   MP:         gadget[k][p] = B^(l-1-p) mod q_k          (global B; same row count l).
-  //   RNS: gadget[k][p] = B_k^(l-1-p) mod q_k        (per-limb base; only k_src=k applies).
-  // MSB-first ordering (p=0 is largest power), matching plain_to_gsw.
-  std::vector<std::vector<uint64_t>> gadget(K, std::vector<uint64_t>(l));
-  if constexpr (rns) {
-    for (size_t k = 0; k < K; ++k) {
-      const uint64_t mod = rns_mods[k];
-      const size_t base_log2_k = pir_params_.get_rns_mod_bits()[k] / l + 1;
-      uint64_t pow = 1 % mod;
-      for (size_t p = 0; p < l; ++p) {
-        gadget[k][l - 1 - p] = pow;
-        pow = static_cast<uint64_t>((static_cast<uint128_t>(pow) << base_log2_k) % mod);
-      }
-    }
-  } else {
-    gadget = utils::gsw_gadget(l, pir_params_.get_base_log2(), K, rns_mods);
-  }
+  // MP gadget table: gadget[k][p] = B^(l-1-p) mod q_k. MSB-first
+  // (p=0 = largest power), matching plain_to_gsw.
+  std::vector<std::vector<uint64_t>> gadget =
+      utils::gsw_gadget(l, pir_params_.get_base_log2(), K, rns_mods);
 
   // Algorithm 1 from the OnionPIR paper: when bit i is "1", write gadget powers
   // (scaled by 1/capacity) into the slots that the expansion will turn into
@@ -181,33 +164,15 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
   for (size_t i = 1; i < query_indices.size(); i++) {
     if (query_indices[i] != 1) continue;
 
-    if constexpr (rns) {
-      // K * l slots per dim, indexed by (k_src, p_idx). Slot (k_src, p_idx)
-      // expands to a BFV that encrypts gadget[k_src][p_idx] · 1 ONLY under
-      // limb k_src (the diagonal RGSW structure). Other limbs stay enc(0).
-      for (size_t k_src = 0; k_src < K; ++k_src) {
-        for (size_t p_idx = 0; p_idx < l; ++p_idx) {
-          const size_t coef_pos =
-              fst_dim_sz + (i - 1) * query_per_dim + k_src * l + p_idx;
-          const size_t reversed_idx = utils::bit_reverse(coef_pos, expan_height);
-          const size_t pad = k_src * DBConsts::PolyDegree;
-          const uint64_t mod = rns_mods[k_src];
-          const uint64_t coef = static_cast<uint64_t>(
-              static_cast<inter_coeff_t>(gadget[k_src][p_idx]) * inv[k_src] % mod);
-          q_head[reversed_idx + pad] = (q_head[reversed_idx + pad] + coef) % mod;
-        }
-      }
-    } else {
-      // MP-gadget: l slots per dim, gadget value written under every limb.
-      for (size_t k = 0; k < l; k++) {
-        const size_t coef_pos = fst_dim_sz + (i - 1) * l + k;
-        const size_t reversed_idx = utils::bit_reverse(coef_pos, expan_height);
-        for (size_t mod_id = 0; mod_id < K; mod_id++) {
-          const size_t pad = mod_id * DBConsts::PolyDegree;
-          inter_coeff_t mod = rns_mods[mod_id];
-          uint64_t coef = (inter_coeff_t)gadget[mod_id][k] * inv[mod_id] % mod;
-          q_head[reversed_idx + pad] = (q_head[reversed_idx + pad] + coef) % mod;
-        }
+    // l slots per dim, gadget value written under every limb.
+    for (size_t k = 0; k < l; k++) {
+      const size_t coef_pos = fst_dim_sz + (i - 1) * l + k;
+      const size_t reversed_idx = utils::bit_reverse(coef_pos, expan_height);
+      for (size_t mod_id = 0; mod_id < K; mod_id++) {
+        const size_t pad = mod_id * DBConsts::PolyDegree;
+        inter_coeff_t mod = rns_mods[mod_id];
+        uint64_t coef = (inter_coeff_t)gadget[mod_id][k] * inv[mod_id] % mod;
+        q_head[reversed_idx + pad] = (q_head[reversed_idx + pad] + coef) % mod;
       }
     }
   }

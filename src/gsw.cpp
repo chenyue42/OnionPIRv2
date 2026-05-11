@@ -8,20 +8,6 @@
 #include <stdexcept>
 
 namespace {
-// Per-limb base log2 for the RNS GSW gadget. Mirrors the BV keyswitch
-// formula `bv_base_log2_per_limb`: rns_mod_bits[k] / l + 1. The +1 keeps
-// B_k^l > q_k so signed digits absorb carries cleanly.
-inline std::vector<size_t> gsw_base_log2_per_limb_vec(const PirParams &p, size_t l) {
-  const size_t K = p.K();
-  std::vector<size_t> out(K);
-  for (size_t k = 0; k < K; ++k) {
-    out[k] = p.get_rns_mod_bits()[k] / l + 1;
-  }
-  return out;
-}
-} // namespace
-
-namespace {
 
 // Native RNS ↔ multi-precision conversions (CRT), replacing
 // seal::util::RNSBase::compose_array / decompose_array. Only K=2 is actually
@@ -132,20 +118,16 @@ void GSWEval::external_product(GSWCt const &gsw_enc, RlweCt const &bfv,
   const size_t coeff_val_cnt = DBConsts::PolyDegree * K; // polydegree * RNS moduli count
 
   // ============================ Decomposition ============================
-  // Row count depends on variant:
-  //   K=1 single-mod, or MP-gadget K>=2: 2 * l_ rows.
-  //   RNS K>=2:                   2 * K * l_ rows.
+  // MP gadget: 2 * l_ rows in either K=1 or K=2.
   std::vector<std::vector<uint64_t>> decomposed_bfv;
   TIME_START(log_keys.decomp);
   if (K == 1) {
     decomp_rlwe_single_mod(bfv, decomposed_bfv, context);
-  } else if constexpr (DBConsts::Decomp == DBConsts::DecompVariant::RNS) {
-    decomp_rlwe_rns(bfv, decomposed_bfv, context);
   } else {
     decomp_rlwe_mp(bfv, decomposed_bfv, context);
   }
   TIME_END(log_keys.decomp);
-  const size_t gsw_rows = decomposed_bfv.size();  // 2*l_ or 2*K*l_
+  const size_t gsw_rows = decomposed_bfv.size();  // 2 * l_
 
   // Transform decomposed coefficients to NTT form
   decomp_to_ntt(decomposed_bfv, context);
@@ -274,16 +256,10 @@ void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<u
     std::vector<std::vector<uint64_t>> digit_matrix(l_, std::vector<uint64_t>(coeff_count));
 
     // signed gadget decomposition
-    const size_t q_bits = pir_params_.get_ct_mod_width();
     for (size_t k = 0; k < coeff_count; k++) {
       // Use a stack buffer; l_ is small (≤12).
       uint64_t digit_vals[16];  // ! for now we assume l_ <= 16. Reasonable for practical params.
-      if (use_approx_decomp_) {
-        bvks::approx_signed_gadget_decompose(poly_ptr[k], base_log2_, q, q_bits,
-                                             digit_vals, l_);
-      } else {
-        bvks::signed_gadget_decompose(poly_ptr[k], base_log2_, q, digit_vals, l_);
-      }
+      bvks::signed_gadget_decompose(poly_ptr[k], base_log2_, q, digit_vals, l_);
       for (size_t p = 0; p < l_; p++) {
         digit_matrix[p][k] = digit_vals[p];
       }
@@ -294,30 +270,6 @@ void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<u
       output.emplace_back(std::move(digit_matrix[p]));
     }
   }
-}
-
-void GSWEval::decomp_rlwe_rns(RlweCt const &ct,
-                                     std::vector<std::vector<uint64_t>> &output,
-                                     LogContext context) {
-  const auto& log_keys = ext_log_keys(context);
-
-  // ============================ Per-limb signed decomposition ============================
-  // 2 * K * l_ rows: l_ * K rows for c0 followed by l_ * K rows for c1.
-  // Within each half, ordered by k_src then by p_idx (MSB first per source limb)
-  // — matches plain_to_gsw RNS row indexing.
-  assert(output.size() == 0);
-  constexpr size_t N = DBConsts::PolyDegree;
-  const auto &qs = pir_params_.get_rns_mods();
-  const size_t K = qs.size();
-  const auto base_log2_per_limb = gsw_base_log2_per_limb_vec(pir_params_, l_);
-  output.reserve(2 * K * l_);
-
-  TIME_START(log_keys.decomp_inner);
-  for (size_t half = 0; half < 2; ++half) {
-    bvks::per_limb_signed_decomp(ct.data(half), N, l_, qs, base_log2_per_limb,
-                                 output);
-  }
-  TIME_END(log_keys.decomp_inner);
 }
 
 void GSWEval::decomp_to_ntt(std::vector<std::vector<uint64_t>> &decomp_coeffs,
@@ -384,36 +336,12 @@ GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
 
   const double sigma = pir_params_.get_noise_std_dev();
 
-  constexpr bool rns =
-      DBConsts::Decomp == DBConsts::DecompVariant::RNS;
+  // MP gadget table: gadget_table[k][p] = B^(l_-1-p) mod q_k, MSB-first
+  // (p=0 = largest power B^(l_-1)).
+  std::vector<std::vector<uint64_t>> gadget_table =
+      utils::gsw_gadget(l_, base_log2_, K, rns_mods_arr);
 
-  // Gadget tables.
-  //   MP:          gadget_table[k][p] = B^(l_-1-p) mod q_k.
-  //   RNS:  gadget_table[k][p] = B_k^(l_-1-p) mod q_k (per-limb base).
-  // Both are MSB-first (p=0 corresponds to the largest power, B^(l_-1)).
-  std::vector<std::vector<uint64_t>> gadget_table;
-  if constexpr (rns) {
-    const auto base_log2_per_limb = gsw_base_log2_per_limb_vec(pir_params_, l_);
-    gadget_table.assign(K, std::vector<uint64_t>(l_));
-    for (size_t k = 0; k < K; ++k) {
-      const uint64_t mod = rns_mods_arr[k];
-      const size_t base_log2_k = base_log2_per_limb[k];
-      uint64_t pow = 1 % mod;
-      for (size_t p = 0; p < l_; ++p) {
-        gadget_table[k][l_ - 1 - p] = pow;
-        pow = static_cast<uint64_t>((static_cast<uint128_t>(pow) << base_log2_k) % mod);
-      }
-    }
-  } else {
-    gadget_table = use_approx_decomp_
-        ? utils::gsw_gadget_approx(l_, base_log2_,
-                                   pir_params_.get_ct_mod_width(), K,
-                                   rns_mods_arr)
-        : utils::gsw_gadget(l_, base_log2_, K, rns_mods_arr);
-  }
-
-  // Row count per half: l_ for MP, K*l_ for RNS.
-  const size_t rows_per_half = rns ? K * l_ : l_;
+  const size_t rows_per_half = l_;
   GSWCt output(2 * rows_per_half, std::vector<uint64_t>(2 * K * N));
 
   // Re-canonicalise plaintext supplied in [0, q_0) when K > 1: a value above
@@ -434,32 +362,16 @@ GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
       // Fresh K-limb Enc_sk(0) in coefficient form.
       encrypt_zero_rns(sk, N, qs, sigma, rng, ct, /*ntt_form=*/false);
 
-      if constexpr (rns) {
-        // r = k_src * l_ + p_idx. Add gadget * plaintext only under limb k_src;
-        // other limbs stay at the encryption-of-zero baseline (g_k mod q_j = 0).
-        const size_t k_src = r / l_;
-        const size_t p_idx = r % l_;
-        const uint64_t qk = qs[k_src];
-        const uint64_t g  = gadget_table[k_src][p_idx];
-        uint64_t *target = ct.data(half) + k_src * N;
+      // Add gadget * plaintext under every limb.
+      for (size_t k = 0; k < K; ++k) {
+        const uint64_t qk = qs[k];
+        const uint64_t g  = gadget_table[k][r];
+        uint64_t *target = ct.data(half) + k * N;
         for (size_t coef = 0; coef < N; ++coef) {
           const uint64_t mj = canon_mj(coef, qk);
           const uint64_t val =
               static_cast<uint64_t>(static_cast<inter_coeff_t>(mj) * g % qk);
           target[coef] = (target[coef] + val) % qk;
-        }
-      } else {
-        // MP-gadget: add gadget * plaintext under EVERY limb.
-        for (size_t k = 0; k < K; ++k) {
-          const uint64_t qk = qs[k];
-          const uint64_t g  = gadget_table[k][r];
-          uint64_t *target = ct.data(half) + k * N;
-          for (size_t coef = 0; coef < N; ++coef) {
-            const uint64_t mj = canon_mj(coef, qk);
-            const uint64_t val =
-                static_cast<uint64_t>(static_cast<inter_coeff_t>(mj) * g % qk);
-            target[coef] = (target[coef] + val) % qk;
-          }
         }
       }
 
@@ -469,9 +381,9 @@ GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
         utils::ntt_fwd(ct.c1.data() + k * N, N, qs[k]);
       }
       const size_t row = half * rows_per_half + r;
-      std::memcpy(output[row].data(),                        ct.c0.data(),
+      std::memcpy(output[row].data(),           ct.c0.data(),
                   K * N * sizeof(uint64_t));
-      std::memcpy(output[row].data() + K * N,      ct.c1.data(),
+      std::memcpy(output[row].data() + K * N,   ct.c1.data(),
                   K * N * sizeof(uint64_t));
     }
   }

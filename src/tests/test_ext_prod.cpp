@@ -98,58 +98,6 @@ void PirTest::test_external_product() {
   }
   TIME_END("External product");
 
-  // ================== Approximate gadget decomposition ==================
-  // Re-run external product with l' < l (so drop = q_bits - l'·base_log2 > 0)
-  // using the approx decomposer + scaled gadget. Correctness: the external
-  // product still lands at BFV(a) up to rounding error of magnitude
-  // 2^(drop-1) per coefficient, which is absorbed by the noise budget.
-  PRINT_BAR;
-  BENCH_PRINT("=== Approximate decomposition ===");
-  const size_t q_bits = pir_params.get_ct_mod_width();
-  for (size_t l_approx = gsw_l; l_approx-- > 2;) {
-    if (l_approx * base_log2 > q_bits) continue;
-    const size_t drop = q_bits - l_approx * base_log2;
-    GSWEval approx_gsw(pir_params, l_approx, base_log2);
-    approx_gsw.set_approx_decomp(true);
-    GSWCt one_gsw_approx  = approx_gsw.plain_to_gsw(one,  rlwe_sk, rng);
-    GSWCt zero_gsw_approx = approx_gsw.plain_to_gsw(zero, rlwe_sk, rng);
-
-    RlweCt r_one;  r_one.resize(coeff_count);
-    approx_gsw.external_product(one_gsw_approx, a_encrypted, r_one, LogContext::GENERIC);
-    r_one.ntt_form = true;
-    rlwe_ntt_inv_inplace(r_one, q, coeff_count);
-    RlwePt dec_one;
-    int bud_one = decrypt_and_budget(r_one, rlwe_sk, coeff_count, q, t, dec_one);
-
-    RlweCt r_zero; r_zero.resize(coeff_count);
-    approx_gsw.external_product(zero_gsw_approx, a_encrypted, r_zero, LogContext::GENERIC);
-    r_zero.ntt_form = true;
-    rlwe_ntt_inv_inplace(r_zero, q, coeff_count);
-    RlwePt dec_zero;
-    int bud_zero = decrypt_and_budget(r_zero, rlwe_sk, coeff_count, q, t, dec_zero);
-
-    BENCH_PRINT("l'=" << l_approx << " (drop=" << drop << " bits)");
-    BENCH_PRINT("  BFV(a) * RGSW_approx(1) = " << pt_to_string(dec_one)
-                << "  budget=" << bud_one);
-    BENCH_PRINT("  BFV(a) * RGSW_approx(0) = " << pt_to_string(dec_zero)
-                << "  budget=" << bud_zero);
-    // Approximate decomposition introduces rounding error of magnitude
-    // ~2^(drop-1) per coefficient before BFV scale-and-round. As long as the
-    // noise budget stays positive the decrypted plaintext must still be exact.
-    if (!utils::plaintext_is_equal(dec_one, expect_a)) {
-      throw std::runtime_error("BFV(a) * RGSW_approx(1) != a at l'="
-                               + std::to_string(l_approx));
-    }
-    if (!utils::plaintext_is_equal(dec_zero, expect_zero)) {
-      throw std::runtime_error("BFV(a) * RGSW_approx(0) != 0 at l'="
-                               + std::to_string(l_approx));
-    }
-    if (bud_one <= 0 || bud_zero <= 0) {
-      throw std::runtime_error("Approximate decomp l'=" + std::to_string(l_approx)
-                               + " exhausted noise budget");
-    }
-  }
-
   END_EXPERIMENT();
   PRINT_RESULTS();
 }

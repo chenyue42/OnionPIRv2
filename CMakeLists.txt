@@ -63,16 +63,14 @@ endif ()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(Onion-PIR)
 
-# Build-time selectors for the parameter set and decomposition variant.
+# Build-time selector for the parameter set.
 # Override on the cmake line:
-#   cmake -DACTIVE_CONFIG=CONFIG_N2048_M28_28 -DVARIANT=VARIANT_RNS ..
-# Defaults are picked up from src/includes/database_constants.h when unset.
-foreach(opt ACTIVE_CONFIG VARIANT)
-    if (DEFINED ${opt})
-        message(STATUS "${opt} = ${${opt}}")
-        add_compile_definitions(${opt}=${${opt}})
-    endif()
-endforeach()
+#   cmake -DACTIVE_CONFIG=CONFIG_N2048_K1_COMP ..
+# Default is picked up from src/includes/database_constants.h when unset.
+if (DEFINED ACTIVE_CONFIG)
+    message(STATUS "ACTIVE_CONFIG = ${ACTIVE_CONFIG}")
+    add_compile_definitions(ACTIVE_CONFIG=${ACTIVE_CONFIG})
+endif()
 
 
 # Automatically find all source files in src/
