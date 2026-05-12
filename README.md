@@ -1,5 +1,7 @@
 # OnionPIR version 2
 
+> **WARNING:** Note that this repository is for research purpose. Do not use this in production directly.
+
 ### Preliminaries
 
 We ran our code on AWS c5n.9xlarge machine, which runs Ubuntu 22.04. This machine uses `Intel(R) Xeon(R) Platinum 8124M CPU @ 3.00GHz`, which allows us to use AVX2 and AVX512 to boost NTT related computation. 
