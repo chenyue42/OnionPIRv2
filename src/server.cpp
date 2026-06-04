@@ -97,20 +97,24 @@ void PirServer::gen_data(const std::vector<size_t>& record_indices) {
     }
 
     if (crt.enabled) {
-      // Composite path: NTT under Q = q1*q2, then split each coefficient into
-      // (mod q1, mod q2) u32 limbs in the coeff-major layout.
+      // Composite path: NTT under Q = q1*q2 per plaintext, then transpose-write
+      // into db_lo_/db_hi_ in coeff-outer / pt-inner order. The naive per-pt
+      // scatter (writing all 2048 coeffs of one pt before moving on) hits a
+      // fresh cache line per write at stride num_pt_*4 B; tile-transposing here
+      // matches the standard path and keeps the writes cache-friendly.
       const uint64_t Q  = rns_mods[0];
       const uint64_t q1 = crt.q1;
       const uint64_t q2 = crt.q2;
       for (size_t p = 0; p < bs; ++p) {
-        uint64_t *coeffs = tile_pt.data() + p * coeff_count;
-        utils::ntt_fwd(coeffs, coeff_count, Q);
-        const size_t poly_id = pb + p;
-        for (size_t coeff_idx = 0; coeff_idx < coeff_count; ++coeff_idx) {
-          const uint64_t c = coeffs[coeff_idx];
-          const size_t idx = coeff_idx * num_pt_ + poly_id;
-          db_lo_[idx] = static_cast<uint32_t>(c % q1);
-          db_hi_[idx] = static_cast<uint32_t>(c % q2);
+        utils::ntt_fwd(tile_pt.data() + p * coeff_count, coeff_count, Q);
+      }
+      for (size_t coeff_idx = 0; coeff_idx < coeff_count; ++coeff_idx) {
+        uint32_t *out_lo = db_lo_.get() + coeff_idx * num_pt_ + pb;
+        uint32_t *out_hi = db_hi_.get() + coeff_idx * num_pt_ + pb;
+        for (size_t p = 0; p < bs; ++p) {
+          const uint64_t c = tile_pt[p * coeff_count + coeff_idx];
+          out_lo[p] = static_cast<uint32_t>(c % q1);
+          out_hi[p] = static_cast<uint32_t>(c % q2);
         }
       }
       continue;
