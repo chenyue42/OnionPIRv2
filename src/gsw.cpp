@@ -3,6 +3,7 @@
 #include "logging.h"
 #include "bv_keyswitch.h"
 #include "database_constants.h"
+#include "hexl/hexl.hpp"
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
@@ -118,8 +119,13 @@ void GSWEval::external_product(GSWCt const &gsw_enc, RlweCt const &bfv,
   const size_t coeff_val_cnt = DBConsts::PolyDegree * K; // polydegree * RNS moduli count
 
   // ============================ Decomposition ============================
-  // MP gadget: 2 * l_ rows in either K=1 or K=2.
-  std::vector<std::vector<uint64_t>> decomposed_bfv;
+  // MP gadget: 2 * l_ rows in either K=1 or K=2. Reuse the per-instance scratch
+  // (sized once) so the thousands of external products don't each heap-allocate
+  // the decomposition rows.
+  const size_t gsw_rows = 2 * l_;
+  if (ep_decomp_.size() != gsw_rows) ep_decomp_.assign(gsw_rows, std::vector<uint64_t>(coeff_val_cnt));
+  else for (auto &row : ep_decomp_) if (row.size() != coeff_val_cnt) row.assign(coeff_val_cnt, 0);
+  std::vector<std::vector<uint64_t>> &decomposed_bfv = ep_decomp_;
   TIME_START(log_keys.decomp);
   if (K == 1) {
     decomp_rlwe_single_mod(bfv, decomposed_bfv, context);
@@ -127,45 +133,38 @@ void GSWEval::external_product(GSWCt const &gsw_enc, RlweCt const &bfv,
     decomp_rlwe_mp(bfv, decomposed_bfv, context);
   }
   TIME_END(log_keys.decomp);
-  const size_t gsw_rows = decomposed_bfv.size();  // 2 * l_
 
   // Transform decomposed coefficients to NTT form
   decomp_to_ntt(decomposed_bfv, context);
 
   // ============================ Polynomial Matrix Multiplication ============================
-  std::vector<std::vector<inter_coeff_t>> result(
-      2, std::vector<inter_coeff_t>(coeff_val_cnt, 0));
-
+  // result = decomp(bfv) [1 x 2l] * gsw [2l x 2], accumulated per output poly and
+  // per RNS limb using HEXL's vectorized modular mult/add (AVX-512), matching the
+  // BV-keyswitch inner-product path. Writes straight into res_ct -- no 128-bit
+  // intermediate, no scalar % reduction. res_ct may alias bfv: safe because the
+  // decomposition above already captured bfv's coefficients.
   TIME_START(log_keys.matmul);
-  // matrix multiplication: decomp(bfv) * gsw. Rows = 2 * l_.
+  const auto &rns_mods = pir_params_.get_rns_mods();
+  if (ep_tmp_.size() != coeff_count) ep_tmp_.resize(coeff_count);
+  uint64_t *const tmp = ep_tmp_.data();
   for (size_t k = 0; k < 2; ++k) {
-    for (size_t j = 0; j < gsw_rows; j++) {
-      const uint64_t *encrypted_gsw_ptr = gsw_enc[j].data() + k * coeff_val_cnt;
-      const uint64_t *encrypted_rlwe_ptr = decomposed_bfv[j].data();
-      #pragma GCC unroll 32
-      for (size_t i = 0; i < coeff_val_cnt; i++) {
-        result[k][i] += (inter_coeff_t)(encrypted_rlwe_ptr[i]) * encrypted_gsw_ptr[i];
+    uint64_t *out = res_ct.data(k);
+    for (size_t mod_id = 0; mod_id < K; ++mod_id) {
+      const uint64_t qk = rns_mods[mod_id];
+      const size_t off = mod_id * coeff_count;
+      // Row 0 initialises the accumulator; subsequent rows multiply-then-add.
+      intel::hexl::EltwiseMultMod(out + off, decomposed_bfv[0].data() + off,
+                                  gsw_enc[0].data() + k * coeff_val_cnt + off,
+                                  coeff_count, qk, 1);
+      for (size_t j = 1; j < gsw_rows; ++j) {
+        intel::hexl::EltwiseMultMod(tmp, decomposed_bfv[j].data() + off,
+                                    gsw_enc[j].data() + k * coeff_val_cnt + off,
+                                    coeff_count, qk, 1);
+        intel::hexl::EltwiseAddMod(out + off, out + off, tmp, coeff_count, qk);
       }
     }
   }
   TIME_END(log_keys.matmul);
-
-  // ============================ Modding ============================
-  TIME_START("external mod");
-  const auto rns_mods = pir_params_.get_rns_mods();
-  for (size_t poly_id = 0; poly_id < 2; poly_id++) {
-    auto ct_ptr = res_ct.data(poly_id);
-    auto &pt_ptr = result[poly_id];
-
-    for (size_t mod_id = 0; mod_id < K; mod_id++) {
-      auto mod_idx = (mod_id * coeff_count);
-      for (size_t coeff_id = 0; coeff_id < coeff_count; coeff_id++) {
-        auto x = pt_ptr[coeff_id + mod_idx];
-        ct_ptr[coeff_id + mod_idx] = x % rns_mods[mod_id];
-      }
-    }
-  }
-  TIME_END("external mod");
   res_ct.is_ntt_form() = true;  // the result of two NTT form polynomials is still in NTT form.
 }
 
@@ -177,8 +176,9 @@ void GSWEval::decomp_rlwe_mp(RlweCt const &ct, std::vector<std::vector<uint64_t>
   // Approximate decomposition is only wired for the single-mod (K=1) path so far
   // (Phase 1); the MP path stays exact until Phase 2.
   assert(!approx_ && "approximate decomposition not yet supported for K>=2 (MP)");
-  assert(output.size() == 0);
-  output.reserve(2 * l_);
+  // `output` is the caller's reusable scratch, pre-sized to 2*l_ rows of
+  // coeff_val_cnt each; we write digit rows in place (no allocation here).
+  assert(output.size() == 2 * l_);
   // Setup parameters
   const uint64_t base = uint64_t(1) << base_log2_;
   const uint64_t mask = base - 1;
@@ -200,13 +200,14 @@ void GSWEval::decomp_rlwe_mp(RlweCt const &ct, std::vector<std::vector<uint64_t>
                       pir_params_.get_rns_tables());
     TIME_END(log_keys.compose);
 
-    // we right shift certain amount to match the GSW ciphertext
+    // we right shift certain amount to match the GSW ciphertext. Rows are
+    // MSB-first: p = l_-1 (largest shift) lands in this poly's row 0.
     for (size_t p = l_; p-- > 0;) { // loop from l_ - 1 to 0.
-      std::vector<uint64_t> rshift_res(ct_coeffs);
-      const size_t shift_amount = p * base_log2_;
+      std::vector<uint64_t> &res = output[poly_id * l_ + (l_ - 1 - p)];
+      memcpy(res.data(), ct_coeffs.data(), coeff_val_cnt * sizeof(uint64_t));
       TIME_START(log_keys.right_shift);
       for (size_t k = 0; k < coeff_count; k++) {
-        uint64_t* res_ptr = rshift_res.data() + k * K;
+        uint64_t* res_ptr = res.data() + k * K;
         if (K == 2) {
             utils::right_shift_uint128(res_ptr, p * base_log2_, res_ptr);
             res_ptr[0] &= mask;
@@ -229,11 +230,9 @@ void GSWEval::decomp_rlwe_mp(RlweCt const &ct, std::vector<std::vector<uint64_t>
       }
       TIME_END(log_keys.right_shift);
       TIME_START(log_keys.decomp_inner);
-      decompose_mp_to_rns(rshift_res.data(), coeff_count, rns_mods, K,
+      decompose_mp_to_rns(res.data(), coeff_count, rns_mods, K,
                           pir_params_.get_rns_tables());
       TIME_END(log_keys.decomp_inner);
-
-      output.emplace_back(std::move(rshift_res));
     }
   }
 }
@@ -241,43 +240,66 @@ void GSWEval::decomp_rlwe_mp(RlweCt const &ct, std::vector<std::vector<uint64_t>
 void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<uint64_t>> &output,
                                    LogContext /*context*/) {
   // ============================ Parameters ============================
-  // No internal timers in this path — it's already coarse enough that the
-  // wrapping `log_keys.decomp` timer in external_product captures it.
-  assert(output.size() == 0);
-  output.reserve(2 * l_);
-  constexpr size_t coeff_count = DBConsts::PolyDegree;
+  // `output` is the caller's reusable scratch, pre-sized to 2*l_ rows of
+  // coeff_count each; we write digits in place (no allocation here).
+  // Vectorized signed decomposition: instead of decomposing one coefficient at a
+  // time (the bvks::(approx_)signed_gadget_decompose primitives, kept for the
+  // keyswitch/tests), we extract one DIGIT across the whole polynomial at a time.
+  // The carry chain is serial across digits, but all N coefficients within a
+  // digit are independent, so the inner loops auto-vectorize (AVX-512). The math
+  // mirrors the scalar primitives exactly (balanced digits MSB-first; for the
+  // approximate variant: round to nearest 2^drop, then leave the MS digit as the
+  // unbalanced remainder -- the carry-out fix).
+  assert(output.size() == 2 * l_);
+  constexpr size_t N = DBConsts::PolyDegree;
   const uint64_t q = pir_params_.get_rns_mods()[0];
+  const int64_t qi = static_cast<int64_t>(q);
+  const uint64_t half_q = q >> 1;
+  const int64_t native = 64 - static_cast<int64_t>(base_log2_);
+  const size_t q_bits = pir_params_.get_ct_mod_width();
+  assert(!approx_ || l_ * base_log2_ <= q_bits);
+  const size_t drop = approx_ ? q_bits - l_ * base_log2_ : 0;
 
-  // ============================ Signed Decomposition ============================
-  // Coefficient-first loop: carry propagates across digits within each coefficient.
-  // Output order: most-significant digit first (p = l_-1..0) to match GSW gadget.
+  if (ep_dwork_.size() != N) ep_dwork_.resize(N);
+  int64_t *const d = ep_dwork_.data();
+
   for (size_t poly_id = 0; poly_id < 2; poly_id++) {
     const uint64_t *poly_ptr = ct.data(poly_id);
+    const size_t base_row = poly_id * l_;
 
-    // digit_matrix[p][k]: digit p of coefficient k. The decompose primitives now
-    // emit MSB-first (digit_vals[0] = highest power), matching the MSB-first GSW
-    // gadget in plain_to_gsw, so we keep the order directly (no reversal).
-    std::vector<std::vector<uint64_t>> digit_matrix(l_, std::vector<uint64_t>(coeff_count));
-
-    // signed gadget decomposition (approximate variant drops the low bits)
-    const size_t q_bits = pir_params_.get_ct_mod_width();
-    for (size_t k = 0; k < coeff_count; k++) {
-      // Use a stack buffer; l_ is small (≤12).
-      uint64_t digit_vals[16];  // ! for now we assume l_ <= 16. Reasonable for practical params.
-      if (approx_) {
-        bvks::approx_signed_gadget_decompose(poly_ptr[k], base_log2_, q, q_bits,
-                                             digit_vals, l_);
-      } else {
-        bvks::signed_gadget_decompose(poly_ptr[k], base_log2_, q, digit_vals, l_);
-      }
-      for (size_t p = 0; p < l_; p++) {
-        digit_matrix[p][k] = digit_vals[p];
+    // Center [0, q) -> (-q/2, q/2].
+    for (size_t k = 0; k < N; ++k) {
+      const int64_t v = static_cast<int64_t>(poly_ptr[k]);
+      d[k] = (poly_ptr[k] > half_q) ? v - qi : v;
+    }
+    // Approximate: round to nearest 2^drop, then divide (sign-preserving).
+    if (drop > 0) {
+      const int64_t half = int64_t(1) << (drop - 1);
+      for (size_t k = 0; k < N; ++k) {
+        const int64_t x = d[k];
+        d[k] = (x >= 0) ? ((x + half) >> drop) : -(((-x) + half) >> drop);
       }
     }
 
-    // Emit MSB-first (digit_matrix[0] = highest power), matching the gadget rows.
-    for (size_t p = 0; p < l_; p++) {
-      output.emplace_back(std::move(digit_matrix[p]));
+    // Digit i is the B^i coefficient (extracted LSB-first); store MSB-first, so
+    // it lands in row (l_-1-i). Poly 0 -> rows [0,l_), poly 1 -> rows [l_,2*l_).
+    for (size_t i = 0; i < l_; ++i) {
+      uint64_t *const outrow = output[base_row + (l_ - 1 - i)].data();
+      if (approx_ && i + 1 == l_) {
+        // Most-significant digit = full remainder (no balanced flip).
+        for (size_t k = 0; k < N; ++k) {
+          const int64_t r = d[k];
+          outrow[k] = (r >= 0) ? static_cast<uint64_t>(r)
+                               : static_cast<uint64_t>(r + qi);
+        }
+      } else {
+        for (size_t k = 0; k < N; ++k) {
+          const int64_t r = (d[k] << native) >> native;  // balanced low digit
+          d[k] = (d[k] - r) >> static_cast<int64_t>(base_log2_);
+          outrow[k] = (r >= 0) ? static_cast<uint64_t>(r)
+                               : static_cast<uint64_t>(r + qi);
+        }
+      }
     }
   }
 }

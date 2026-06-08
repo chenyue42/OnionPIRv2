@@ -19,6 +19,14 @@ class GSWEval {
     // l_*base_log2_ <= ct_mod_width. Currently wired for the single-mod (K=1) path.
     bool approx_;
 
+    // Reusable scratch for external_product, sized once then reused across the
+    // many calls (avoids per-call heap churn). ep_decomp_: 2*l_ decomposed rows,
+    // each K*N. ep_tmp_: one N-block for the matmul. Mirrors bv_keyswitch's
+    // GaloisScratch; safe because external products run single-threaded.
+    std::vector<std::vector<uint64_t>> ep_decomp_;
+    std::vector<uint64_t> ep_tmp_;
+    std::vector<int64_t> ep_dwork_;  // centered working values for vectorized decomp
+
   public:
     GSWEval(const PirParams &pir_params, const size_t l, const size_t base_log2,
             const bool approx = false)
