@@ -46,6 +46,19 @@ namespace DBConsts {
   // matmul work; pow-2 keeps matmul cheap at the cost of more dims.
   constexpr bool FST_DIM_POW2 = true;
 
+  // Query / expansion mode.
+  //   Stateful:        server stores the BV galois keys + RGSW(s); the client
+  //                    sends one packed BFV query that the server expands with
+  //                    Galois automorphisms (fast_expand_qry) and promotes to
+  //                    GSW selectors via query_to_gsw.
+  //   DoubleStateless: server stores no keys. Each request carries fresh RGSW
+  //                    selectors: log2(fst_dim_sz) for the first dimension
+  //                    (expanded with DMux external products) and num_dims-1
+  //                    for the subsequent dimensions (used directly). Larger
+  //                    query, but unlinkable and no server-side key storage.
+  enum class QueryMode { Stateful, DoubleStateless };
+  // constexpr QueryMode Mode = QueryMode::Stateful;
+  constexpr QueryMode Mode = QueryMode::DoubleStateless;
   // ==========================================================================
   // Per-config constants
   // ==========================================================================

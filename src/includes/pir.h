@@ -52,6 +52,13 @@ public:
   inline size_t get_small_q() const { return small_q_; }
   inline size_t get_base_log2() const { return base_log2_; }
   inline size_t get_base_log2_key() const { return base_log2_key_; }
+  // Gadget base bit-width for a decomposition of length l: ceil(ct_mod_width/l),
+  // so l digits of base 2^base_log2 span the full ciphertext modulus. Single
+  // source of truth for every gadget length (data l_ep, key l_key, BV-keyswitch
+  // L_KS, and the DMux selector gsw_l).
+  inline size_t get_base_log2_for(size_t l) const {
+    return (get_ct_mod_width() + l - 1) / l;
+  }
   inline size_t get_fst_dim_sz() const { return fst_dim_sz_; }
   inline size_t get_other_dim_sz() const { return num_pt_ / fst_dim_sz_; }
   // Number of RNS limbs (matches DBConsts::RnsMods.size()).
@@ -66,6 +73,7 @@ public:
   inline const CompositeRnsTables &get_composite_rns() const { return composite_rns_; }
   inline size_t get_poly_degree() const { return DBConsts::PolyDegree; }
   inline const size_t get_expan_height() const { return DBConsts::TREE_HEIGHT; }
+  inline DBConsts::QueryMode get_query_mode() const { return DBConsts::Mode; }
   inline size_t get_num_other_dims() const { return num_dims_ - 1; }
 
   // Standard deviation σ of the Gaussian error distribution used during

@@ -93,6 +93,26 @@ void rlwe_ntt_inv_inplace(RlweCt &ct, uint64_t q, size_t N);
 // dst may alias src.
 void rlwe_shift(const RlweCt &src, RlweCt &dst, size_t index, uint64_t q, size_t N);
 
+// K-limb generalisations of the single-modulus arithmetic above, for
+// ciphertexts whose c0/c1 hold K*N coefficients concatenated as
+// limb0 || limb1 || ... (qs[k] on limb k). Caller upholds the matching-NTT-form
+// invariant (no runtime check).
+//   rlwe_add_k:             c = a + b, per limb (c resized; c.ntt_form = a's).
+//   rlwe_add_inplace_k:     a += b, per limb.
+//   rlwe_sub_inplace_k:     a -= b, per limb.
+//   rlwe_ntt_inv_inplace_k: inverse NTT on both polynomials; sets ntt_form=false.
+//   rlwe_shift_k:           negacyclic shift by `index`, per limb (coeff form;
+//                           dst resized; dst.ntt_form = src's). dst may alias src.
+void rlwe_add_k(const RlweCt &a, const RlweCt &b, RlweCt &c,
+                const std::vector<uint64_t> &qs, size_t N);
+void rlwe_add_inplace_k(RlweCt &a, const RlweCt &b,
+                        const std::vector<uint64_t> &qs, size_t N);
+void rlwe_sub_inplace_k(RlweCt &a, const RlweCt &b,
+                        const std::vector<uint64_t> &qs, size_t N);
+void rlwe_ntt_inv_inplace_k(RlweCt &ct, const std::vector<uint64_t> &qs, size_t N);
+void rlwe_shift_k(const RlweCt &src, RlweCt &dst, size_t index,
+                  const std::vector<uint64_t> &qs, size_t N);
+
 // ---------------------------------------------------------------------------
 // K-limb (RNS) RLWE primitives.
 // All functions operate on K = qs.size() limbs concatenated in mod0 || mod1 || ...

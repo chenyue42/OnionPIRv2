@@ -70,9 +70,8 @@ PirParams::PirParams()
   }
 
   // ================== GSW related parameters ==================
-  size_t ct_mod_width = get_ct_mod_width();
-  base_log2_ = (ct_mod_width + l_ep_ - 1) / l_ep_;
-  base_log2_key_ = (ct_mod_width + l_key_ - 1) / l_key_;
+  base_log2_ = get_base_log2_for(l_ep_);
+  base_log2_key_ = get_base_log2_for(l_key_);
 
   // =============== Database shape calculation ===============
   size_t target_num_pt = DBConsts::DB_SIZE_MB * 1024 * 1024 / get_pt_size();

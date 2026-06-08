@@ -21,6 +21,17 @@ public:
 
   // Given the client id and a packed client query, this function first unpacks the query, then returns the retrieved encrypted result.
   RlweCt make_query(const size_t client_id, RlweCt &query);
+
+  // DoubleStateless query path: no server-resident keys. The client ships a real
+  // BFV root and fresh RGSW selectors; the server expands the first dimension
+  // with DMux, then runs the subsequent dimensions with the supplied selectors
+  // directly (no query_to_gsw). first_dim_query: the real BFV one-hot the DMux
+  // starts from (e.g. a single BFV(1), or a 2^m one-hot resolving the top m
+  // bits). first_dim_selectors: one RGSW(bit) per remaining first-dim tree level.
+  // other_dim_selectors: num_dims-1 RGSW(bit), ordered as get_query_indices()[1..].
+  RlweCt make_query_dmux(std::vector<RlweCt> first_dim_query,
+                         const std::vector<GSWCt> &first_dim_selectors,
+                         std::vector<GSWCt> &other_dim_selectors);
   // return the number of bits needed to represent the server reponse
   size_t save_resp_to_stream(const RlweCt &response, std::stringstream &resp_stream);
   void set_client_bv_galois_key(const size_t client_id, bvks::BvGaloisKeys bv_keys);
@@ -83,6 +94,27 @@ private:
   std::vector<RlweCt> fast_expand_qry(size_t client_id, RlweCt &ciphertext) const;
 
   std::vector<RlweCt> full_expand_qry(size_t client_id, RlweCt &ciphertext) const;
+
+  // DMux-based query expansion: an alternative to fast_expand_qry's Galois
+  // route that uses only external products. Each selector level splits every
+  // query ciphertext c with an RGSW selector C via
+  //   DMux(c, C) = (c - EP(C, c), EP(C, c)).
+  // The output length is query.size() << selectors.size(). When the input query
+  // is one-hot (exactly one BFV(1), the rest BFV(0)), so is the output: the lone
+  // "1" sits at the index whose remaining low bits are encoded MSB-first by the
+  // selector bits.
+  //
+  // `query` is the starting set of ciphertexts, in coefficient form, K-limb: a
+  // real client BFV(0)/BFV(1) one-hot vector of size 2^m. The client resolves
+  // the top m bits by sending 2^m small BFV ciphertexts, and the remaining h-m
+  // selectors finish the tree. The BFV ciphertexts must be real (noisy)
+  // encryptions so BFV(0) and BFV(1) are indistinguishable.
+  // `selectors` must be fresh RGSW(bit) under the data-gsw gadget of length
+  // gsw_l (see PirClient::generate_dmux_selectors); gsw_l must match the
+  // client's so the per-level decomposition lines up with the selectors.
+  std::vector<RlweCt> dmux_expand_qry(std::vector<RlweCt> query,
+                                      const std::vector<GSWCt> &selectors,
+                                      const size_t gsw_l);
 
   // Convert the first-dim matmul output `inter_res` into per-ciphertext form.
   // Two responsibilities:

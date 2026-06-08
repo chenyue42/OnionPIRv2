@@ -1,4 +1,22 @@
 #include "tests.h"
+#include <cmath>
+
+namespace {
+// Shared checks for a DMux-expanded one-hot: the target slot decrypts to 1 (with
+// its noise budget) and an off-target slot decrypts to 0. `label` distinguishes
+// the trivial vs real-query variants.
+void check_dmux_onehot(const std::string &label, PirClient &client,
+                       const std::vector<RlweCt> &dmux_q, size_t col_idx,
+                       size_t fst_dim_sz) {
+  BENCH_PRINT(label << " target slot " << col_idx << " noise budget: "
+               << client.noise_budget(dmux_q[col_idx]) << " bits");
+  BENCH_PRINT(label << " target slot coeff[0]: "
+               << client.decrypt_ct(dmux_q[col_idx]).data[0] << " (expected 1)");
+  const size_t other = (col_idx + 1) % fst_dim_sz;
+  BENCH_PRINT(label << " off-target slot " << other << " coeff[0]: "
+               << client.decrypt_ct(dmux_q[other]).data[0] << " (expected 0)");
+}
+}  // namespace
 
 void PirTest::test_fast_expand_query() {
   print_func_name(__FUNCTION__);
@@ -58,4 +76,93 @@ void PirTest::test_fast_expand_query() {
     fast_exp_pt.push_back(client.decrypt_ct(fast_exp_q[i]));
   }
   BENCH_PRINT("fast expanded query coeff[0]: " << fast_exp_pt[query_idx % fst_dim_sz].data[0]);
+  PRINT_BAR;
+
+  // ===== Timing & size: Galois (fast_expand_qry) vs DMux (external product) ===
+  // DMux splits real BFV ciphertexts with fresh RGSW selectors via
+  //   DMux(c, C) = (c - EP(C, c), EP(C, c)).
+  // The client resolves the top `m` first-dim bits by shipping a 2^m one-hot of
+  // *real* BFV ciphertexts, so only h-m selectors finish the tree. Larger m
+  // saves RGSW selectors (each is 2*dmux_l BFV ciphertexts) at the cost of more
+  // (but individually tiny) BFV ciphertexts. We time both routes and print the
+  // DMux query size at each m so the size trade-off is visible.
+  //
+  // Note: fast_expand_qry expands the *whole* packed query (first dim + the
+  // other-dim GSW rows); dmux_expand_qry here expands only the first dimension.
+  {
+    const size_t col_idx = query_idx % fst_dim_sz;
+    const size_t h = std::bit_width(fst_dim_sz) - 1;  // fst_dim_sz == 2^h
+    const size_t dmux_l = 4;
+
+    // --- Galois route (expands the whole packed query) ---
+    server.fast_expand_qry(client_id, fast_query);  // warm up
+    TIME_ONCE_START("Galois fast_expand_qry");
+    auto galois_q = server.fast_expand_qry(client_id, fast_query);
+    TIME_ONCE_END("Galois fast_expand_qry");
+    PRINT_ONCE("Galois fast_expand_qry");
+
+    // --- DMux route at several skip levels m (first dimension only) ---
+    // Each level skipped drops one RGSW selector (2*dmux_l BFV cts) but doubles
+    // the BFV one-hot, so query size has a sweet spot before 2^m takes over.
+    // Note: skipping *top* levels barely changes compute — those levels have the
+    // smallest frontiers (work per level grows toward the leaves).
+    const size_t bfv_bytes = pir_params.get_BFV_size(/*use_seed=*/false);
+    const size_t sel_bytes = 2 * dmux_l * pir_params.get_BFV_size(/*use_seed=*/true);
+    for (size_t m = 1; m <= 6 && m <= h; ++m) {
+      auto query = client.generate_dmux_query(query_idx, m);
+      auto sel = client.generate_dmux_selectors(query_idx, dmux_l, m);
+      const std::string label = "DMux m=" + std::to_string(m) + " expand";
+
+      server.dmux_expand_qry(query, sel, dmux_l);  // warm up
+      TIME_ONCE_START(label);
+      auto dmux_q = server.dmux_expand_qry(query, sel, dmux_l);
+      TIME_ONCE_END(label);
+
+      // Correctness: still a one-hot at col_idx.
+      check_dmux_onehot("DMux m=" + std::to_string(m), client, dmux_q, col_idx,
+                        fst_dim_sz);
+      PRINT_ONCE(label);
+      const double q_kb =
+          ((size_t{1} << m) * bfv_bytes + sel.size() * sel_bytes) / 1024.0;
+      BENCH_PRINT("  query = " << (size_t{1} << m) << " BFV + " << sel.size()
+                   << " sel = " << q_kb << " KB");
+    }
+  }
+  PRINT_BAR;
+
+  // ===== Deep DMux expansion: noise vs number of levels r =====================
+  // dmux_expand_qry doesn't depend on fst_dim_sz, so we can drive an arbitrary
+  // number of levels r from a single real BFV(1) root + r RGSW(bit) selectors
+  // (PirTest is a friend, so it encrypts the bit pattern directly). This tests
+  // the bound from codex_resp/noise_bounds.py: DMux budget stays ~flat (noise is
+  // linear in r), while a Galois route would lose ~1 bit/level (noise ~4^r) and
+  // the two cross near r=10 at equal size (dmux_l=4 vs L_KS=8). We push to r=12.
+  // The predicted budget = 41 - 0.5*log2(1 + r*l*N*B^2/2), B = 2^base_log2.
+  // NOTE: produces 2^r ciphertexts (r=12 -> 4096).
+  {
+    constexpr size_t N = DBConsts::PolyDegree;
+    for (size_t dmux_l : {4u, 8u}) {
+      GSWEval dmux_gsw(pir_params, dmux_l, pir_params.get_base_log2_for(dmux_l));
+      const double B = std::pow(2.0, (double)pir_params.get_base_log2_for(dmux_l));
+      for (size_t r : {3u, 6u, 9u, 12u}) {
+        // Arbitrary MSB-first target index in [0, 2^r): the 0b0101... pattern.
+        const size_t target = ((size_t{1} << r) - 1) / 3;
+        std::vector<size_t> bits(r);
+        for (size_t j = 0; j < r; ++j) bits[j] = (target >> (r - 1 - j)) & 1ULL;
+
+        std::vector<RlweCt> query;
+        query.push_back(client.fresh_bfv_ct(1));  // single real BFV(1) root
+        auto sel = client.encrypt_selector_bits(bits, dmux_gsw);
+        auto dmux_q = server.dmux_expand_qry(std::move(query), sel, dmux_l);
+
+        const double pred = 41.0 - 0.5 * std::log2(1.0 + (double)r * dmux_l * N * B * B / 2.0);
+        const size_t other = (target + 1) % dmux_q.size();
+        BENCH_PRINT("DMux r=" << r << " dmux_l=" << dmux_l << " (out=" << dmux_q.size()
+                     << "): budget=" << client.noise_budget(dmux_q[target])
+                     << " bits (bound " << pred << "), target[0]="
+                     << client.decrypt_ct(dmux_q[target]).data[0] << " off[0]="
+                     << client.decrypt_ct(dmux_q[other]).data[0]);
+      }
+    }
+  }
 }
