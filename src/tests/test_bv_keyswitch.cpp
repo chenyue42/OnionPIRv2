@@ -26,10 +26,11 @@ static void test_signed_decompose() {
     uint64_t digits[bvks::L_KS];
     bvks::signed_gadget_decompose(val, base_log2, q, digits, bvks::L_KS);
 
-    // 1. Reconstruction: Σ digits[i] * B^i ≡ val (mod q)
+    // 1. Reconstruction (MSB-first: digits[i] is the B^(L-1-i) digit):
+    //    Σ digits[i] * B^(L_KS-1-i) ≡ val (mod q)
     uint128_t reconstructed = 0;
     uint128_t Bi = 1;
-    for (size_t i = 0; i < bvks::L_KS; ++i) {
+    for (size_t i = bvks::L_KS; i-- > 0;) {  // i descending, Bi = B^0, B^1, ...
       reconstructed = (reconstructed + (static_cast<uint128_t>(digits[i]) * Bi) % q) % q;
       Bi = (Bi * B) % q;
     }

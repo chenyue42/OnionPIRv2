@@ -12,13 +12,12 @@
 // in test_fast_expand is a primitive bug (e.g. order/overflow); if it matches,
 // the cliff is noise propagation in the DMux pipeline, not the primitive.
 //
-// ORDER CONVENTION (the thing Codex flagged):
-//   bvks::(approx_)signed_gadget_decompose -> digits LSB-first: digit[i] is the
-//       coefficient of B^i (digit[0] = B^0).
+// ORDER CONVENTION (MSB-first everywhere):
+//   bvks::(approx_)signed_gadget_decompose -> digits MSB-first: digit[0] is the
+//       coefficient of the highest power B^(l-1), digit[l-1] is B^0.
 //   utils::gsw_gadget(_approx)             -> MSB-first by index: gadget[0] is
 //       the largest power (* 2^drop * B^(l-1)), gadget[l-1] is B^0 (* 2^drop).
-//   So digit[i] pairs with gadget[ell-1-i]. The production path hides this by
-//   reversing the digits in decomp_rlwe_* before matching gadget rows 1:1.
+//   So digit[i] pairs directly with gadget[i] (1:1, no reversal anywhere).
 
 namespace {
 // Center a value in [0, q) to (-q/2, q/2].
@@ -27,16 +26,16 @@ int64_t center(uint64_t v, uint64_t q) {
                         : static_cast<int64_t>(v);
 }
 
-// Reconstruct from LSB-first digits and an MSB-first gadget row.
-// reversed=false: correct pairing digit[i] <-> gadget[ell-1-i].
-// reversed=true : naive pairing digit[i] <-> gadget[i] (what you get if you
-//                 forget the decomp_rlwe reversal) -- expected to be broken.
+// Reconstruct from MSB-first digits and an MSB-first gadget row.
+// reversed=false: correct pairing digit[i] <-> gadget[i] (both MSB-first).
+// reversed=true : flipped pairing digit[i] <-> gadget[ell-1-i] -- expected broken,
+//                 demonstrates the order actually matters.
 uint64_t reconstruct(const uint64_t *digits, const std::vector<uint64_t> &gadget,
                      size_t ell, uint64_t q, bool reversed) {
   __int128 acc = 0;
   for (size_t i = 0; i < ell; ++i) {
     const int64_t d = center(digits[i], q);
-    const uint64_t g = reversed ? gadget[i] : gadget[ell - 1 - i];
+    const uint64_t g = reversed ? gadget[ell - 1 - i] : gadget[i];
     acc += static_cast<__int128>(d) * static_cast<__int128>(g);
   }
   int64_t m = static_cast<int64_t>(acc % static_cast<__int128>(q));

@@ -254,7 +254,9 @@ void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<u
   for (size_t poly_id = 0; poly_id < 2; poly_id++) {
     const uint64_t *poly_ptr = ct.data(poly_id);
 
-    // digit_matrix[p][k]: digit p of coefficient k (out[0]=least significant)
+    // digit_matrix[p][k]: digit p of coefficient k. The decompose primitives now
+    // emit MSB-first (digit_vals[0] = highest power), matching the MSB-first GSW
+    // gadget in plain_to_gsw, so we keep the order directly (no reversal).
     std::vector<std::vector<uint64_t>> digit_matrix(l_, std::vector<uint64_t>(coeff_count));
 
     // signed gadget decomposition (approximate variant drops the low bits)
@@ -273,8 +275,8 @@ void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<u
       }
     }
 
-    // Push most-significant digit first (matches current GSW gadget ordering).
-    for (size_t p = l_; p-- > 0;) {
+    // Emit MSB-first (digit_matrix[0] = highest power), matching the gadget rows.
+    for (size_t p = 0; p < l_; p++) {
       output.emplace_back(std::move(digit_matrix[p]));
     }
   }

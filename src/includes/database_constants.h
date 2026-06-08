@@ -58,7 +58,7 @@ namespace DBConsts {
   //                    query, but unlinkable and no server-side key storage.
   enum class QueryMode { Stateful, DoubleStateless };
   // constexpr QueryMode Mode = QueryMode::Stateful;
-  constexpr QueryMode Mode = QueryMode::DoubleStateless;
+  constexpr QueryMode Mode = QueryMode::Stateful;
   // ==========================================================================
   // Per-config constants
   // ==========================================================================
