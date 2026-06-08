@@ -174,6 +174,9 @@ void GSWEval::decomp_rlwe_mp(RlweCt const &ct, std::vector<std::vector<uint64_t>
   const auto& log_keys = ext_log_keys(context);
 
   // ============================ Parameters ============================
+  // Approximate decomposition is only wired for the single-mod (K=1) path so far
+  // (Phase 1); the MP path stays exact until Phase 2.
+  assert(!approx_ && "approximate decomposition not yet supported for K>=2 (MP)");
   assert(output.size() == 0);
   output.reserve(2 * l_);
   // Setup parameters
@@ -254,11 +257,17 @@ void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<u
     // digit_matrix[p][k]: digit p of coefficient k (out[0]=least significant)
     std::vector<std::vector<uint64_t>> digit_matrix(l_, std::vector<uint64_t>(coeff_count));
 
-    // signed gadget decomposition
+    // signed gadget decomposition (approximate variant drops the low bits)
+    const size_t q_bits = pir_params_.get_ct_mod_width();
     for (size_t k = 0; k < coeff_count; k++) {
       // Use a stack buffer; l_ is small (≤12).
       uint64_t digit_vals[16];  // ! for now we assume l_ <= 16. Reasonable for practical params.
-      bvks::signed_gadget_decompose(poly_ptr[k], base_log2_, q, digit_vals, l_);
+      if (approx_) {
+        bvks::approx_signed_gadget_decompose(poly_ptr[k], base_log2_, q, q_bits,
+                                             digit_vals, l_);
+      } else {
+        bvks::signed_gadget_decompose(poly_ptr[k], base_log2_, q, digit_vals, l_);
+      }
       for (size_t p = 0; p < l_; p++) {
         digit_matrix[p][k] = digit_vals[p];
       }
@@ -336,9 +345,13 @@ GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
   const double sigma = pir_params_.get_noise_std_dev();
 
   // MP gadget table: gadget_table[k][p] = B^(l_-1-p) mod q_k, MSB-first
-  // (p=0 = largest power B^(l_-1)).
+  // (p=0 = largest power B^(l_-1)). Approximate variant scales by 2^drop so it
+  // pairs with approx_signed_gadget_decompose.
   std::vector<std::vector<uint64_t>> gadget_table =
-      utils::gsw_gadget(l_, base_log2_, rns_mods_arr);
+      approx_ ? utils::gsw_gadget_approx(l_, base_log2_,
+                                         pir_params_.get_ct_mod_width(),
+                                         rns_mods_arr)
+              : utils::gsw_gadget(l_, base_log2_, rns_mods_arr);
 
   const size_t rows_per_half = l_;
   GSWCt output(2 * rows_per_half, std::vector<uint64_t>(2 * K * N));

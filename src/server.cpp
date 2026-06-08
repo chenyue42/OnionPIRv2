@@ -627,14 +627,18 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
 std::vector<RlweCt>
 PirServer::dmux_expand_qry(std::vector<RlweCt> query,
                            const std::vector<GSWCt> &selectors,
-                           const size_t gsw_l) {
+                           const size_t gsw_l,
+                           const size_t approx_base_log2) {
   constexpr size_t N = DBConsts::PolyDegree;
   const auto &qs = pir_params_.get_rns_mods();
   const size_t K = qs.size();
 
   // Decompose against the same gadget the selectors were encrypted under, not
-  // the fixed data_gsw_ (which is locked to l_ep).
-  GSWEval dmux_gsw(pir_params_, gsw_l, pir_params_.get_base_log2_for(gsw_l));
+  // the fixed data_gsw_ (which is locked to l_ep). approx_base_log2 > 0 selects
+  // the approximate (scaled) gadget at that base bit-width; 0 keeps it exact.
+  const bool approx = approx_base_log2 > 0;
+  const size_t b = approx ? approx_base_log2 : pir_params_.get_base_log2_for(gsw_l);
+  GSWEval dmux_gsw(pir_params_, gsw_l, b, approx);
 
   // DMux tree: each selector level doubles the number of query ciphertexts. The
   // query is in coefficient form (a trivial BFV(1) root, or a real client BFV

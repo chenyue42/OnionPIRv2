@@ -9,6 +9,7 @@ void PirTest::run_test(const std::string &test_name) {
   else if (test_name == "ext_prod_mux")      test_ext_prod_mux();
   else if (test_name == "fst_dim")           test_fst_dim_mult();
   else if (test_name == "fast_expand")       test_fast_expand_query();
+  else if (test_name == "approx_decomp")     test_approx_decomp();
   else if (test_name == "decrypt_mod_q")     test_decrypt_mod_q();
   else if (test_name == "mod_switch")        test_mod_switch();
   else if (test_name == "db_shape")          test_db_shape();

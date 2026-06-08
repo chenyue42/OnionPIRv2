@@ -211,6 +211,16 @@ std::vector<std::vector<uint64_t>>
 gsw_gadget(size_t l, uint64_t base_log2,
            const std::vector<uint64_t> &rns_mods);
 
+// Scaled gadget for approximate decomposition (TFHE-rs style).
+// Entries equal the exact gadget multiplied by 2^drop mod q, where
+//   drop = q_bits - l * base_log2.
+// Pair with bvks::approx_signed_gadget_decompose so the external product
+// reconstructs val up to an error bounded by 2^(drop-1) per coefficient.
+// When drop == 0 this returns exactly gsw_gadget(...). Requires l*base_log2 <= q_bits.
+std::vector<std::vector<uint64_t>>
+gsw_gadget_approx(size_t l, uint64_t base_log2, size_t q_bits,
+                  const std::vector<uint64_t> &rns_mods);
+
 // Generate a prime that is bit_width long
 std::uint64_t generate_prime(size_t bit_width);
 

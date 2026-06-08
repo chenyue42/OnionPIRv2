@@ -209,10 +209,14 @@ std::vector<GSWCt> PirClient::encrypt_selector_bits(
 
 std::vector<GSWCt> PirClient::generate_dmux_selectors(const size_t pt_idx,
                                                       const size_t gsw_l,
-                                                      const size_t skip_levels) {
-  // Gadget of length gsw_l. The server must use the same gsw_l when decomposing
-  // in DMux so the per-level base_log2 lines up.
-  GSWEval data_gsw(pir_params_, gsw_l, pir_params_.get_base_log2_for(gsw_l));
+                                                      const size_t skip_levels,
+                                                      const size_t approx_base_log2) {
+  // Gadget of length gsw_l. The server must use the same gsw_l/base_log2 when
+  // decomposing in DMux. approx_base_log2 > 0 selects the approximate (scaled)
+  // gadget at that base bit-width; 0 keeps the exact gadget.
+  const bool approx = approx_base_log2 > 0;
+  const size_t b = approx ? approx_base_log2 : pir_params_.get_base_log2_for(gsw_l);
+  GSWEval data_gsw(pir_params_, gsw_l, b, approx);
   // Drop the first skip_levels MSB bits — those are resolved by a real BFV query.
   std::vector<size_t> bits = generate_dmux_indices(pt_idx);
   assert(skip_levels <= bits.size());

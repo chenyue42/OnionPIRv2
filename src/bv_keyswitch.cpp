@@ -39,6 +39,49 @@ void signed_gadget_decompose(uint64_t val, size_t base_log2,
   }
 }
 
+void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
+                                    uint64_t q, size_t q_bits,
+                                    uint64_t *out, size_t num_digits) {
+  const size_t rep_bits = num_digits * base_log2;
+  assert(rep_bits <= q_bits);
+  const size_t drop = q_bits - rep_bits;
+
+  // Center to (-q/2, q/2].
+  const uint64_t half_q = q >> 1;
+  int64_t d = (val > half_q)
+      ? static_cast<int64_t>(val) - static_cast<int64_t>(q)
+      : static_cast<int64_t>(val);
+
+  // Round to nearest multiple of 2^drop, then divide by 2^drop (sign-preserving).
+  if (drop > 0) {
+    const int64_t half = int64_t(1) << (drop - 1);
+    d = (d >= 0) ? ((d + half) >> drop)
+                 : -(((-d) + half) >> drop);
+  }
+
+  // Signed base-B decomposition on the (now small) rounded value. |d'| < B^l/2
+  // (because q/2 < 2^(q_bits-1)), so the value is representable in num_digits
+  // balanced digits. Balance every digit EXCEPT the most-significant one: a
+  // balanced top digit of exactly B/2 sign-flips to -B/2 and carries out, and
+  // with no spare high digit that carry would be lost (the approximate gadget
+  // sits right at the B^l/2 edge, unlike exact decomposition which has headroom).
+  // Letting the last digit hold the whole remainder (|remainder| <= B/2) keeps
+  // the reconstruction exact; the digit magnitude bound B/2 is unchanged.
+  const int64_t nativeSubgBits = 64 - static_cast<int64_t>(base_log2);
+  for (size_t i = 0; i < num_digits; ++i) {
+    int64_t r;
+    if (i + 1 < num_digits) {
+      r = (d << nativeSubgBits) >> nativeSubgBits;  // balanced low digit
+      d -= r;
+      d >>= base_log2;
+    } else {
+      r = d;  // most-significant digit: full remainder, no balanced flip
+    }
+    out[i] = (r >= 0) ? static_cast<uint64_t>(r)
+                      : static_cast<uint64_t>(r + static_cast<int64_t>(q));
+  }
+}
+
 void signed_gadget_decompose_mp(uint128_t val, uint128_t Q, size_t base_log2,
                                 int64_t *out, size_t num_digits) {
   using i128 = __int128_t;

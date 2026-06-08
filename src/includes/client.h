@@ -27,9 +27,13 @@ public:
   // same gsw_l so its decomposition matches. `skip_levels` drops that many
   // leading (MSB) selectors — use it when the top bits are instead resolved by a
   // real BFV query from generate_dmux_query(pt_idx, skip_levels).
+  // `approx_base_log2`: 0 = exact gadget (base_log2 = ceil(ct_mod_width/gsw_l));
+  // >0 = approximate gadget with that base bit-width (must satisfy
+  // gsw_l*approx_base_log2 <= ct_mod_width). The server must pass the same value.
   std::vector<GSWCt> generate_dmux_selectors(const size_t pt_idx,
                                              const size_t gsw_l,
-                                             const size_t skip_levels = 0);
+                                             const size_t skip_levels = 0,
+                                             const size_t approx_base_log2 = 0);
 
   // Build the real BFV one-hot the DMux tree starts from when the top
   // `num_levels` first-dim bits are resolved client-side: a length-2^num_levels

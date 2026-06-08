@@ -112,9 +112,12 @@ private:
   // `selectors` must be fresh RGSW(bit) under the data-gsw gadget of length
   // gsw_l (see PirClient::generate_dmux_selectors); gsw_l must match the
   // client's so the per-level decomposition lines up with the selectors.
+  // `approx_base_log2`: 0 = exact gadget; >0 = approximate decomposition at that
+  // base bit-width (must match the value the client used for the selectors).
   std::vector<RlweCt> dmux_expand_qry(std::vector<RlweCt> query,
                                       const std::vector<GSWCt> &selectors,
-                                      const size_t gsw_l);
+                                      const size_t gsw_l,
+                                      const size_t approx_base_log2 = 0);
 
   // Convert the first-dim matmul output `inter_res` into per-ciphertext form.
   // Two responsibilities:

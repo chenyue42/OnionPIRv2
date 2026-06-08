@@ -48,10 +48,11 @@ void PirTest::test_fast_expand_query() {
   server.set_client_gsw_key(client_id, client.generate_gsw_from_key());
 
   // ============ test initial noise ==============
-  {
-    RlweCt zero_ct = client.fresh_zero_ct();
-    BENCH_PRINT("fresh zero noise budget: " << client.noise_budget(zero_ct) << " bits");
-  }
+  // Fresh BFV noise budget, measured (not hardcoded) so the analytic prediction
+  // below adapts when q / t / sigma / N change. The DMux root is a fresh BFV, so
+  // this is the budget the expansion starts from.
+  const double fresh_budget = client.noise_budget(client.fresh_zero_ct());
+  BENCH_PRINT("fresh zero noise budget: " << fresh_budget << " bits");
 
   // ============= Generate the query ==============
   const size_t query_idx = std::rand() % pir_params.get_num_pt();
@@ -155,7 +156,7 @@ void PirTest::test_fast_expand_query() {
         auto sel = client.encrypt_selector_bits(bits, dmux_gsw);
         auto dmux_q = server.dmux_expand_qry(std::move(query), sel, dmux_l);
 
-        const double pred = 41.0 - 0.5 * std::log2(1.0 + (double)r * dmux_l * N * B * B / 2.0);
+        const double pred = fresh_budget - 0.5 * std::log2(1.0 + (double)r * dmux_l * N * B * B / 2.0);
         const size_t other = (target + 1) % dmux_q.size();
         BENCH_PRINT("DMux r=" << r << " dmux_l=" << dmux_l << " (out=" << dmux_q.size()
                      << "): budget=" << client.noise_budget(dmux_q[target])
@@ -164,5 +165,43 @@ void PirTest::test_fast_expand_query() {
                      << client.decrypt_ct(dmux_q[other]).data[0]);
       }
     }
+  }
+  PRINT_BAR;
+
+  // ===== Approximate gadget decomposition: noise vs base b (ell=4, r=12) ======
+  // Exact decomposition forces base_log2 = ceil(ct_mod_width/ell) (b=15 for
+  // ell=4), and that huge B=2^15 dominates the external-product noise. Approx
+  // decomposition drops the low (ct_mod_width - ell*b) bits so b can be smaller
+  // -- less gadget noise (~B^2) at the cost of a rounding error. noise_bounds.py
+  // predicts an optimum near b=11 giving ~+3-4 bits over exact. Validate on a
+  // real 12-level expansion (single BFV(1) root + 12 RGSW(bit) selectors).
+  {
+    constexpr size_t ell = 4;
+    constexpr size_t r = 12;
+    const size_t target = ((size_t{1} << r) - 1) / 3;  // 0b0101... pattern
+    std::vector<size_t> bits(r);
+    for (size_t j = 0; j < r; ++j) bits[j] = (target >> (r - 1 - j)) & 1ULL;
+    const size_t other = (target + 1) % (size_t{1} << r);
+    const size_t q_bits = pir_params.get_ct_mod_width();
+
+    auto run = [&](const char *tag, size_t b, bool approx) {
+      const size_t base_log2 = approx ? b : pir_params.get_base_log2_for(ell);
+      GSWEval gsw(pir_params, ell, base_log2, approx);  // client-side selectors
+      auto sel = client.encrypt_selector_bits(bits, gsw);
+      std::vector<RlweCt> query;
+      query.push_back(client.fresh_bfv_ct(1));
+      auto dmux_q = server.dmux_expand_qry(std::move(query), sel, ell,
+                                           approx ? b : 0);
+      const size_t drop = ell * base_log2 >= q_bits ? 0 : q_bits - ell * base_log2;
+      BENCH_PRINT(tag << " ell=" << ell << " b=" << base_log2 << " (cover "
+                   << ell * base_log2 << "/" << q_bits << " bits, drop "
+                   << drop << "): budget="
+                   << client.noise_budget(dmux_q[target]) << " bits, target[0]="
+                   << client.decrypt_ct(dmux_q[target]).data[0] << " off[0]="
+                   << client.decrypt_ct(dmux_q[other]).data[0]);
+    };
+
+    run("exact ", 0, false);
+    for (size_t b : {10u, 11u, 12u, 13u, 14u}) run("approx", b, true);
   }
 }
