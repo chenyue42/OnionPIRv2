@@ -53,10 +53,6 @@ class PirTest {
     void test_noise_sampling();
     void test_rlwe_enc();
     void test_barrett();
-    // Isolated reconstruction test for (approximate) gadget decomposition:
-    // measures || sum_i digit_i * gadget_i - v || per coefficient vs the
-    // 2^(drop-1) bound, with no external-product / noise accumulation.
-    void test_approx_decomp();
 
     // Search (tree_height, num_queries, num_other_dims) for minimum total
     // communication in each (QueryMode, GswSource) combination, given the

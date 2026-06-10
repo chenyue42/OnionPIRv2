@@ -157,60 +157,6 @@ void rlwe_ntt_inv_inplace(RlweCt &ct, uint64_t q, size_t N) {
   ct.ntt_form = false;
 }
 
-void rlwe_add_k(const RlweCt &a, const RlweCt &b, RlweCt &c,
-                const std::vector<uint64_t> &qs, size_t N) {
-  c.c0.resize(qs.size() * N);
-  c.c1.resize(qs.size() * N);
-  c.ntt_form = a.ntt_form;
-  for (size_t k = 0; k < qs.size(); ++k) {
-    intel::hexl::EltwiseAddMod(c.c0.data() + k * N, a.c0.data() + k * N,
-                               b.c0.data() + k * N, N, qs[k]);
-    intel::hexl::EltwiseAddMod(c.c1.data() + k * N, a.c1.data() + k * N,
-                               b.c1.data() + k * N, N, qs[k]);
-  }
-}
-
-void rlwe_add_inplace_k(RlweCt &a, const RlweCt &b,
-                        const std::vector<uint64_t> &qs, size_t N) {
-  for (size_t k = 0; k < qs.size(); ++k) {
-    intel::hexl::EltwiseAddMod(a.c0.data() + k * N, a.c0.data() + k * N,
-                               b.c0.data() + k * N, N, qs[k]);
-    intel::hexl::EltwiseAddMod(a.c1.data() + k * N, a.c1.data() + k * N,
-                               b.c1.data() + k * N, N, qs[k]);
-  }
-}
-
-void rlwe_sub_inplace_k(RlweCt &a, const RlweCt &b,
-                        const std::vector<uint64_t> &qs, size_t N) {
-  for (size_t k = 0; k < qs.size(); ++k) {
-    intel::hexl::EltwiseSubMod(a.c0.data() + k * N, a.c0.data() + k * N,
-                               b.c0.data() + k * N, N, qs[k]);
-    intel::hexl::EltwiseSubMod(a.c1.data() + k * N, a.c1.data() + k * N,
-                               b.c1.data() + k * N, N, qs[k]);
-  }
-}
-
-void rlwe_ntt_inv_inplace_k(RlweCt &ct, const std::vector<uint64_t> &qs, size_t N) {
-  for (size_t k = 0; k < qs.size(); ++k) {
-    utils::ntt_inv(ct.c0.data() + k * N, N, qs[k]);
-    utils::ntt_inv(ct.c1.data() + k * N, N, qs[k]);
-  }
-  ct.ntt_form = false;
-}
-
-void rlwe_shift_k(const RlweCt &src, RlweCt &dst, size_t index,
-                  const std::vector<uint64_t> &qs, size_t N) {
-  dst.c0.resize(qs.size() * N);
-  dst.c1.resize(qs.size() * N);
-  dst.ntt_form = src.ntt_form;
-  for (size_t k = 0; k < qs.size(); ++k) {
-    utils::negacyclic_shift_poly_coeffmod(src.c0.data() + k * N, N, index,
-                                          qs[k], dst.c0.data() + k * N);
-    utils::negacyclic_shift_poly_coeffmod(src.c1.data() + k * N, N, index,
-                                          qs[k], dst.c1.data() + k * N);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // K-limb (RNS) RLWE primitives.
 // ---------------------------------------------------------------------------

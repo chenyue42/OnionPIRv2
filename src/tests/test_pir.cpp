@@ -27,60 +27,35 @@ void PirTest::test_pir() {
   size_t query_size = 0;
   size_t resp_size = 0;
 
-  if constexpr (DBConsts::Mode == DBConsts::QueryMode::DoubleStateless) {
-    BENCH_PRINT("Query mode: DoubleStateless (DMux expansion, no stored keys)");
-  } else {
-    BENCH_PRINT("Query mode: Stateful (Galois expansion, server-resident keys)");
-  }
-
   // Run the query process many times.
   for (size_t i = 0; i < num_experiments; i++) {
     BENCH_PRINT("======================== Experiment " << i + 1 << " ========================");
 
+    // ============= OFFLINE PHASE: key materials ==============
     // Initialize the client
     PirClient client(pir_params);
     const size_t client_id = client.get_client_id();
     std::stringstream resp_stream;
+
+    // Client create BV galois keys and gsw(sk)
+    auto bv_galois_keys = client.create_bv_galois_keys();
+    galois_key_size = pir_params.get_bv_galois_key_size();
+    //--------------------------------------------------------------------------------
+    // Server receives the BV galois keys and gsw keys
+    server.set_client_bv_galois_key(client_id, std::move(bv_galois_keys));
+    server.set_client_gsw_key(client_id, client.generate_gsw_from_key());
+
+    // ===================== ONLINE PHASE =====================
     size_t query_pt_idx = query_indices[i];
-    RlweCt response;
 
-    if constexpr (DBConsts::Mode == DBConsts::QueryMode::Stateful) {
-      // ============= OFFLINE PHASE: server-resident key materials ==============
-      auto bv_galois_keys = client.create_bv_galois_keys();
-      galois_key_size = pir_params.get_bv_galois_key_size();
-      server.set_client_bv_galois_key(client_id, std::move(bv_galois_keys));
-      server.set_client_gsw_key(client_id, client.generate_gsw_from_key());
+    TIME_START(CLIENT_TOT_TIME);
+    RlweCt query = client.fast_generate_query(query_pt_idx);
+    TIME_END(CLIENT_TOT_TIME);
+    query_size = pir_params.get_BFV_size();
 
-      // ===================== ONLINE PHASE =====================
-      TIME_START(CLIENT_TOT_TIME);
-      RlweCt query = client.fast_generate_query(query_pt_idx);
-      TIME_END(CLIENT_TOT_TIME);
-      query_size = pir_params.get_BFV_size();
-
-      TIME_START(SERVER_TOT_TIME);
-      response = server.make_query(client_id, query);
-      TIME_END(SERVER_TOT_TIME);
-    } else {
-      // ============= DOUBLE STATELESS: fresh selectors, no stored keys ==========
-      galois_key_size = 0;
-      TIME_START(CLIENT_TOT_TIME);
-      // The client ships a real BFV(1) root for the DMux tree plus the fresh
-      // RGSW selectors; the server fabricates no part of the query.
-      std::vector<RlweCt> first_query;
-      first_query.push_back(client.fresh_bfv_ct(1));
-      auto first_sel = client.generate_dmux_selectors(query_pt_idx, pir_params.get_l());
-      auto other_sel = client.generate_other_dim_selectors(query_pt_idx);
-      TIME_END(CLIENT_TOT_TIME);
-      // Each RGSW selector is 2*l_ep seed-compressed BFV ciphertexts; the root is
-      // one full (non-seeded) BFV ciphertext.
-      const size_t num_gsw = first_sel.size() + other_sel.size();
-      query_size = first_query.size() * pir_params.get_BFV_size(/*use_seed=*/false)
-                 + num_gsw * 2 * pir_params.get_l() * pir_params.get_BFV_size();
-
-      TIME_START(SERVER_TOT_TIME);
-      response = server.make_query_dmux(std::move(first_query), first_sel, other_sel);
-      TIME_END(SERVER_TOT_TIME);
-    }
+    TIME_START(SERVER_TOT_TIME);
+    RlweCt response = server.make_query(client_id, query);
+    TIME_END(SERVER_TOT_TIME);
 
     // ---------- server send the response to the client -----------
     resp_size = server.save_resp_to_stream(response, resp_stream);
@@ -123,13 +98,9 @@ void PirTest::test_pir() {
   PRINT_BAR;
   BENCH_PRINT("Success rate: " << success_count << "/" << num_experiments);
   BENCH_PRINT("BV galois key size: " << static_cast<double>(galois_key_size) / 1024 << " KB");
-  // DoubleStateless ships nothing server-side: no galois keys, no RGSW(sk).
-  const size_t gsw_key_size_bytes =
-      (DBConsts::Mode == DBConsts::QueryMode::Stateful)
-          ? pir_params.get_gsw_key_size()
-          : 0;
-  BENCH_PRINT("gsw key size: " << gsw_key_size_bytes << " bytes = " << static_cast<double>(gsw_key_size_bytes) / 1024 << " KB");
-  BENCH_PRINT("total key size: " << static_cast<double>(galois_key_size + gsw_key_size_bytes) / 1024 << "KB");
+  // BENCH_PRINT("gsw key size: " << gsw_key_size << " bytes");
+  BENCH_PRINT("gsw key size: " << pir_params.get_gsw_key_size() << " bytes = " << static_cast<double>(pir_params.get_gsw_key_size()) / 1024 << " KB");
+  BENCH_PRINT("total key size: " << static_cast<double>(galois_key_size + pir_params.get_gsw_key_size()) / 1024 << "KB");
   BENCH_PRINT("query size: " << query_size << " bytes = " << static_cast<double>(query_size) / 1024 << " KB");
   BENCH_PRINT("response size: " << resp_size << " bytes = " << static_cast<double>(resp_size) / 1024 << " KB");
 

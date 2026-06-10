@@ -13,11 +13,6 @@ class GSWEval {
     PirParams pir_params_;
     size_t l_;
     size_t base_log2_;
-    // Approximate (TFHE-rs style) gadget: when true, plain_to_gsw uses the scaled
-    // gadget and decomp_rlwe_* uses approx_signed_gadget_decompose, covering only
-    // the top l_*base_log2_ bits of the modulus (drops the low bits). Requires
-    // l_*base_log2_ <= ct_mod_width. Currently wired for the single-mod (K=1) path.
-    bool approx_;
 
     // Reusable scratch for external_product, sized once then reused across the
     // many calls (avoids per-call heap churn). ep_decomp_: 2*l_ decomposed rows,
@@ -28,9 +23,8 @@ class GSWEval {
     std::vector<int64_t> ep_dwork_;  // centered working values for vectorized decomp
 
   public:
-    GSWEval(const PirParams &pir_params, const size_t l, const size_t base_log2,
-            const bool approx = false)
-        : pir_params_(pir_params), l_(l), base_log2_(base_log2), approx_(approx) {}
+    GSWEval(const PirParams &pir_params, const size_t l, const size_t base_log2)
+        : pir_params_(pir_params), l_(l), base_log2_(base_log2) {}
     ~GSWEval() = default;
     GSWEval(const GSWEval &gsw_eval) = default;
 

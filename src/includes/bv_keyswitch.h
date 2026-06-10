@@ -74,34 +74,18 @@ BvGaloisKeys gen_bv_galois_keys(const PirParams &pir_params,
 // Gadget decomposition
 // ============================================================================
 
-// ORDER CONVENTION (all gadget code is MSB-first): out[0] is the HIGHEST power
-// B^(num_digits-1), out[num_digits-1] is B^0. This matches utils::gsw_gadget(_approx)
-// (gadget[0] = highest power) and the keyswitch keys, so digit i always pairs with
-// gadget/key row i.
-
 // Signed (zero-centered) gadget decomposition of a single coefficient.
 // Input:  val ∈ [0, q), base_log2, q, num_digits
-// Output: num_digits digits MSB-first (out[0]=B^(l-1), out[l-1]=B^0), each stored
-//         mod q, representing a signed digit in [-B/2, B/2).
-// Reconstruction: Σ out[i] · B^(num_digits-1-i) ≡ val (mod q).
+// Output: num_digits digits (out[0]=B^0, out[num_digits-1]=most significant),
+//         each stored mod q, representing a signed digit in [-B/2, B/2).
+// Reconstruction: Σ out[i] · B^i ≡ val (mod q).
 void signed_gadget_decompose(uint64_t val, size_t base_log2,
                              uint64_t q, uint64_t *out, size_t num_digits);
 
-// Approximate (TFHE-rs style) signed gadget decomposition: covers only the top
-// num_digits*base_log2 bits of the q_bits-wide modulus, rounding away the low
-// drop = q_bits - num_digits*base_log2 bits before decomposing. Pair with
-// utils::gsw_gadget_approx (same l, base_log2, q_bits): the external product then
-// reconstructs val up to a rounding error bounded by 2^(drop-1) per coefficient.
-// Output MSB-first (see convention above). Requires num_digits*base_log2 <= q_bits;
-// drop==0 reduces to signed_gadget_decompose.
-void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
-                                    uint64_t q, size_t q_bits,
-                                    uint64_t *out, size_t num_digits);
-
 // Multi-precision variant for K=2 (uint128 modulus Q = q0·q1). Centers `val`
-// in (-Q/2, Q/2] then emits num_digits signed digits in [-B/2, B/2) as int64_t,
-// MSB-first (out[0] = highest power). Callers render each digit to uint64 mod q_k
-// per limb separately, since the same digit needs to land under multiple moduli.
+// in (-Q/2, Q/2] then emits num_digits signed digits in [-B/2, B/2) as int64_t.
+// Callers render each digit to uint64 mod q_k per limb separately, since the
+// same digit needs to land under multiple moduli.
 void signed_gadget_decompose_mp(uint128_t val, uint128_t Q, size_t base_log2,
                                 int64_t *out, size_t num_digits);
 

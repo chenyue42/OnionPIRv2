@@ -173,9 +173,6 @@ void GSWEval::decomp_rlwe_mp(RlweCt const &ct, std::vector<std::vector<uint64_t>
   const auto& log_keys = ext_log_keys(context);
 
   // ============================ Parameters ============================
-  // Approximate decomposition is only wired for the single-mod (K=1) path so far
-  // (Phase 1); the MP path stays exact until Phase 2.
-  assert(!approx_ && "approximate decomposition not yet supported for K>=2 (MP)");
   // `output` is the caller's reusable scratch, pre-sized to 2*l_ rows of
   // coeff_val_cnt each; we write digit rows in place (no allocation here).
   assert(output.size() == 2 * l_);
@@ -243,22 +240,17 @@ void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<u
   // `output` is the caller's reusable scratch, pre-sized to 2*l_ rows of
   // coeff_count each; we write digits in place (no allocation here).
   // Vectorized signed decomposition: instead of decomposing one coefficient at a
-  // time (the bvks::(approx_)signed_gadget_decompose primitives, kept for the
+  // time (the bvks::signed_gadget_decompose primitive, kept for the
   // keyswitch/tests), we extract one DIGIT across the whole polynomial at a time.
   // The carry chain is serial across digits, but all N coefficients within a
   // digit are independent, so the inner loops auto-vectorize (AVX-512). The math
-  // mirrors the scalar primitives exactly (balanced digits MSB-first; for the
-  // approximate variant: round to nearest 2^drop, then leave the MS digit as the
-  // unbalanced remainder -- the carry-out fix).
+  // mirrors the scalar primitive exactly (balanced digits, MSB-first).
   assert(output.size() == 2 * l_);
   constexpr size_t N = DBConsts::PolyDegree;
   const uint64_t q = pir_params_.get_rns_mods()[0];
   const int64_t qi = static_cast<int64_t>(q);
   const uint64_t half_q = q >> 1;
   const int64_t native = 64 - static_cast<int64_t>(base_log2_);
-  const size_t q_bits = pir_params_.get_ct_mod_width();
-  assert(!approx_ || l_ * base_log2_ <= q_bits);
-  const size_t drop = approx_ ? q_bits - l_ * base_log2_ : 0;
 
   if (ep_dwork_.size() != N) ep_dwork_.resize(N);
   int64_t *const d = ep_dwork_.data();
@@ -272,33 +264,16 @@ void GSWEval::decomp_rlwe_single_mod(RlweCt const &ct, std::vector<std::vector<u
       const int64_t v = static_cast<int64_t>(poly_ptr[k]);
       d[k] = (poly_ptr[k] > half_q) ? v - qi : v;
     }
-    // Approximate: round to nearest 2^drop, then divide (sign-preserving).
-    if (drop > 0) {
-      const int64_t half = int64_t(1) << (drop - 1);
-      for (size_t k = 0; k < N; ++k) {
-        const int64_t x = d[k];
-        d[k] = (x >= 0) ? ((x + half) >> drop) : -(((-x) + half) >> drop);
-      }
-    }
 
     // Digit i is the B^i coefficient (extracted LSB-first); store MSB-first, so
     // it lands in row (l_-1-i). Poly 0 -> rows [0,l_), poly 1 -> rows [l_,2*l_).
     for (size_t i = 0; i < l_; ++i) {
       uint64_t *const outrow = output[base_row + (l_ - 1 - i)].data();
-      if (approx_ && i + 1 == l_) {
-        // Most-significant digit = full remainder (no balanced flip).
-        for (size_t k = 0; k < N; ++k) {
-          const int64_t r = d[k];
-          outrow[k] = (r >= 0) ? static_cast<uint64_t>(r)
-                               : static_cast<uint64_t>(r + qi);
-        }
-      } else {
-        for (size_t k = 0; k < N; ++k) {
-          const int64_t r = (d[k] << native) >> native;  // balanced low digit
-          d[k] = (d[k] - r) >> static_cast<int64_t>(base_log2_);
-          outrow[k] = (r >= 0) ? static_cast<uint64_t>(r)
-                               : static_cast<uint64_t>(r + qi);
-        }
+      for (size_t k = 0; k < N; ++k) {
+        const int64_t r = (d[k] << native) >> native;  // balanced low digit
+        d[k] = (d[k] - r) >> static_cast<int64_t>(base_log2_);
+        outrow[k] = (r >= 0) ? static_cast<uint64_t>(r)
+                             : static_cast<uint64_t>(r + qi);
       }
     }
   }
@@ -369,13 +344,9 @@ GSWCt GSWEval::plain_to_gsw(std::vector<uint64_t> const &plaintext,
   const double sigma = pir_params_.get_noise_std_dev();
 
   // MP gadget table: gadget_table[k][p] = B^(l_-1-p) mod q_k, MSB-first
-  // (p=0 = largest power B^(l_-1)). Approximate variant scales by 2^drop so it
-  // pairs with approx_signed_gadget_decompose.
+  // (p=0 = largest power B^(l_-1)).
   std::vector<std::vector<uint64_t>> gadget_table =
-      approx_ ? utils::gsw_gadget_approx(l_, base_log2_,
-                                         pir_params_.get_ct_mod_width(),
-                                         rns_mods_arr)
-              : utils::gsw_gadget(l_, base_log2_, rns_mods_arr);
+      utils::gsw_gadget(l_, base_log2_, rns_mods_arr);
 
   const size_t rows_per_half = l_;
   GSWCt output(2 * rows_per_half, std::vector<uint64_t>(2 * K * N));

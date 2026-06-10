@@ -546,10 +546,46 @@ RlweCt PirServer::evaluate_other_dim(std::vector<RlweCt> &mid_db, std::vector<GS
 void PirServer::ext_prod_mux(RlweCt &x, RlweCt &y, GSWCt &selection_cipher, RlweCt &result) {
     constexpr size_t N = DBConsts::PolyDegree;
     const auto &qs = pir_params_.get_rns_mods();
+    const size_t K = qs.size();
+
+    auto sub_k = [&](RlweCt &a, const RlweCt &b) {
+      for (size_t k = 0; k < K; ++k) {
+        intel::hexl::EltwiseSubMod(a.c0.data() + k * N, a.c0.data() + k * N,
+                                   b.c0.data() + k * N, N, qs[k]);
+        intel::hexl::EltwiseSubMod(a.c1.data() + k * N, a.c1.data() + k * N,
+                                   b.c1.data() + k * N, N, qs[k]);
+      }
+    };
+    auto add_inplace_k = [&](RlweCt &a, const RlweCt &b) {
+      for (size_t k = 0; k < K; ++k) {
+        intel::hexl::EltwiseAddMod(a.c0.data() + k * N, a.c0.data() + k * N,
+                                   b.c0.data() + k * N, N, qs[k]);
+        intel::hexl::EltwiseAddMod(a.c1.data() + k * N, a.c1.data() + k * N,
+                                   b.c1.data() + k * N, N, qs[k]);
+      }
+    };
+    auto add_k = [&](const RlweCt &a, const RlweCt &b, RlweCt &c) {
+      c.c0.resize(K * N);
+      c.c1.resize(K * N);
+      c.ntt_form = a.ntt_form;
+      for (size_t k = 0; k < K; ++k) {
+        intel::hexl::EltwiseAddMod(c.c0.data() + k * N, a.c0.data() + k * N,
+                                   b.c0.data() + k * N, N, qs[k]);
+        intel::hexl::EltwiseAddMod(c.c1.data() + k * N, a.c1.data() + k * N,
+                                   b.c1.data() + k * N, N, qs[k]);
+      }
+    };
+    auto intt_k = [&](RlweCt &ct) {
+      for (size_t k = 0; k < K; ++k) {
+        utils::ntt_inv(ct.c0.data() + k * N, N, qs[k]);
+        utils::ntt_inv(ct.c1.data() + k * N, N, qs[k]);
+      }
+      ct.ntt_form = false;
+    };
 
     // ========== y = y - x ==========
     TIME_START(OTHER_DIM_ADD_SUB);
-    rlwe_sub_inplace_k(y, x, qs, N);
+    sub_k(y, x);
     TIME_END(OTHER_DIM_ADD_SUB);
 
     // ========== y = b * (y - x) ========== output will be in NTT form
@@ -559,15 +595,15 @@ void PirServer::ext_prod_mux(RlweCt &x, RlweCt &y, GSWCt &selection_cipher, Rlwe
 
     // ========== y = INTT(y) ==========
     TIME_START(OTHER_DIM_INTT);
-    rlwe_ntt_inv_inplace_k(y, qs, N);
+    intt_k(y);
     TIME_END(OTHER_DIM_INTT);
 
     // ========== result = y + x ==========
     TIME_START(OTHER_DIM_ADD_SUB);
     if (&result == &x) {
-      rlwe_add_inplace_k(x, y, qs, N);
+      add_inplace_k(x, y);
     } else {
-      rlwe_add_k(x, y, result, qs, N);
+      add_k(x, y, result);
     }
     TIME_END(OTHER_DIM_ADD_SUB);
 }
@@ -584,10 +620,40 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
   const auto &bv_galois_key = client_bv_galois_keys_.at(client_id);
   constexpr size_t N = DBConsts::PolyDegree;
   const auto &qs = pir_params_.get_rns_mods();
+  const size_t K = qs.size();
 
-  // All ciphertexts in this routine are coefficient form, K-limb, with c0/c1
-  // each holding K*N uint64_t. Per-limb arithmetic uses the shared rlwe_*_k
-  // helpers (add / sub / shift).
+  // K-aware per-limb helpers. All ciphertexts in this routine are coefficient
+  // form, K-limb, with c0/c1 each holding K*N uint64_t.
+  auto rlwe_add_k = [&](const RlweCt &a, const RlweCt &b, RlweCt &c) {
+    c.c0.resize(K * N);
+    c.c1.resize(K * N);
+    c.ntt_form = a.ntt_form;
+    for (size_t k = 0; k < K; ++k) {
+      intel::hexl::EltwiseAddMod(c.c0.data() + k * N, a.c0.data() + k * N,
+                                 b.c0.data() + k * N, N, qs[k]);
+      intel::hexl::EltwiseAddMod(c.c1.data() + k * N, a.c1.data() + k * N,
+                                 b.c1.data() + k * N, N, qs[k]);
+    }
+  };
+  auto rlwe_sub_inplace_k = [&](RlweCt &a, const RlweCt &b) {
+    for (size_t k = 0; k < K; ++k) {
+      intel::hexl::EltwiseSubMod(a.c0.data() + k * N, a.c0.data() + k * N,
+                                 b.c0.data() + k * N, N, qs[k]);
+      intel::hexl::EltwiseSubMod(a.c1.data() + k * N, a.c1.data() + k * N,
+                                 b.c1.data() + k * N, N, qs[k]);
+    }
+  };
+  auto rlwe_shift_k = [&](const RlweCt &src, RlweCt &dst, size_t index) {
+    dst.c0.resize(K * N);
+    dst.c1.resize(K * N);
+    dst.ntt_form = src.ntt_form;
+    for (size_t k = 0; k < K; ++k) {
+      utils::negacyclic_shift_poly_coeffmod(src.c0.data() + k * N, N, index,
+                                            qs[k], dst.c0.data() + k * N);
+      utils::negacyclic_shift_poly_coeffmod(src.c1.data() + k * N, N, index,
+                                            qs[k], dst.c1.data() + k * N);
+    }
+  };
 
   // ============== storage   – index 0 is *unused*, root is slot 1
   std::vector<RlweCt> cts(2 * capacity); // slots 0 … 2*capacity-1
@@ -609,12 +675,12 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
                                   pir_params_);
     TIME_END(APPLY_GALOIS);
     TIME_START("add_sub");
-    rlwe_add_k(cts[i], c_prime, cts[2 * i], qs, N);
-    rlwe_sub_inplace_k(cts[i], c_prime, qs, N);
+    rlwe_add_k(cts[i], c_prime, cts[2 * i]);
+    rlwe_sub_inplace_k(cts[i], c_prime);
     TIME_END("add_sub");
 
     TIME_START("shift polynomial");
-    rlwe_shift_k(cts[i], cts[2 * i + 1], static_cast<size_t>(-k), qs, N);
+    rlwe_shift_k(cts[i], cts[2 * i + 1], static_cast<size_t>(-k));
     TIME_END("shift polynomial");
   }
 
@@ -622,45 +688,6 @@ PirServer::fast_expand_qry(std::size_t client_id, RlweCt &ciphertext) const {
   return std::vector<RlweCt>(
       std::make_move_iterator(cts.begin() + capacity),
       std::make_move_iterator(cts.begin() + capacity + useful_cnt));
-}
-
-std::vector<RlweCt>
-PirServer::dmux_expand_qry(std::vector<RlweCt> query,
-                           const std::vector<GSWCt> &selectors,
-                           const size_t gsw_l,
-                           const size_t approx_base_log2) {
-  constexpr size_t N = DBConsts::PolyDegree;
-  const auto &qs = pir_params_.get_rns_mods();
-  const size_t K = qs.size();
-
-  // Decompose against the same gadget the selectors were encrypted under, not
-  // the fixed data_gsw_ (which is locked to l_ep). approx_base_log2 > 0 selects
-  // the approximate (scaled) gadget at that base bit-width; 0 keeps it exact.
-  const bool approx = approx_base_log2 > 0;
-  const size_t b = approx ? approx_base_log2 : pir_params_.get_base_log2_for(gsw_l);
-  GSWEval dmux_gsw(pir_params_, gsw_l, b, approx);
-
-  // DMux tree: each selector level doubles the number of query ciphertexts. The
-  // query is in coefficient form (a trivial BFV(1) root, or a real client BFV
-  // one-hot). External product returns NTT form, so INTT the high branch back to
-  // coefficient form before the subtract and the next level's decomposition.
-  std::vector<RlweCt> level = std::move(query);
-  for (const GSWCt &sel : selectors) {
-    std::vector<RlweCt> next;
-    next.reserve(level.size() * 2);
-    for (RlweCt &ct : level) {
-      RlweCt hi;
-      hi.resize(N * K);
-      dmux_gsw.external_product(sel, ct, hi, LogContext::GENERIC);  // hi = EP(C, c)
-      rlwe_ntt_inv_inplace_k(hi, qs, N);
-      RlweCt lo = std::move(ct);
-      rlwe_sub_inplace_k(lo, hi, qs, N);                            // lo = c - EP(C, c)
-      next.push_back(std::move(lo));
-      next.push_back(std::move(hi));
-    }
-    level = std::move(next);
-  }
-  return level;
 }
 
 void PirServer::set_client_bv_galois_key(const size_t client_id, bvks::BvGaloisKeys bv_keys) {
@@ -732,40 +759,6 @@ RlweCt PirServer::make_query(const size_t client_id, RlweCt &query) {
 
   TIME_END(MOD_SWITCH);
   DEBUG_PRINT("Modulus switching done.");
-
-  return result;
-}
-
-
-RlweCt
-PirServer::make_query_dmux(std::vector<RlweCt> first_dim_query,
-                           const std::vector<GSWCt> &first_dim_selectors,
-                           std::vector<GSWCt> &other_dim_selectors) {
-  const size_t l_ep = pir_params_.get_l();
-
-  // ===== Expansion: first-dim one-hot via DMux external products =====
-  TIME_START(EXPAND_TIME);
-  std::vector<RlweCt> sel_vec =
-      dmux_expand_qry(std::move(first_dim_query), first_dim_selectors, l_ep);
-  TIME_END(EXPAND_TIME);
-
-  // ===== First dimension =====
-  TIME_START(FST_DIM_TIME);
-  std::vector<RlweCt> mid_db = evaluate_first_dim(sel_vec);
-  TIME_END(FST_DIM_TIME);
-
-  // ===== Subsequent dimensions: use the fresh selectors directly =====
-  TIME_START(OTHER_DIM_TIME);
-  RlweCt result = evaluate_other_dim(mid_db, other_dim_selectors);
-  TIME_END(OTHER_DIM_TIME);
-
-  // ===== Post-processing: mod-switch to small q =====
-  TIME_START(MOD_SWITCH);
-  if (DBConsts::SmallQWidth < DBConsts::RnsMods[0]) {
-    const uint64_t small_q = pir_params_.get_small_q();
-    mod_switch_inplace(result, small_q);
-  }
-  TIME_END(MOD_SWITCH);
 
   return result;
 }

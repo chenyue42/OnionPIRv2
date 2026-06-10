@@ -4,7 +4,6 @@
 #include "gsw.h"
 #include "rlwe.h"
 #include "hexl/hexl.hpp"
-#include <bit>
 #include <cassert>
 #include <random>
 
@@ -180,79 +179,6 @@ void PirClient::add_gsw_to_query(RlweCt &query, const std::vector<size_t> query_
 }
 
 
-std::vector<size_t> PirClient::generate_dmux_indices(size_t pt_idx) const {
-  const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
-  const size_t col_idx = pt_idx % fst_dim_sz;
-  const size_t h = std::bit_width(fst_dim_sz) - 1;  // fst_dim_sz must be 2^h
-  assert((size_t{1} << h) == fst_dim_sz);
-
-  std::vector<size_t> bits(h);
-  for (size_t j = 0; j < h; ++j) {
-    // MSB-first: level j peels off bit (h-1-j) of col_idx.
-    bits[j] = (col_idx >> (h - 1 - j)) & 1ULL;
-  }
-  return bits;
-}
-
-std::vector<GSWCt> PirClient::encrypt_selector_bits(
-    const std::vector<size_t> &bits, GSWEval &gsw) {
-  constexpr size_t N = DBConsts::PolyDegree;
-  std::vector<GSWCt> selectors;
-  selectors.reserve(bits.size());
-  std::vector<uint64_t> bit_poly(N, 0);
-  for (const size_t b : bits) {
-    bit_poly[0] = b;  // 0 or 1
-    selectors.push_back(gsw.plain_to_gsw(bit_poly, rlwe_sk_, rng_));
-  }
-  return selectors;
-}
-
-std::vector<GSWCt> PirClient::generate_dmux_selectors(const size_t pt_idx,
-                                                      const size_t gsw_l,
-                                                      const size_t skip_levels,
-                                                      const size_t approx_base_log2) {
-  // Gadget of length gsw_l. The server must use the same gsw_l/base_log2 when
-  // decomposing in DMux. approx_base_log2 > 0 selects the approximate (scaled)
-  // gadget at that base bit-width; 0 keeps the exact gadget.
-  const bool approx = approx_base_log2 > 0;
-  const size_t b = approx ? approx_base_log2 : pir_params_.get_base_log2_for(gsw_l);
-  GSWEval data_gsw(pir_params_, gsw_l, b, approx);
-  // Drop the first skip_levels MSB bits — those are resolved by a real BFV query.
-  std::vector<size_t> bits = generate_dmux_indices(pt_idx);
-  assert(skip_levels <= bits.size());
-  return encrypt_selector_bits({bits.begin() + skip_levels, bits.end()}, data_gsw);
-}
-
-std::vector<RlweCt> PirClient::generate_dmux_query(const size_t pt_idx,
-                                                   const size_t num_levels) {
-  const size_t fst_dim_sz = pir_params_.get_fst_dim_sz();
-  const size_t col_idx = pt_idx % fst_dim_sz;
-  const size_t h = std::bit_width(fst_dim_sz) - 1;  // fst_dim_sz == 2^h
-  assert(num_levels <= h);
-  // The one-hot slot is the top num_levels bits of col_idx (MSB-first), matching
-  // the index a single root would reach after num_levels DMux selector levels.
-  const size_t hot = col_idx >> (h - num_levels);
-  const size_t size = size_t{1} << num_levels;
-  std::vector<RlweCt> query;
-  query.reserve(size);
-  for (size_t i = 0; i < size; ++i) {
-    query.push_back(fresh_bfv_ct(i == hot ? 1 : 0));
-  }
-  return query;
-}
-
-
-std::vector<GSWCt> PirClient::generate_other_dim_selectors(const size_t pt_idx) {
-  const std::vector<size_t> qi = get_query_indices(pt_idx);
-  if (qi.size() <= 1) return {};  // single dimension: no other dims
-
-  // l_ep gadget: these feed evaluate_other_dim's ext_prod_mux, which decomposes
-  // with the server's data_gsw_ (also l_ep). Bits are get_query_indices()[1..].
-  GSWEval data_gsw(pir_params_, pir_params_.get_l(), pir_params_.get_base_log2());
-  return encrypt_selector_bits({qi.begin() + 1, qi.end()}, data_gsw);
-}
-
-
 // Shared single-mod decryption under modulus `q` using the matching sk.
 // Computes phase = c0 + c1*s (mod q), recovers m = round(phase * t / q),
 // and returns (plaintext, noise_budget).
@@ -323,20 +249,6 @@ RlweCt PirClient::fresh_zero_ct() {
   const double sigma = pir_params_.get_noise_std_dev();
   RlweCt ct;
   encrypt_zero_rns(rlwe_sk_, N, qs, sigma, rng_, ct, /*ntt_form=*/false);
-  return ct;
-}
-
-RlweCt PirClient::fresh_bfv_ct(uint64_t scalar) {
-  // Testing only.
-  constexpr size_t N = DBConsts::PolyDegree;
-  const auto &qs_arr = pir_params_.get_rns_mods();
-  const std::vector<uint64_t> qs(qs_arr.begin(), qs_arr.end());
-  const uint64_t t = pir_params_.get_plain_mod();
-  const double sigma = pir_params_.get_noise_std_dev();
-  std::vector<uint64_t> m(N, 0);
-  m[0] = scalar % t;
-  RlweCt ct;
-  encrypt_bfv_rns(m, rlwe_sk_, N, qs, t, sigma, rng_, ct);
   return ct;
 }
 

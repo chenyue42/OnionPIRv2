@@ -27,61 +27,14 @@ void signed_gadget_decompose(uint64_t val, size_t base_log2,
       ? static_cast<int64_t>(val) - static_cast<int64_t>(q)
       : static_cast<int64_t>(val);
 
-  // d = r_0 B^0 + r_1 B^1 + ... with r_i in [-B/2, B/2). We extract digits
-  // LSB-first but STORE them MSB-first: out[0] is the highest power B^(l-1),
-  // out[num_digits-1] is B^0. (Convention is MSB-first everywhere: the gadget,
-  // the GSW rows, and the keyswitch keys are all MSB-first; see bv_keyswitch.h.)
+  // The goal here: d = r_0 B^0 + r_1 B^1 + r_2 B^2 + ... with r_i in [-B/2, B/2).
+
   for (size_t i = 0; i < num_digits; ++i) {
     // Extract signed digit: sign-extend the lowest base_log2 bits
     int64_t r = (d << nativeSubgBits) >> nativeSubgBits;
     d -= r;
     d >>= base_log2;
-    out[num_digits - 1 - i] = (r >= 0) ? static_cast<uint64_t>(r)
-                      : static_cast<uint64_t>(r + static_cast<int64_t>(q));
-  }
-}
-
-void approx_signed_gadget_decompose(uint64_t val, size_t base_log2,
-                                    uint64_t q, size_t q_bits,
-                                    uint64_t *out, size_t num_digits) {
-  const size_t rep_bits = num_digits * base_log2;
-  assert(rep_bits <= q_bits);
-  const size_t drop = q_bits - rep_bits;
-
-  // Center to (-q/2, q/2].
-  const uint64_t half_q = q >> 1;
-  int64_t d = (val > half_q)
-      ? static_cast<int64_t>(val) - static_cast<int64_t>(q)
-      : static_cast<int64_t>(val);
-
-  // Round to nearest multiple of 2^drop, then divide by 2^drop (sign-preserving).
-  if (drop > 0) {
-    const int64_t half = int64_t(1) << (drop - 1);
-    d = (d >= 0) ? ((d + half) >> drop)
-                 : -(((-d) + half) >> drop);
-  }
-
-  // Signed base-B decomposition on the (now small) rounded value. |d'| < B^l/2
-  // (because q/2 < 2^(q_bits-1)), so the value is representable in num_digits
-  // balanced digits. Balance every digit EXCEPT the most-significant one: a
-  // balanced top digit of exactly B/2 sign-flips to -B/2 and carries out, and
-  // with no spare high digit that carry would be lost (the approximate gadget
-  // sits right at the B^l/2 edge, unlike exact decomposition which has headroom).
-  // Letting the MS digit hold the whole remainder (|remainder| <= B/2) keeps the
-  // reconstruction exact; the digit magnitude bound B/2 is unchanged.
-  // Digits are extracted LSB-first but STORED MSB-first (out[0] = highest power),
-  // so the MS-digit remainder lands in out[0].
-  const int64_t nativeSubgBits = 64 - static_cast<int64_t>(base_log2);
-  for (size_t i = 0; i < num_digits; ++i) {
-    int64_t r;
-    if (i + 1 < num_digits) {
-      r = (d << nativeSubgBits) >> nativeSubgBits;  // balanced low digit
-      d -= r;
-      d >>= base_log2;
-    } else {
-      r = d;  // most-significant digit: full remainder, no balanced flip
-    }
-    out[num_digits - 1 - i] = (r >= 0) ? static_cast<uint64_t>(r)
+    out[i] = (r >= 0) ? static_cast<uint64_t>(r)
                       : static_cast<uint64_t>(r + static_cast<int64_t>(q));
   }
 }
@@ -96,8 +49,6 @@ void signed_gadget_decompose_mp(uint128_t val, uint128_t Q, size_t base_log2,
 
   i128 d = (val > half_Q) ? static_cast<i128>(val) - static_cast<i128>(Q)
                           : static_cast<i128>(val);
-  // Extract LSB-first, store MSB-first (out[0] = highest power) to match the
-  // MSB-first convention used everywhere else.
   for (size_t i = 0; i < num_digits; ++i) {
     const uint64_t low = static_cast<uint64_t>(d) & B_mask;
     int64_t r;
@@ -108,7 +59,7 @@ void signed_gadget_decompose_mp(uint128_t val, uint128_t Q, size_t base_log2,
       r = static_cast<int64_t>(low);
       d >>= base_log2;
     }
-    out[num_digits - 1 - i] = r;
+    out[i] = r;
   }
 }
 
@@ -288,17 +239,14 @@ BvKeySwitchKey gen_bv_ks_key(const PirParams &pir_params,
   BvKeySwitchKey ksk;
   ksk.galois_k = galois_k;
 
-  // MP gadget: L_KS rows, MSB-first to match the decomposition (out[0] = highest
-  // power). Row i encrypts σ(s) · B^(L_KS-1-i) under all K limbs, so it pairs with
-  // digit i = signed_gadget_decompose(...)[i] (the inner product is a sum, so the
-  // result is independent of the shared ordering as long as both agree).
+  // MP gadget: L_KS rows, each row encrypts σ(s) · B^i under all K limbs.
   const size_t base_log2 = bv_base_log2(pir_params);
   ksk.cts.resize(L_KS);
   std::vector<uint64_t> msg(N * K);
   for (size_t i = 0; i < L_KS; ++i) {
     for (size_t k = 0; k < K; ++k) {
       const uint64_t qk = qs[k];
-      const uint64_t Bi = power_of_two_mod((L_KS - 1 - i) * base_log2, qk);
+      const uint64_t Bi = power_of_two_mod(i * base_log2, qk);
       intel::hexl::EltwiseFMAMod(msg.data() + k * N, sigma_s.data() + k * N,
                                  Bi, nullptr, N, qk, 1);
     }
